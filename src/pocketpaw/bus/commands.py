@@ -249,6 +249,13 @@ class CommandHandler:
         tail = parts[1].strip() if len(parts) > 1 else ""
         return selector, tail
 
+    def _is_todo_enabled(self) -> bool:
+        """Check whether the Todo extension is enabled in settings."""
+        from pocketpaw.config import Settings
+
+        settings = Settings.load()
+        return _TODO_EXTENSION_ID not in settings.extension_disabled_ids
+
     def is_command(self, content: str) -> bool:
         """Check if the message content is a recognised command."""
         parsed = _parse_command(content)
@@ -260,6 +267,8 @@ class CommandHandler:
             return True
 
         if cmd == _TODO_COMMAND:
+            if not self._is_todo_enabled():
+                return False
             action, _remainder = _parse_todo_action(args)
             return action is not None
 
@@ -281,6 +290,13 @@ class CommandHandler:
             return await self._dispatch(cmd, args, message, session_key)
 
         if cmd == _TODO_COMMAND:
+            if not self._is_todo_enabled():
+                return OutboundMessage(
+                    channel=message.channel,
+                    chat_id=message.chat_id,
+                    content="The Todo extension is currently disabled. "
+                    "Enable it from Settings to use `/todo` commands.",
+                )
             action, _remainder = _parse_todo_action(args)
             if action is not None:
                 return await self._dispatch(cmd, args, message, session_key)
