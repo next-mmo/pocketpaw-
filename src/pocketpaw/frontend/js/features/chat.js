@@ -30,6 +30,10 @@ window.PocketPaw.Chat = {
             // Messages
             messages: [],
             inputText: '',
+            slashPicker: {
+                open: false,
+                selectedIndex: 0,
+            },
 
             // Guided composer state (used by extensions like Todo)
             composerAssist: {
@@ -172,6 +176,312 @@ window.PocketPaw.Chat = {
                 });
             },
 
+            focusChatComposer() {
+                this.$nextTick(() => {
+                    requestAnimationFrame(() => {
+                        const input = this.$refs.chatInput
+                            || document.querySelector('[aria-label="Chat message input"]');
+                        if (input && typeof input.focus === 'function') {
+                            input.focus({ preventScroll: true });
+                            if (typeof input.setSelectionRange === 'function') {
+                                const end = input.value.length;
+                                input.setSelectionRange(end, end);
+                            }
+                        }
+                    });
+                });
+            },
+
+            getTodoSlashAssist() {
+                return {
+                    source: 'todo',
+                    icon: 'list-todo',
+                    title: 'Todo Copilot',
+                    subtitle: (
+                        'Pick a quick action or type after /todo. '
+                        + 'Open the Todo app first if you want the current list attached automatically.'
+                    ),
+                    summary: 'Direct chat mode',
+                    prompt_prefix: '/todo ',
+                    actions: [
+                        {
+                            key: 'next',
+                            label: 'What should I do next?',
+                            description: 'Ask for prioritization without opening the app.',
+                            command: '/todo what should I do next?',
+                        },
+                        {
+                            key: 'plan',
+                            label: 'Plan my day',
+                            description: 'Turn your rough plan into a practical day plan.',
+                            command: '/todo help me plan my day.',
+                        },
+                        {
+                            key: 'workflow',
+                            label: 'How should I use Todo?',
+                            description: 'Get a quick workflow explanation.',
+                            command: '/todo teach me how to use Todo well in chat.',
+                        },
+                        {
+                            key: 'capture',
+                            label: 'Turn ideas into tasks',
+                            description: 'Convert rough notes into an actionable list.',
+                            command: '/todo help me turn rough ideas into actionable tasks.',
+                        },
+                    ],
+                    context: null,
+                };
+            },
+
+            getSlashCommandCatalog() {
+                const commands = [
+                    {
+                        key: 'todo',
+                        command: '/todo',
+                        description: 'Open Todo Copilot prompts. Use the Todo app for live task context.',
+                        kind: 'App',
+                        insertText: '/todo ',
+                        priority: 0,
+                        assist: this.getTodoSlashAssist(),
+                    },
+                    {
+                        key: 'new',
+                        command: '/new',
+                        description: 'Start a fresh conversation session.',
+                        kind: 'Command',
+                        insertText: '/new',
+                        priority: 1,
+                    },
+                    {
+                        key: 'sessions',
+                        command: '/sessions',
+                        description: 'List your conversation sessions.',
+                        kind: 'Command',
+                        insertText: '/sessions',
+                        priority: 2,
+                    },
+                    {
+                        key: 'resume',
+                        command: '/resume',
+                        description: 'Resume a session by number or search text.',
+                        kind: 'Command',
+                        insertText: '/resume ',
+                        priority: 3,
+                    },
+                    {
+                        key: 'help',
+                        command: '/help',
+                        description: 'Show the built-in command reference.',
+                        kind: 'Command',
+                        insertText: '/help',
+                        priority: 4,
+                    },
+                    {
+                        key: 'clear',
+                        command: '/clear',
+                        description: 'Clear the current chat history.',
+                        kind: 'Command',
+                        insertText: '/clear',
+                        priority: 5,
+                    },
+                    {
+                        key: 'rename',
+                        command: '/rename',
+                        description: 'Rename the current session.',
+                        kind: 'Command',
+                        insertText: '/rename ',
+                        priority: 6,
+                    },
+                    {
+                        key: 'status',
+                        command: '/status',
+                        description: 'Show backend and session status.',
+                        kind: 'Command',
+                        insertText: '/status',
+                        priority: 7,
+                    },
+                    {
+                        key: 'delete',
+                        command: '/delete',
+                        description: 'Delete the current session.',
+                        kind: 'Command',
+                        insertText: '/delete',
+                        priority: 8,
+                    },
+                    {
+                        key: 'backend',
+                        command: '/backend',
+                        description: 'Show or switch the active backend.',
+                        kind: 'Command',
+                        insertText: '/backend ',
+                        priority: 9,
+                    },
+                    {
+                        key: 'backends',
+                        command: '/backends',
+                        description: 'List all available backends.',
+                        kind: 'Command',
+                        insertText: '/backends',
+                        priority: 10,
+                    },
+                    {
+                        key: 'model',
+                        command: '/model',
+                        description: 'Show or switch the active model.',
+                        kind: 'Command',
+                        insertText: '/model ',
+                        priority: 11,
+                    },
+                    {
+                        key: 'tools',
+                        command: '/tools',
+                        description: 'Show or switch the tool profile.',
+                        kind: 'Command',
+                        insertText: '/tools ',
+                        priority: 12,
+                    },
+                ];
+
+                const skillCommands = (this.skills || []).map((skill) => ({
+                    key: `skill-${skill.name}`,
+                    command: `/${skill.name}`,
+                    description: skill.description || 'Run this installed skill.',
+                    kind: 'Skill',
+                    insertText: `/${skill.name} `,
+                    priority: 50,
+                }));
+
+                return [...commands, ...skillCommands];
+            },
+
+            getSlashSuggestions(limit = 8) {
+                const text = String(this.inputText || '').trimStart();
+                if (!text.startsWith('/')) {
+                    return [];
+                }
+
+                const slashToken = text.split(/\s+/, 1)[0];
+                if (text.length > slashToken.length && /\s/.test(text.charAt(slashToken.length))) {
+                    return [];
+                }
+
+                const query = slashToken.slice(1).toLowerCase();
+                const searchNeedle = `/${query}`;
+                return this.getSlashCommandCatalog()
+                    .filter((item) => {
+                        if (!query) return true;
+                        return item.command.toLowerCase().includes(searchNeedle);
+                    })
+                    .sort((left, right) => {
+                        const leftExact = left.command.toLowerCase() === searchNeedle ? 0 : 1;
+                        const rightExact = right.command.toLowerCase() === searchNeedle ? 0 : 1;
+                        if (leftExact !== rightExact) return leftExact - rightExact;
+
+                        const leftPrefix = left.command.toLowerCase().startsWith(searchNeedle) ? 0 : 1;
+                        const rightPrefix = right.command.toLowerCase().startsWith(searchNeedle) ? 0 : 1;
+                        if (leftPrefix !== rightPrefix) return leftPrefix - rightPrefix;
+
+                        if (left.priority !== right.priority) {
+                            return left.priority - right.priority;
+                        }
+                        return left.command.localeCompare(right.command);
+                    })
+                    .slice(0, limit);
+            },
+
+            updateSlashPicker() {
+                const suggestions = this.getSlashSuggestions();
+                this.slashPicker.open = suggestions.length > 0;
+                if (!this.slashPicker.open) {
+                    this.slashPicker.selectedIndex = 0;
+                    return;
+                }
+
+                if (this.slashPicker.selectedIndex >= suggestions.length) {
+                    this.slashPicker.selectedIndex = 0;
+                }
+            },
+
+            hideSlashPicker() {
+                this.slashPicker.open = false;
+                this.slashPicker.selectedIndex = 0;
+            },
+
+            handleChatInputChange() {
+                this.updateSlashPicker();
+            },
+
+            handleChatInputKeydown(event) {
+                if (!this.slashPicker.open) {
+                    return;
+                }
+
+                if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    this.moveSlashPicker(1);
+                    return;
+                }
+
+                if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    this.moveSlashPicker(-1);
+                    return;
+                }
+
+                if (event.key === 'Enter' || event.key === 'Tab') {
+                    event.preventDefault();
+                    this.applySlashSuggestion();
+                    return;
+                }
+
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    this.hideSlashPicker();
+                }
+            },
+
+            moveSlashPicker(direction) {
+                const suggestions = this.getSlashSuggestions();
+                if (suggestions.length === 0) {
+                    this.hideSlashPicker();
+                    return;
+                }
+
+                const total = suggestions.length;
+                this.slashPicker.selectedIndex = (
+                    (this.slashPicker.selectedIndex + direction) % total + total
+                ) % total;
+            },
+
+            applySlashSuggestion(item = null) {
+                const suggestions = this.getSlashSuggestions();
+                const selected = item || suggestions[this.slashPicker.selectedIndex] || null;
+                if (!selected) {
+                    this.hideSlashPicker();
+                    return false;
+                }
+
+                this.inputText = selected.insertText || selected.command;
+                this.hideSlashPicker();
+
+                if (selected.assist) {
+                    this.openComposerAssist(selected.assist);
+                } else if (this.composerAssist.active && !this.composerAssist.context) {
+                    this.dismissComposerAssist();
+                }
+
+                this.focusChatComposer();
+                return true;
+            },
+
+            handleComposerSubmit() {
+                if (this.slashPicker.open && this.getSlashSuggestions().length > 0) {
+                    this.applySlashSuggestion();
+                    return;
+                }
+                this.sendMessage();
+            },
+
             openComposerAssist(payload = {}) {
                 const actions = Array.isArray(payload.actions)
                     ? payload.actions
@@ -197,6 +507,7 @@ window.PocketPaw.Chat = {
                     actions,
                     context: payload.context || null,
                 };
+                this.hideSlashPicker();
 
                 this.$nextTick(() => {
                     if (window.refreshIcons) window.refreshIcons();
@@ -276,6 +587,7 @@ window.PocketPaw.Chat = {
                 const text = String(rawText || '').trim();
                 if (!text) return;
 
+                this.hideSlashPicker();
                 const outboundMeta = this.buildChatMetadata(text, options);
 
                 // Check for skill command (starts with /)

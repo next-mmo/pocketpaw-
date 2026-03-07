@@ -42,6 +42,27 @@ def _open_todo_app(page: Page, dashboard_url: str):
 
 
 class TestTodoExtension:
+    def test_slash_menu_supports_direct_todo_entry(
+        self,
+        page: Page,
+        dashboard_url: str,
+    ):
+        page.goto(dashboard_url)
+        page.wait_for_load_state("networkidle")
+
+        chat_input = page.get_by_label("Chat message input")
+        chat_input.fill("/to")
+
+        expect(page.get_by_text("Slash Commands")).to_be_visible()
+        expect(page.locator("button").filter(has_text="/todo").first).to_be_visible()
+
+        chat_input.press("Enter")
+
+        expect(chat_input).to_have_value(re.compile(r"^/todo\s*$"))
+        expect(page.get_by_text("Todo Copilot")).to_be_visible()
+        expect(page.get_by_text("Direct chat mode")).to_be_visible()
+        expect(page.get_by_text("Slash Commands")).to_have_count(0)
+
     def test_todo_crud_and_chat_handoff(
         self,
         page: Page,
