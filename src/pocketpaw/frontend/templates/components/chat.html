@@ -41,7 +41,24 @@
       class="mx-4 md:mx-8 mt-2 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-4"
     >
       <div class="flex items-center gap-3 text-amber-200/90">
-        <svg class="w-5 h-5 shrink-0 text-amber-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+        <svg
+          class="w-5 h-5 shrink-0 text-amber-400"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path
+            d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"
+          />
+          <path d="M20 3v4" />
+          <path d="M22 5h-4" />
+          <path d="M4 17v2" />
+          <path d="M5 18H3" />
+        </svg>
         <p class="text-[13px] md:text-sm font-medium leading-tight">
           PocketPaw is running! To enable AI features, add an API key in
           <span class="text-amber-400 font-bold">Settings</span>.
@@ -58,7 +75,19 @@
           @click="apiBannerDismissed = true"
           class="p-1 hover:bg-white/5 rounded-full text-amber-200/40 hover:text-amber-200/80 transition-colors"
         >
-          <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          <svg
+            class="w-4 h-4"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
         </button>
       </div>
     </div>
@@ -117,7 +146,9 @@
         <span x-show="!streamingContent && !isThinking" class="text-white/40">
           Preparing response...
         </span>
-        <span class="animate-pulse font-bold" aria-label="Streaming in progress">▌</span>
+        <span class="animate-pulse font-bold" aria-label="Streaming in progress"
+          >▌</span
+        >
       </div>
       <div class="flex gap-2 items-center px-1 opacity-70">
         <span
@@ -134,22 +165,44 @@
 
   <!-- Input Area — flex child, gradient fade, safe-area inset -->
   <div class="shrink-0 relative z-20">
-    <div class="absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-black to-transparent pointer-events-none"></div>
-    <div class="bg-black px-3 md:px-8 pb-2 md:pb-4 pt-1" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))">
+    <div
+      class="absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-black to-transparent pointer-events-none"
+    ></div>
+    <div
+      class="bg-black px-3 md:px-8 pb-2 md:pb-4 pt-1"
+      style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))"
+    >
       <template x-if="composerAssist.active">
-        <div class="mb-3 rounded-[28px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top_left,rgba(103,195,255,0.22),transparent_40%),linear-gradient(180deg,rgba(18,28,42,0.96),rgba(9,14,24,0.98))] px-4 py-4 shadow-[0_24px_70px_rgba(0,0,0,0.32)] backdrop-blur-xl">
+        <div
+          class="mb-3 rounded-[28px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top_left,rgba(103,195,255,0.22),transparent_40%),linear-gradient(180deg,rgba(18,28,42,0.96),rgba(9,14,24,0.98))] px-4 py-4 shadow-[0_24px_70px_rgba(0,0,0,0.32)] backdrop-blur-xl"
+        >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex items-center gap-3">
-                <span class="inline-flex w-10 h-10 items-center justify-center rounded-2xl bg-white/8 border border-white/10 text-cyan-200 shrink-0">
-                  <i :data-lucide="composerAssist.icon || 'sparkles'" class="w-4 h-4"></i>
+                <span
+                  class="inline-flex w-10 h-10 items-center justify-center rounded-2xl bg-white/8 border border-white/10 text-cyan-200 shrink-0"
+                >
+                  <i
+                    :data-lucide="composerAssist.icon || 'sparkles'"
+                    class="w-4 h-4"
+                  ></i>
                 </span>
                 <div class="min-w-0">
-                  <p class="text-[10px] uppercase tracking-[0.24em] text-cyan-100/45">Guided Chat</p>
-                  <h3 class="text-sm md:text-[15px] font-semibold text-white truncate" x-text="composerAssist.title"></h3>
+                  <p
+                    class="text-[10px] uppercase tracking-[0.24em] text-cyan-100/45"
+                  >
+                    Guided Chat
+                  </p>
+                  <h3
+                    class="text-sm md:text-[15px] font-semibold text-white truncate"
+                    x-text="composerAssist.title"
+                  ></h3>
                 </div>
               </div>
-              <p class="mt-3 text-sm text-white/70 leading-relaxed" x-text="composerAssist.subtitle"></p>
+              <p
+                class="mt-3 text-sm text-white/70 leading-relaxed"
+                x-text="composerAssist.subtitle"
+              ></p>
             </div>
             <button
               type="button"
@@ -163,22 +216,34 @@
 
           <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <template x-if="composerAssist.summary">
-              <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-100/90" x-text="composerAssist.summary"></span>
+              <span
+                class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-100/90"
+                x-text="composerAssist.summary"
+              ></span>
             </template>
-            <span class="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-white/55">
-              Type <code class="mx-1 text-white/80">/todo</code> or tap a quick action
+            <span
+              class="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-white/55"
+            >
+              Type <code class="mx-1 text-white/80">/todo</code> or tap a quick
+              action
             </span>
           </div>
 
           <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            <template x-for="action in composerAssist.actions" :key="action.key">
+            <template
+              x-for="action in composerAssist.actions"
+              :key="action.key"
+            >
               <button
                 type="button"
                 @click="runComposerAssistAction(action)"
                 class="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-cyan-400/25 px-3.5 py-3 text-left transition-all"
               >
                 <div class="flex items-start justify-between gap-3">
-                  <div class="text-sm font-medium text-white group-hover:text-cyan-50" x-text="action.label"></div>
+                  <div
+                    class="text-sm font-medium text-white group-hover:text-cyan-50"
+                    x-text="action.label"
+                  ></div>
                   <span
                     class="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/45"
                     x-text="action.behavior === 'insert' ? 'Insert' : 'Run'"
@@ -193,11 +258,18 @@
             </template>
           </div>
 
-          <template x-if="composerAssist.examples && composerAssist.examples.length > 0">
+          <template
+            x-if="composerAssist.examples && composerAssist.examples.length > 0"
+          >
             <div class="mt-3">
-              <p class="text-[11px] uppercase tracking-[0.2em] text-white/35">Examples</p>
+              <p class="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                Examples
+              </p>
               <div class="mt-2 flex flex-wrap gap-2">
-                <template x-for="example in composerAssist.examples" :key="example">
+                <template
+                  x-for="example in composerAssist.examples"
+                  :key="example"
+                >
                   <button
                     type="button"
                     @click="inputText = example; syncComposerAssistWithInput(); focusChatComposer()"
@@ -212,16 +284,29 @@
       </template>
 
       <template x-if="slashPicker.open">
-        <div class="mb-3 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(25,27,36,0.98),rgba(13,15,22,0.98))] shadow-[0_24px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl overflow-hidden">
-          <div class="px-4 py-3 border-b border-white/8 flex items-center justify-between gap-3">
+        <div
+          class="mb-3 rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(25,27,36,0.98),rgba(13,15,22,0.98))] shadow-[0_24px_60px_rgba(0,0,0,0.32)] backdrop-blur-xl overflow-hidden"
+        >
+          <div
+            class="px-4 py-3 border-b border-white/8 flex items-center justify-between gap-3"
+          >
             <div>
-              <p class="text-[10px] uppercase tracking-[0.24em] text-white/35">Slash Commands</p>
-              <p class="mt-1 text-sm text-white/65">Pick a command instead of memorizing it.</p>
+              <p class="text-[10px] uppercase tracking-[0.24em] text-white/35">
+                Slash Commands
+              </p>
+              <p class="mt-1 text-sm text-white/65">
+                Pick a command instead of memorizing it.
+              </p>
             </div>
-            <span class="text-[10px] uppercase tracking-[0.18em] text-white/30">Enter to insert</span>
+            <span class="text-[10px] uppercase tracking-[0.18em] text-white/30"
+              >Enter to insert</span
+            >
           </div>
           <div class="p-2">
-            <template x-for="(item, index) in getSlashSuggestions()" :key="item.key">
+            <template
+              x-for="(item, index) in getSlashSuggestions()"
+              :key="item.key"
+            >
               <button
                 type="button"
                 @mouseenter="slashPicker.selectedIndex = index"
@@ -234,15 +319,63 @@
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="text-sm font-semibold text-white" x-text="item.command"></span>
-                      <span class="px-2 py-0.5 rounded-full bg-white/6 text-[10px] uppercase tracking-[0.16em] text-white/45" x-text="item.kind"></span>
+                      <span
+                        class="text-sm font-semibold text-white"
+                        x-text="item.command"
+                      ></span>
+                      <span
+                        class="px-2 py-0.5 rounded-full bg-white/6 text-[10px] uppercase tracking-[0.16em] text-white/45"
+                        x-text="item.kind"
+                      ></span>
                     </div>
-                    <p class="mt-1 text-xs leading-relaxed text-white/50" x-text="item.description"></p>
+                    <p
+                      class="mt-1 text-xs leading-relaxed text-white/50"
+                      x-text="item.description"
+                    ></p>
                   </div>
-                  <span class="text-[10px] uppercase tracking-[0.18em] text-white/25">↵</span>
+                  <span
+                    class="text-[10px] uppercase tracking-[0.18em] text-white/25"
+                    >↵</span
+                  >
                 </div>
               </button>
             </template>
+          </div>
+        </div>
+      </template>
+
+      <!-- Delete Confirmation -->
+      <template x-if="deleteConfirm.active">
+        <div
+          class="mb-3 flex justify-center animate-[messageSlide_0.2s_ease-out]"
+        >
+          <div
+            class="inline-flex items-center gap-2.5 rounded-full border border-red-500/20 bg-[rgba(30,16,16,0.95)] shadow-[0_8px_32px_rgba(0,0,0,0.3)] backdrop-blur-xl px-2 py-1.5"
+          >
+            <span
+              class="inline-flex w-7 h-7 items-center justify-center rounded-full bg-red-500/10 text-red-400 shrink-0"
+            >
+              <i data-lucide="triangle-alert" class="w-3.5 h-3.5"></i>
+            </span>
+            <span
+              class="text-[13px] text-white/80 font-medium"
+              x-text="deleteConfirm.displayText"
+            ></span>
+            <div class="w-px h-4 bg-white/10"></div>
+            <button
+              type="button"
+              @click="cancelDelete()"
+              class="px-2.5 py-1 rounded-full text-[11px] font-medium text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              @click="confirmDelete()"
+              class="px-3 py-1 rounded-full bg-red-500/20 border border-red-500/25 text-[11px] font-semibold text-red-200 hover:bg-red-500/30 hover:text-red-100 transition-colors"
+            >
+              Delete
+            </button>
           </div>
         </div>
       </template>
@@ -252,7 +385,10 @@
         @submit.prevent="handleComposerSubmit()"
       >
         <!-- Agent Mode Toggle (inside pill) -->
-        <label class="relative w-[36px] h-[20px] cursor-pointer ml-4 shrink-0" aria-label="Agent mode">
+        <label
+          class="relative w-[36px] h-[20px] cursor-pointer ml-4 shrink-0"
+          aria-label="Agent mode"
+        >
           <input
             type="checkbox"
             x-model="agentActive"

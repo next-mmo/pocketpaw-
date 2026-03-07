@@ -48,6 +48,13 @@ window.PocketPaw.Chat = {
         examples: [],
         context: null,
       },
+
+      // Pending destructive-command confirmation
+      deleteConfirm: {
+        active: false,
+        command: "",
+        displayText: "",
+      },
     };
   },
 
@@ -682,11 +689,44 @@ window.PocketPaw.Chat = {
       /**
        * Send a chat message
        */
+      confirmDelete() {
+        if (!this.deleteConfirm.active) return;
+        const command = this.deleteConfirm.command;
+        this.deleteConfirm = { active: false, command: "", displayText: "" };
+        this.sendMessage({ text: command, _skipDeleteConfirm: true });
+      },
+
+      cancelDelete() {
+        this.deleteConfirm = { active: false, command: "", displayText: "" };
+        this.focusChatComposer();
+      },
+
       sendMessage(options = {}) {
         const rawText =
           typeof options.text === "string" ? options.text : this.inputText;
         const text = String(rawText || "").trim();
         if (!text) return;
+
+        // Intercept /todo delete for confirmation
+        if (!options._skipDeleteConfirm) {
+          const deleteMatch = text.match(/^\/todo\s+delete\s+(.+)/i);
+          if (deleteMatch) {
+            this.deleteConfirm = {
+              active: true,
+              command: text,
+              displayText: `Delete todo item: ${deleteMatch[1].trim()}`,
+            };
+            this.inputText = "";
+            this.hideSlashPicker();
+            if (this.composerAssist.active) {
+              this.dismissComposerAssist();
+            }
+            this.$nextTick(() => {
+              if (window.refreshIcons) window.refreshIcons();
+            });
+            return;
+          }
+        }
 
         this.hideSlashPicker();
         const outboundMeta = this.buildChatMetadata(text, options);

@@ -144,6 +144,8 @@ _EXTRA_ORIGINS = list(set(_BUILTIN_ORIGINS + _custom_origins))
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
+    import os
+
     response = await call_next(request)
     is_extension_asset = request.url.path.startswith("/extensions/")
     response.headers["X-Frame-Options"] = "SAMEORIGIN" if is_extension_asset else "DENY"
@@ -164,6 +166,11 @@ async def security_headers_middleware(request: Request, call_next):
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Dev mode: disable browser caching for HTML pages and static assets
+    if os.environ.get("POCKETPAW_DEV") == "1":
+        path = request.url.path
+        if path == "/" or path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
 
 
@@ -856,15 +863,26 @@ async def oauth_callback(
 
 
 def _static_version() -> str:
-    """Generate a cache-busting version string from JS file mtimes."""
+    """Generate a cache-busting version string from frontend file mtimes."""
     import hashlib
 
-    js_dir = FRONTEND_DIR / "js"
-    if not js_dir.exists():
-        return "0"
     mtimes = []
-    for f in sorted(js_dir.rglob("*.js")):
-        mtimes.append(str(int(f.stat().st_mtime)))
+    # Hash JS files
+    js_dir = FRONTEND_DIR / "js"
+    if js_dir.exists():
+        for f in sorted(js_dir.rglob("*.js")):
+            mtimes.append(str(int(f.stat().st_mtime)))
+    # Hash HTML templates
+    if TEMPLATES_DIR.exists():
+        for f in sorted(TEMPLATES_DIR.rglob("*.html")):
+            mtimes.append(str(int(f.stat().st_mtime)))
+    # Hash CSS files
+    css_dir = FRONTEND_DIR / "css"
+    if css_dir.exists():
+        for f in sorted(css_dir.rglob("*.css")):
+            mtimes.append(str(int(f.stat().st_mtime)))
+    if not mtimes:
+        return "0"
     return hashlib.md5("|".join(mtimes).encode()).hexdigest()[:8]
 
 
@@ -1655,6 +1673,8 @@ def run_dashboard(
     print("🐾 POCKETPAW WEB DASHBOARD")
     print("=" * 50)
     if dev:
+        import os
+        os.environ["POCKETPAW_DEV"] = "1"
         print("🔄 Development mode — auto-reload enabled")
     if host == "0.0.0.0":
         import socket
