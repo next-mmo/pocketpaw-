@@ -12,9 +12,25 @@ import uuid
 from collections.abc import Callable
 
 from pocketpaw.bus.events import InboundMessage, OutboundMessage
+from pocketpaw.extensions.storage import get_extension_storage
 from pocketpaw.memory import get_memory_manager
 
 logger = logging.getLogger(__name__)
+
+_TODO_EXTENSION_ID = "todo"
+_TODO_STORAGE_KEY = "todos"
+_TODO_COMMAND = "/todo"
+_TODO_ACTION_ALIASES: dict[str, str] = {
+    "list": "list",
+    "ls": "list",
+    "add": "add",
+    "done": "done",
+    "reopen": "reopen",
+    "undo": "reopen",
+    "update": "update",
+    "delete": "delete",
+    "rm": "delete",
+}
 
 _COMMANDS = frozenset(
     {
@@ -56,6 +72,44 @@ def _normalize_cmd(raw: str) -> str:
     return raw
 
 
+def _parse_command(content: str) -> tuple[str, str] | None:
+    match = _CMD_RE.match(content.strip())
+    if not match:
+        return None
+    return _normalize_cmd(match.group(1).lower()), match.group(2).strip()
+
+
+def _parse_todo_action(args: str) -> tuple[str | None, str]:
+    stripped = args.strip()
+    if not stripped:
+        return "help", ""
+
+    parts = stripped.split(None, 1)
+    verb = parts[0].lower()
+    remainder = parts[1].strip() if len(parts) > 1 else ""
+
+    if verb == "help" and not remainder:
+        return "help", ""
+
+    return _TODO_ACTION_ALIASES.get(verb), remainder
+
+
+def _normalize_todo_item(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict):
+        return None
+
+    text = str(raw.get("text") or "").strip()
+    if not text:
+        return None
+
+    todo_id = str(raw.get("id") or f"todo-{uuid.uuid4().hex[:10]}")
+    return {
+        "id": todo_id,
+        "text": text,
+        "done": bool(raw.get("done")),
+    }
+
+
 class CommandHandler:
     """Unified handler for cross-channel slash commands."""
 
@@ -74,10 +128,116 @@ class CommandHandler:
         if self._on_settings_changed is not None:
             self._on_settings_changed()
 
+    def _load_todos(self) -> list[dict[str, object]]:
+        storage = get_extension_storage()
+        exists, value = storage.get_item(_TODO_EXTENSION_ID, _TODO_STORAGE_KEY)
+        if not exists or not isinstance(value, list):
+            return []
+
+        todos: list[dict[str, object]] = []
+        for raw in value:
+            normalized = _normalize_todo_item(raw)
+            if normalized is not None:
+                todos.append(normalized)
+        return todos
+
+    def _save_todos(self, todos: list[dict[str, object]]) -> None:
+        storage = get_extension_storage()
+        storage.set_item(_TODO_EXTENSION_ID, _TODO_STORAGE_KEY, todos)
+
+    def _build_todo_response(self, message: InboundMessage, content: str) -> OutboundMessage:
+        return OutboundMessage(
+            channel=message.channel,
+            chat_id=message.chat_id,
+            content=content,
+        )
+
+    def _format_todo_list(self, todos: list[dict[str, object]]) -> str:
+        if not todos:
+            return (
+                "**Todo List:**\n\n"
+                "No tasks yet.\n\n"
+                "Try `/todo add Buy milk` to create your first item."
+            )
+
+        open_count = sum(1 for todo in todos if not todo["done"])
+        done_count = len(todos) - open_count
+
+        lines = [
+            "**Todo List:**",
+            f"{open_count} open • {done_count} done" if done_count else f"{open_count} open",
+            "",
+        ]
+        for index, todo in enumerate(todos, 1):
+            marker = "[x]" if todo["done"] else "[ ]"
+            lines.append(f"{index}. {marker} {todo['text']}")
+
+        lines.extend(
+            [
+                "",
+                "Commands: `/todo add <task>`, `/todo done <n>`, "
+                "`/todo update <n> <text>`, `/todo delete <n>`",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _resolve_todo_index(
+        self, todos: list[dict[str, object]], selector: str
+    ) -> tuple[int | None, str | None]:
+        choice = selector.strip()
+        if not choice:
+            return None, "Choose a todo by number, for example `/todo done 1`."
+
+        if choice.isdigit():
+            index = int(choice) - 1
+            if 0 <= index < len(todos):
+                return index, None
+            return None, f"Todo #{choice} does not exist."
+
+        lowered = choice.casefold()
+        exact_matches = [
+            index
+            for index, todo in enumerate(todos)
+            if str(todo["id"]).casefold() == lowered or str(todo["text"]).casefold() == lowered
+        ]
+        if len(exact_matches) == 1:
+            return exact_matches[0], None
+        if len(exact_matches) > 1:
+            return None, "More than one todo matches that text. Use the list number instead."
+
+        partial_matches = [
+            index for index, todo in enumerate(todos) if lowered in str(todo["text"]).casefold()
+        ]
+        if len(partial_matches) == 1:
+            return partial_matches[0], None
+        if len(partial_matches) > 1:
+            return None, "More than one todo matches that text. Use the list number instead."
+
+        return None, f'No todo matching "{choice}" was found.'
+
+    def _split_todo_selector(self, remainder: str) -> tuple[str, str]:
+        parts = remainder.strip().split(None, 1)
+        if not parts:
+            return "", ""
+        selector = parts[0]
+        tail = parts[1].strip() if len(parts) > 1 else ""
+        return selector, tail
+
     def is_command(self, content: str) -> bool:
         """Check if the message content is a recognised command."""
-        m = _CMD_RE.match(content.strip())
-        return bool(m and _normalize_cmd(m.group(1).lower()) in _COMMANDS)
+        parsed = _parse_command(content)
+        if parsed is None:
+            return False
+
+        cmd, args = parsed
+        if cmd in _COMMANDS:
+            return True
+
+        if cmd == _TODO_COMMAND:
+            action, _remainder = _parse_todo_action(args)
+            return action is not None
+
+        return False
 
     async def handle(self, message: InboundMessage) -> OutboundMessage | None:
         """Process a command and return the response message.
@@ -86,11 +246,17 @@ class CommandHandler:
         """
         session_key = message.session_key
 
-        m = _CMD_RE.match(message.content.strip())
-        if m:
-            cmd = _normalize_cmd(m.group(1).lower())
-            if cmd in _COMMANDS:
-                args = m.group(2).strip()
+        parsed = _parse_command(message.content)
+        if parsed is None:
+            return None
+
+        cmd, args = parsed
+        if cmd in _COMMANDS:
+            return await self._dispatch(cmd, args, message, session_key)
+
+        if cmd == _TODO_COMMAND:
+            action, _remainder = _parse_todo_action(args)
+            if action is not None:
                 return await self._dispatch(cmd, args, message, session_key)
 
         return None
@@ -123,6 +289,8 @@ class CommandHandler:
             return self._cmd_tools(message, args)
         elif cmd == "/help":
             return self._cmd_help(message)
+        elif cmd == _TODO_COMMAND:
+            return self._cmd_todo(message, args)
         return None
 
     # ------------------------------------------------------------------
@@ -569,6 +737,110 @@ class CommandHandler:
         )
 
     # ------------------------------------------------------------------
+    # /todo
+    # ------------------------------------------------------------------
+
+    def _cmd_todo(self, message: InboundMessage, args: str) -> OutboundMessage:
+        """Manage Todo extension data directly from chat."""
+        action, remainder = _parse_todo_action(args)
+        todos = self._load_todos()
+
+        if action == "help":
+            help_text = (
+                "**Todo Commands:**\n\n"
+                "/todo list — Show the current todo list\n"
+                "/todo add <task> — Add a new task\n"
+                "/todo done <n> — Mark task #n done\n"
+                "/todo reopen <n> — Mark task #n open again\n"
+                "/todo update <n> <text> — Replace task #n text\n"
+                "/todo delete <n> — Delete task #n\n\n"
+                "Examples:\n"
+                "- `/todo add Buy milk`\n"
+                "- `/todo update 1 Buy oat milk`\n"
+                "- `/todo done 1`\n"
+                "- `/todo delete 1`\n\n"
+                "Freeform prompts still work too, for example `/todo what should I do next?`."
+            )
+            return self._build_todo_response(message, help_text)
+
+        if action == "list":
+            return self._build_todo_response(message, self._format_todo_list(todos))
+
+        if action == "add":
+            text = remainder.strip()
+            if not text:
+                return self._build_todo_response(
+                    message,
+                    "Usage: `/todo add <task>`",
+                )
+
+            todo = {
+                "id": f"todo-{uuid.uuid4().hex[:10]}",
+                "text": text,
+                "done": False,
+            }
+            todos.insert(0, todo)
+            self._save_todos(todos)
+            return self._build_todo_response(
+                message,
+                f'Added todo #{1}: "{text}"\n\n{self._format_todo_list(todos)}',
+            )
+
+        if action in {"done", "reopen", "delete"}:
+            selector, _unused = self._split_todo_selector(remainder)
+            index, error = self._resolve_todo_index(todos, selector)
+            if error is not None or index is None:
+                return self._build_todo_response(message, error or "Todo not found.")
+
+            todo = todos[index]
+            if action == "done":
+                todo["done"] = True
+                self._save_todos(todos)
+                updated_list = self._format_todo_list(todos)
+                return self._build_todo_response(
+                    message,
+                    f'Marked todo #{index + 1} done: "{todo["text"]}"\n\n{updated_list}',
+                )
+
+            if action == "reopen":
+                todo["done"] = False
+                self._save_todos(todos)
+                updated_list = self._format_todo_list(todos)
+                return self._build_todo_response(
+                    message,
+                    f'Reopened todo #{index + 1}: "{todo["text"]}"\n\n{updated_list}',
+                )
+
+            deleted = todos.pop(index)
+            self._save_todos(todos)
+            updated_list = self._format_todo_list(todos)
+            return self._build_todo_response(
+                message,
+                f'Deleted todo #{index + 1}: "{deleted["text"]}"\n\n{updated_list}',
+            )
+
+        if action == "update":
+            selector, new_text = self._split_todo_selector(remainder)
+            if not selector or not new_text:
+                return self._build_todo_response(
+                    message,
+                    "Usage: `/todo update <n> <new text>`",
+                )
+
+            index, error = self._resolve_todo_index(todos, selector)
+            if error is not None or index is None:
+                return self._build_todo_response(message, error or "Todo not found.")
+
+            todos[index]["text"] = new_text
+            self._save_todos(todos)
+            return self._build_todo_response(
+                message,
+                f'Updated todo #{index + 1}: "{new_text}"\n\n{self._format_todo_list(todos)}',
+            )
+
+        return self._build_todo_response(message, "Usage: `/todo list` or `/todo add <task>`")
+
+    # ------------------------------------------------------------------
     # /help
     # ------------------------------------------------------------------
 
@@ -589,6 +861,33 @@ class CommandHandler:
             "/model — Show or switch model for current backend\n"
             "/tools — Show or switch tool profile\n"
             "/help — Show this help message\n\n"
+            "_Tip: Use !command instead of /command on channels"
+            " where / is intercepted (e.g. Matrix)._"
+        )
+        return OutboundMessage(
+            channel=message.channel,
+            chat_id=message.chat_id,
+            content=text,
+        )
+
+    def _cmd_help(self, message: InboundMessage) -> OutboundMessage:
+        """List all available commands."""
+        text = (
+            "**PocketPaw Commands:**\n\n"
+            "/new - Start a fresh conversation\n"
+            "/sessions - List your conversation sessions\n"
+            "/resume <n> - Resume session #n from the list\n"
+            "/resume <text> - Search and resume a session by title\n"
+            "/clear - Clear the current session history\n"
+            "/rename <title> - Rename the current session\n"
+            "/status - Show current session info\n"
+            "/delete - Delete the current session\n"
+            "/backend - Show or switch agent backend\n"
+            "/backends - List all available backends\n"
+            "/model - Show or switch model for current backend\n"
+            "/tools - Show or switch tool profile\n"
+            "/todo - Manage Todo items from chat\n"
+            "/help - Show this help message\n\n"
             "_Tip: Use !command instead of /command on channels"
             " where / is intercepted (e.g. Matrix)._"
         )

@@ -166,7 +166,7 @@
               <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-100/90" x-text="composerAssist.summary"></span>
             </template>
             <span class="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-white/55">
-              Start with <code class="mx-1 text-white/80">/todo</code> or tap a quick action
+              Type <code class="mx-1 text-white/80">/todo</code> or tap a quick action
             </span>
           </div>
 
@@ -177,7 +177,13 @@
                 @click="runComposerAssistAction(action)"
                 class="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-cyan-400/25 px-3.5 py-3 text-left transition-all"
               >
-                <div class="text-sm font-medium text-white group-hover:text-cyan-50" x-text="action.label"></div>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="text-sm font-medium text-white group-hover:text-cyan-50" x-text="action.label"></div>
+                  <span
+                    class="shrink-0 rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/45"
+                    x-text="action.behavior === 'insert' ? 'Insert' : 'Run'"
+                  ></span>
+                </div>
                 <div
                   x-show="action.description"
                   class="mt-1 text-xs leading-relaxed text-white/50 group-hover:text-white/65"
@@ -186,6 +192,22 @@
               </button>
             </template>
           </div>
+
+          <template x-if="composerAssist.examples && composerAssist.examples.length > 0">
+            <div class="mt-3">
+              <p class="text-[11px] uppercase tracking-[0.2em] text-white/35">Examples</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <template x-for="example in composerAssist.examples" :key="example">
+                  <button
+                    type="button"
+                    @click="inputText = example; syncComposerAssistWithInput(); focusChatComposer()"
+                    class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/65 hover:bg-white/[0.08] hover:text-white transition-colors"
+                    x-text="example"
+                  ></button>
+                </template>
+              </div>
+            </div>
+          </template>
         </div>
       </template>
 

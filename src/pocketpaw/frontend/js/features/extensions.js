@@ -305,9 +305,14 @@ window.PocketPaw.Extensions = {
                     return;
                 }
 
-                this.extensionsHost.frameSrc = `${extension.asset_base}?host=dashboard`;
+                const nextFrameSrc = `${extension.asset_base}?host=dashboard`;
+                const frameWasAlreadyMounted = this.extensionsHost.frameSrc === nextFrameSrc;
+                this.extensionsHost.frameSrc = nextFrameSrc;
                 try {
                     await this.ensureExtensionSession(extension.id, false);
+                    if (frameWasAlreadyMounted) {
+                        await this.postExtensionContext(false);
+                    }
                 } catch (error) {
                     console.error('Failed to create extension session:', error);
                     this.showToast('Failed to open extension', 'error');

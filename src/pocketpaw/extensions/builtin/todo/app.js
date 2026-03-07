@@ -31,56 +31,71 @@ function createQuickActions(snapshot) {
     if (snapshot.open_count > 0) {
         return [
             {
-                key: 'next',
-                label: 'What should I do next?',
-                description: 'Ask PocketPaw to prioritize the current list.',
-                command: '/todo what should I do next based on my current tasks?',
+                key: 'add',
+                label: 'Add a task',
+                description: 'Insert /todo add into chat and keep the current snapshot attached.',
+                command: '/todo add ',
+                behavior: 'insert',
             },
             {
-                key: 'plan',
-                label: 'Plan my day',
-                description: 'Turn the list into a realistic plan for today.',
-                command: '/todo turn these tasks into a practical plan for today.',
+                key: 'list',
+                label: 'Show list',
+                description: 'Run /todo list right away.',
+                command: '/todo list',
+                behavior: 'send',
             },
             {
-                key: 'summarize',
-                label: 'Summarize tasks',
-                description: 'Get a quick view of scope, progress, and focus.',
-                command: '/todo summarize my current tasks and progress.',
+                key: 'done',
+                label: 'Mark done',
+                description: 'Insert a template like /todo done 1.',
+                command: '/todo done ',
+                behavior: 'insert',
             },
             {
                 key: 'update',
-                label: 'Draft progress update',
-                description: 'Prepare a short status update from the list.',
-                command: '/todo draft a short progress update based on my current tasks.',
+                label: 'Update task',
+                description: 'Insert a template like /todo update 2 Rewrite copy.',
+                command: '/todo update ',
+                behavior: 'insert',
+            },
+            {
+                key: 'delete',
+                label: 'Delete task',
+                description: 'Insert a template like /todo delete 3.',
+                command: '/todo delete ',
+                behavior: 'insert',
             },
         ];
     }
 
     return [
         {
-            key: 'starter',
-            label: 'Create a starter list',
-            description: 'Ask PocketPaw what a useful starter todo list looks like.',
-            command: '/todo help me create a starter todo list for today.',
+            key: 'add',
+            label: 'Add a task',
+            description: 'Insert /todo add so you can create the first task from chat.',
+            command: '/todo add ',
+            behavior: 'insert',
         },
         {
-            key: 'workflow',
-            label: 'How do I use this?',
-            description: 'Get a quick explanation of the Todo + chat workflow.',
-            command: '/todo teach me how to use the Todo app and chat workflow well.',
+            key: 'list',
+            label: 'Show list',
+            description: 'Run /todo list to confirm the list is empty or see existing tasks.',
+            command: '/todo list',
+            behavior: 'send',
         },
         {
-            key: 'capture',
-            label: 'Turn ideas into tasks',
-            description: 'Ask PocketPaw to convert rough notes into actionable tasks.',
-            command: '/todo help me turn rough ideas into actionable tasks.',
+            key: 'update',
+            label: 'Update task',
+            description: 'Insert a template for editing a task once you have items.',
+            command: '/todo update ',
+            behavior: 'insert',
         },
         {
-            key: 'review',
-            label: 'Review my system',
-            description: 'Ask for suggestions before tasks start piling up.',
-            command: '/todo suggest a simple task system I can stick with.',
+            key: 'delete',
+            label: 'Delete task',
+            description: 'Insert a template for removing a task by number.',
+            command: '/todo delete ',
+            behavior: 'insert',
         },
     ];
 }
@@ -100,11 +115,18 @@ function createAssistPayload() {
             icon: 'list-todo',
             title: 'Todo Copilot',
             subtitle: snapshot.open_count > 0
-                ? 'Pick a quick action or type after /todo. The current Todo snapshot will be carried into the next chat turn.'
-                : 'Start with a quick action or type after /todo. PocketPaw can help you set up the list before you fill it in.',
+                ? 'Manage the list directly from chat. The current Todo snapshot will be attached to the next /todo turn if you need it.'
+                : 'Start with /todo add, /todo list, /todo update, /todo done, or /todo delete.',
             summary,
             prompt_prefix: '/todo ',
             actions: createQuickActions(snapshot),
+            examples: [
+                '/todo add Buy milk',
+                '/todo list',
+                '/todo update 1 Buy oat milk',
+                '/todo done 1',
+                '/todo delete 1',
+            ],
             context: snapshot,
         },
     };
@@ -174,5 +196,9 @@ summaryButton.addEventListener('click', () => {
 });
 
 window.PocketPawExtensionSDK.ready().then(() => {
+    loadTodos();
+});
+
+document.addEventListener('pocketpaw-extension:ready', () => {
     loadTodos();
 });

@@ -1,4 +1,6 @@
+import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -41,6 +43,43 @@ def _open_todo_app(page: Page, dashboard_url: str):
     return frame_locator
 
 
+def _send_chat_command(page: Page, command: str, expected_text: str):
+    chat_input = page.get_by_label("Chat message input")
+    chat_input.fill(command)
+    chat_input.press("Enter")
+    expect(page.locator(".messages").get_by_text(expected_text)).to_be_visible(timeout=10000)
+
+
+def _send_chat_command_no_assert(page: Page, command: str):
+    chat_input = page.get_by_label("Chat message input")
+    chat_input.fill(command)
+    chat_input.press("Enter")
+    expect(page.locator(".messages").get_by_text(command, exact=True)).to_be_visible(timeout=10000)
+
+
+def _wait_for_todo_storage(
+    todo_path: Path, expected: list[tuple[str, bool]], timeout: float = 10.0
+):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if todo_path.exists():
+            data = json.loads(todo_path.read_text(encoding="utf-8"))
+            todos = data.get("todos", [])
+        else:
+            todos = []
+
+        normalized = [
+            (str(item.get("text") or ""), bool(item.get("done")))
+            for item in todos
+            if isinstance(item, dict)
+        ]
+        if normalized == expected:
+            return
+        time.sleep(0.2)
+
+    raise AssertionError(f"Timed out waiting for todo storage state: {expected!r}")
+
+
 class TestTodoExtension:
     def test_slash_menu_supports_direct_todo_entry(
         self,
@@ -60,42 +99,24 @@ class TestTodoExtension:
 
         expect(chat_input).to_have_value(re.compile(r"^/todo\s*$"))
         expect(page.get_by_text("Todo Copilot")).to_be_visible()
-        expect(page.get_by_text("Direct chat mode")).to_be_visible()
+        expect(page.get_by_text("Direct CRUD in chat")).to_be_visible()
+        expect(page.get_by_role("button", name="Add a task")).to_be_visible()
+        expect(page.get_by_role("button", name="Show list")).to_be_visible()
+        expect(page.get_by_text("/todo add Buy milk")).to_be_visible()
         expect(page.get_by_text("Slash Commands")).to_have_count(0)
 
         chat_input.fill("")
         expect(page.get_by_text("Todo Copilot")).to_have_count(0)
-        expect(page.get_by_text("Direct chat mode")).to_have_count(0)
+        expect(page.get_by_text("Direct CRUD in chat")).to_have_count(0)
 
-    def test_todo_crud_and_chat_handoff(
+    def test_todo_chat_crud_syncs_back_to_app(
         self,
         page: Page,
         dashboard_url: str,
         isolated_todo_storage: Path,
     ):
         frame = _open_todo_app(page, dashboard_url)
-
-        todo_input = frame.get_by_placeholder("Add a task...")
-        add_button = frame.get_by_role("button", name="Add", exact=True)
-
-        tasks = {
-            "done": "E2E Buy milk",
-            "open": "E2E Call dentist",
-            "delete": "E2E Fix bug #42",
-        }
-
-        for task in tasks.values():
-            todo_input.fill(task)
-            add_button.click()
-            expect(frame.get_by_text(task)).to_be_visible()
-
-        done_item = frame.locator("li.todo-item").filter(has_text=tasks["done"])
-        done_item.locator('input[type="checkbox"]').check()
-        expect(done_item.locator('input[type="checkbox"]')).to_be_checked()
-
-        delete_item = frame.locator("li.todo-item").filter(has_text=tasks["delete"])
-        delete_item.get_by_role("button", name="Remove", exact=True).click()
-        expect(frame.get_by_text(tasks["delete"])).to_have_count(0)
+        expect(frame.get_by_text("No tasks yet.")).to_be_visible()
 
         frame.get_by_role("button", name="Open In Chat", exact=True).click()
 
@@ -103,15 +124,34 @@ class TestTodoExtension:
         expect(chat_input).to_be_visible()
         expect(chat_input).to_have_value(re.compile(r"^/todo\s*$"))
         expect(page.get_by_text("Todo Copilot")).to_be_visible()
-        expect(page.get_by_text("1 open • 1 done")).to_be_visible()
-        expect(page.get_by_role("button", name="What should I do next?")).to_be_visible()
+        expect(page.get_by_text("No tasks yet").first).to_be_visible()
+        expect(page.get_by_role("button", name="Add a task")).to_be_visible()
         expect(chat_input).to_be_focused()
 
-        page.get_by_role("button", name="What should I do next?").click()
-        expect(
-            page.locator(".messages").get_by_text(
-                "/todo what should I do next based on my current tasks?",
-                exact=True,
-            )
-        ).to_be_visible()
-        expect(page.get_by_text("Todo Copilot")).to_have_count(0)
+        page.get_by_role("button", name="Add a task").click()
+        expect(chat_input).to_have_value(re.compile(r"^/todo add\s*$"))
+
+        _send_chat_command_no_assert(page, "/todo add E2E chat task")
+        _wait_for_todo_storage(isolated_todo_storage, [("E2E chat task", False)])
+
+        _send_chat_command_no_assert(page, "/todo list")
+        _wait_for_todo_storage(isolated_todo_storage, [("E2E chat task", False)])
+
+        _send_chat_command_no_assert(page, "/todo update 1 E2E updated task")
+        _wait_for_todo_storage(isolated_todo_storage, [("E2E updated task", False)])
+
+        _send_chat_command_no_assert(page, "/todo done 1")
+        _wait_for_todo_storage(isolated_todo_storage, [("E2E updated task", True)])
+
+        _send_chat_command_no_assert(page, "/todo reopen 1")
+        _wait_for_todo_storage(isolated_todo_storage, [("E2E updated task", False)])
+
+        _send_chat_command_no_assert(page, "/todo delete 1")
+        _wait_for_todo_storage(isolated_todo_storage, [])
+
+        page.locator("header").get_by_role("button", name="Apps", exact=True).click()
+        expect(page.get_by_text("Installed Apps")).to_be_visible()
+
+        frame = page.frame_locator("iframe[title='PocketPaw Extension']")
+        expect(frame.get_by_text("No tasks yet.")).to_be_visible(timeout=10000)
+        expect(frame.get_by_text("E2E updated task")).to_have_count(0)

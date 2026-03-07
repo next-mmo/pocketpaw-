@@ -216,11 +216,10 @@ async def websocket_handler(
             # Handle chat via MessageBus
             if action == "chat":
                 log_msg = (
-                    f"\u26a1 Processing message with Backend: {settings.agent_backend}"
-                    f" (Provider: {settings.llm_provider})"
+                    f"Processing message with backend: {settings.agent_backend}"
+                    f" (provider: {settings.llm_provider})"
                 )
-                logger.warning(log_msg)  # Use WARNING to ensure it shows up
-                print(log_msg)  # Force stdout just in case
+                logger.warning(log_msg)
 
                 await ws_adapter.handle_message(chat_id, data)
 

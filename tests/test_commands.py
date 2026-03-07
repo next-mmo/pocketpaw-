@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from pocketpaw.bus.events import Channel, InboundMessage, OutboundMessage
+from pocketpaw.extensions.storage import ExtensionStorage
 from pocketpaw.memory.file_store import FileMemoryStore
 
 # =========================================================================
@@ -444,7 +446,101 @@ class TestHelpCommand:
         assert "/backends" in response.content
         assert "/model" in response.content
         assert "/tools" in response.content
+        assert "/todo" in response.content
         assert "/help" in response.content
+
+
+# =========================================================================
+# /todo command
+# =========================================================================
+
+
+class TestTodoCommand:
+    def setup_method(self):
+        from pocketpaw.bus.commands import CommandHandler
+
+        self.handler = CommandHandler()
+        self.tmpdir = tempfile.mkdtemp()
+        self.storage = ExtensionStorage(Path(self.tmpdir))
+
+    def test_recognises_todo_crud(self):
+        assert self.handler.is_command("/todo")
+        assert self.handler.is_command("/todo add Buy milk")
+        assert self.handler.is_command("/todo list")
+        assert self.handler.is_command("/todo update 1 Buy oat milk")
+        assert self.handler.is_command("!todo delete 1")
+
+    def test_rejects_todo_freeform_prompt(self):
+        assert not self.handler.is_command("/todo what should I do next?")
+        assert not self.handler.is_command("/todo help me plan my day")
+
+    @patch("pocketpaw.bus.commands.get_extension_storage")
+    async def test_todo_help(self, mock_get_storage):
+        mock_get_storage.return_value = self.storage
+
+        response = await self.handler.handle(_make_msg("/todo"))
+
+        assert response is not None
+        assert "Todo Commands" in response.content
+        assert "/todo add <task>" in response.content
+
+    @patch("pocketpaw.bus.commands.get_extension_storage")
+    async def test_todo_add_and_list(self, mock_get_storage):
+        mock_get_storage.return_value = self.storage
+
+        add_response = await self.handler.handle(_make_msg("/todo add Buy milk"))
+        list_response = await self.handler.handle(_make_msg("/todo list"))
+
+        assert add_response is not None
+        assert 'Added todo #1: "Buy milk"' in add_response.content
+        assert list_response is not None
+        assert "[ ] Buy milk" in list_response.content
+
+        exists, todos = self.storage.get_item("todo", "todos")
+        assert exists is True
+        assert todos[0]["text"] == "Buy milk"
+        assert todos[0]["done"] is False
+
+    @patch("pocketpaw.bus.commands.get_extension_storage")
+    async def test_todo_update_done_reopen_delete(self, mock_get_storage):
+        mock_get_storage.return_value = self.storage
+        self.storage.set_item(
+            "todo",
+            "todos",
+            [
+                {"id": "todo-1", "text": "Buy milk", "done": False},
+            ],
+        )
+
+        update_response = await self.handler.handle(_make_msg("/todo update 1 Buy oat milk"))
+        done_response = await self.handler.handle(_make_msg("/todo done 1"))
+        reopen_response = await self.handler.handle(_make_msg("/todo reopen 1"))
+        delete_response = await self.handler.handle(_make_msg("/todo delete 1"))
+
+        assert 'Updated todo #1: "Buy oat milk"' in update_response.content
+        assert 'Marked todo #1 done: "Buy oat milk"' in done_response.content
+        assert 'Reopened todo #1: "Buy oat milk"' in reopen_response.content
+        assert 'Deleted todo #1: "Buy oat milk"' in delete_response.content
+
+        exists, todos = self.storage.get_item("todo", "todos")
+        assert exists is True
+        assert todos == []
+
+    @patch("pocketpaw.bus.commands.get_extension_storage")
+    async def test_todo_invalid_item_reference(self, mock_get_storage):
+        mock_get_storage.return_value = self.storage
+        self.storage.set_item(
+            "todo",
+            "todos",
+            [
+                {"id": "todo-1", "text": "Buy milk", "done": False},
+            ],
+        )
+
+        response = await self.handler.handle(_make_msg("/todo update 9 Buy oat milk"))
+
+        assert response is not None
+        assert "does not exist" in response.content
 
 
 # =========================================================================
