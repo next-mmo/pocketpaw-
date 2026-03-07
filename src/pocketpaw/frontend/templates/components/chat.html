@@ -136,6 +136,59 @@
   <div class="shrink-0 relative z-20">
     <div class="absolute inset-x-0 -top-8 h-8 bg-gradient-to-t from-black to-transparent pointer-events-none"></div>
     <div class="bg-black px-3 md:px-8 pb-2 md:pb-4 pt-1" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))">
+      <template x-if="composerAssist.active">
+        <div class="mb-3 rounded-[28px] border border-cyan-400/15 bg-[radial-gradient(circle_at_top_left,rgba(103,195,255,0.22),transparent_40%),linear-gradient(180deg,rgba(18,28,42,0.96),rgba(9,14,24,0.98))] px-4 py-4 shadow-[0_24px_70px_rgba(0,0,0,0.32)] backdrop-blur-xl">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-3">
+                <span class="inline-flex w-10 h-10 items-center justify-center rounded-2xl bg-white/8 border border-white/10 text-cyan-200 shrink-0">
+                  <i :data-lucide="composerAssist.icon || 'sparkles'" class="w-4 h-4"></i>
+                </span>
+                <div class="min-w-0">
+                  <p class="text-[10px] uppercase tracking-[0.24em] text-cyan-100/45">Guided Chat</p>
+                  <h3 class="text-sm md:text-[15px] font-semibold text-white truncate" x-text="composerAssist.title"></h3>
+                </div>
+              </div>
+              <p class="mt-3 text-sm text-white/70 leading-relaxed" x-text="composerAssist.subtitle"></p>
+            </div>
+            <button
+              type="button"
+              @click="dismissComposerAssist()"
+              class="shrink-0 w-9 h-9 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+              aria-label="Dismiss guided composer"
+            >
+              <i data-lucide="x" class="w-4 h-4 mx-auto"></i>
+            </button>
+          </div>
+
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <template x-if="composerAssist.summary">
+              <span class="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-cyan-100/90" x-text="composerAssist.summary"></span>
+            </template>
+            <span class="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-white/55">
+              Start with <code class="mx-1 text-white/80">/todo</code> or tap a quick action
+            </span>
+          </div>
+
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            <template x-for="action in composerAssist.actions" :key="action.key">
+              <button
+                type="button"
+                @click="runComposerAssistAction(action)"
+                class="group rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-cyan-400/25 px-3.5 py-3 text-left transition-all"
+              >
+                <div class="text-sm font-medium text-white group-hover:text-cyan-50" x-text="action.label"></div>
+                <div
+                  x-show="action.description"
+                  class="mt-1 text-xs leading-relaxed text-white/50 group-hover:text-white/65"
+                  x-text="action.description"
+                ></div>
+              </button>
+            </template>
+          </div>
+        </div>
+      </template>
+
       <form
         class="relative flex items-center bg-[#2c2c2e]/90 backdrop-blur-xl border border-[var(--glass-border)] rounded-[24px] shadow-2xl transition-all focus-within:ring-1 focus-within:ring-white/20 focus-within:bg-[#323234]"
         @submit.prevent="sendMessage()"
@@ -160,7 +213,8 @@
         <input
           type="text"
           class="flex-1 bg-transparent border-none text-[15px] text-white placeholder-white/30 py-4 pr-14 focus:outline-none focus:ring-0"
-          placeholder="Type a message..."
+          :placeholder="getChatInputPlaceholder()"
+          x-ref="chatInput"
           x-model="inputText"
           :disabled="isStreaming"
           aria-label="Chat message input"

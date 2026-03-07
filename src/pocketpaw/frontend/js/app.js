@@ -288,6 +288,10 @@ function app() {
             PocketPaw.EventBus.on('sidebar:files', (data) => this.handleSidebarFiles(data));
             PocketPaw.EventBus.on('output:files', (data) => this.handleOutputFiles(data));
 
+            if (this.initExtensionHost) {
+                this.initExtensionHost();
+            }
+
             // Register event handlers first
             this.setupSocketHandlers();
 

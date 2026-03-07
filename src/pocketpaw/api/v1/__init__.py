@@ -30,6 +30,7 @@ _V1_ROUTERS: list[tuple[str, str, str]] = [
     ("pocketpaw.api.v1.backends", "router", "Backends"),
     ("pocketpaw.api.v1.api_keys", "router", "API Keys"),
     ("pocketpaw.api.v1.oauth2", "router", "OAuth2"),
+    ("pocketpaw.api.v1.extensions", "router", "Extensions"),
     ("pocketpaw.api.v1.chat", "router", "Chat"),
     ("pocketpaw.api.v1.reminders", "router", "Reminders"),
     ("pocketpaw.api.v1.intentions", "router", "Intentions"),

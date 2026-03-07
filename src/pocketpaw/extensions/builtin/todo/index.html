@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PocketPaw Todo</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="/static/js/extensions-sdk.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PocketPaw Extension</p>
+          <h1>Todo</h1>
+          <p class="lede">A sandboxed sample app that stores its own data through the extension runtime API.</p>
+        </div>
+        <button id="chat-summary" class="ghost">Open In Chat</button>
+      </section>
+
+      <section class="panel">
+        <form id="todo-form" class="composer">
+          <input id="todo-input" type="text" placeholder="Add a task..." autocomplete="off" />
+          <button type="submit">Add</button>
+        </form>
+
+        <div id="empty-state" class="empty">No tasks yet.</div>
+        <ul id="todo-list" class="todo-list"></ul>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

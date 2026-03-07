@@ -71,12 +71,16 @@ window.PocketPaw.HashRouter = {
                 if (viewName === 'missions') {
                     this.loadMCData();
                 }
+                if (viewName === 'extensions') {
+                    this.loadExtensions();
+                }
 
                 // Map view names to hash routes
                 const hashMap = {
                     'chat': '#/chat',
                     'activity': '#/activity',
                     'terminal': '#/terminal',
+                    'extensions': '#/apps',
                     'missions': '#/crew'
                 };
                 this.updateHash(hashMap[viewName] || '#/chat');
@@ -103,7 +107,7 @@ window.PocketPaw.HashRouter = {
                 const parts = clean.split('/');
 
                 // Default route
-                const route = { view: 'chat', crewTab: null, projectId: null };
+                const route = { view: 'chat', crewTab: null, projectId: null, extensionRoute: null };
 
                 if (parts[0] === 'chat') {
                     route.view = 'chat';
@@ -114,6 +118,9 @@ window.PocketPaw.HashRouter = {
                 } else if (parts[0] === 'crew') {
                     route.view = 'missions';
                     route.crewTab = parts[1] === 'projects' ? 'projects' : 'tasks';
+                } else if (parts[0] === 'apps') {
+                    route.view = 'extensions';
+                    route.extensionRoute = parts[1] || null;
                 } else if (parts[0] === 'project' && parts[1]) {
                     route.view = 'missions';
                     route.crewTab = 'projects';
@@ -143,6 +150,14 @@ window.PocketPaw.HashRouter = {
                     // Deferred project selection — wait for projects to load
                     if (route.projectId) {
                         this._selectProjectById(route.projectId);
+                    }
+                }
+
+                if (route.view === 'extensions') {
+                    this.loadExtensions();
+                    if (route.extensionRoute) {
+                        this.extensionsHost.activeRoute = route.extensionRoute;
+                        this._selectExtensionByRoute(route.extensionRoute);
                     }
                 }
 

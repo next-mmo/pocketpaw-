@@ -290,6 +290,98 @@ async def test_agent_loop_builds_context_and_passes_to_router(
 @patch("pocketpaw.agents.loop.get_message_bus")
 @patch("pocketpaw.agents.loop.get_memory_manager")
 @patch("pocketpaw.agents.loop.AgentContextBuilder")
+@patch("pocketpaw.agents.loop.AgentRouter")
+@pytest.mark.asyncio
+async def test_agent_loop_resolves_todo_extension_context_without_polluting_memory(
+    mock_router_cls,
+    mock_builder_cls,
+    mock_get_memory,
+    mock_get_bus,
+    mock_bus,
+    mock_memory,
+):
+    """Todo extension handoff should expand for the model but stay compact in memory."""
+    mock_get_bus.return_value = mock_bus
+    mock_get_memory.return_value = mock_memory
+
+    captured = {}
+
+    async def capturing_run(message, *, system_prompt=None, history=None, session_key=None):
+        captured["message"] = message
+        captured["system_prompt"] = system_prompt
+        yield AgentEvent(type="message", content="Use rent first.")
+        yield AgentEvent(type="done", content="")
+
+    router = MagicMock()
+    router.run = capturing_run
+    router.stop = AsyncMock()
+    mock_router_cls.return_value = router
+
+    mock_builder_instance = mock_builder_cls.return_value
+    mock_builder_instance.build_system_prompt = AsyncMock(return_value="System Prompt")
+
+    with patch("pocketpaw.agents.loop.get_settings") as mock_settings:
+        settings = MagicMock()
+        settings.agent_backend = "claude_agent_sdk"
+        settings.max_concurrent_conversations = 5
+        settings.injection_scan_enabled = False
+        mock_settings.return_value = settings
+
+        with patch("pocketpaw.agents.loop.Settings") as mock_settings_cls:
+            mock_settings_cls.load.return_value = settings
+
+            loop = AgentLoop()
+
+            msg = InboundMessage(
+                channel=Channel.WEBSOCKET,
+                sender_id="user1",
+                chat_id="chat1",
+                content="/todo what should I do next?",
+                metadata={
+                    "action": "chat",
+                    "extension_chat_source": "todo",
+                    "extension_chat_action": "next",
+                    "extension_chat_context": {
+                        "kind": "todo",
+                        "source": "todo",
+                        "open_todos": [
+                            {"id": "1", "text": "Pay rent"},
+                            {"id": "2", "text": "Book flights"},
+                        ],
+                        "done_todos": [
+                            {"id": "3", "text": "Wash car"},
+                        ],
+                        "total_count": 3,
+                        "open_count": 2,
+                        "done_count": 1,
+                    },
+                },
+            )
+
+            await loop._process_message(msg)
+
+            assert "The user opened chat from the PocketPaw Todo app." in captured["message"]
+            assert "User request: what should I do next?" in captured["message"]
+            assert "Open tasks:\n- Pay rent\n- Book flights" in captured["message"]
+            assert "Completed tasks:\n- Wash car" in captured["message"]
+
+            first_store_call = mock_memory.add_to_session.call_args_list[0]
+            assert first_store_call.kwargs["content"] == "/todo what should I do next?"
+            assert first_store_call.kwargs["metadata"] == {
+                "action": "chat",
+                "extension_chat_source": "todo",
+                "extension_chat_action": "next",
+                "extension_chat_counts": {
+                    "total_count": 3,
+                    "open_count": 2,
+                    "done_count": 1,
+                },
+            }
+
+
+@patch("pocketpaw.agents.loop.get_message_bus")
+@patch("pocketpaw.agents.loop.get_memory_manager")
+@patch("pocketpaw.agents.loop.AgentContextBuilder")
 @pytest.mark.asyncio
 async def test_agent_loop_handles_error_before_router_init(
     mock_builder_cls, mock_get_memory, mock_get_bus, mock_bus, mock_memory

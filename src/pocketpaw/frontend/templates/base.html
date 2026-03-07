@@ -200,6 +200,13 @@
                 Terminal
             </button>
             <button
+                class="px-4 md:px-6 py-1.5 rounded-[7px] text-[13px] font-medium transition-all hidden md:block"
+                :class="view === 'extensions' ? 'bg-[#636366]/80 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-white'"
+                @click="navigateToView('extensions')"
+            >
+                Apps
+            </button>
+            <button
                 class="relative px-4 md:px-6 py-1.5 rounded-[7px] text-[13px] font-medium transition-all flex items-center gap-1.5 hidden sm:flex"
                 :class="view === 'missions' ? 'bg-[#636366]/80 text-white shadow-sm' : 'text-[var(--text-secondary)] hover:text-white'"
                 @click="navigateToView('missions')"
@@ -270,6 +277,7 @@
 
       {% include "components/activity.html" %}
       {% include "components/terminal.html" %}
+      {% include "components/extensions.html" %}
       {% include "components/missions.html" %}
     </main>
 
@@ -301,6 +309,7 @@
     <script src="/static/js/features/mc-events.js?v={{ v }}"></script>
     <script src="/static/js/features/channels.js?v={{ v }}"></script>
     <script src="/static/js/features/mcp.js?v={{ v }}"></script>
+    <script src="/static/js/features/extensions.js?v={{ v }}"></script>
     <script src="/static/js/features/hash-router.js?v={{ v }}"></script>
     <script src="/static/js/features/project-browser.js?v={{ v }}"></script>
     <script src="/static/js/features/health.js?v={{ v }}"></script>

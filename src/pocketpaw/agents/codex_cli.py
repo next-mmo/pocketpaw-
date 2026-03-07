@@ -10,9 +10,12 @@ Requires: OPENAI_API_KEY (or CODEX_API_KEY) env var and `codex` on PATH.
 """
 
 import asyncio
+import inspect
 import json
 import logging
+import os
 import shutil
+import subprocess
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -56,10 +59,11 @@ class CodexCLIBackend:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._stop_flag = False
-        self._cli_available = shutil.which("codex") is not None
-        self._process: asyncio.subprocess.Process | None = None
+        self._cli_path = shutil.which("codex")
+        self._cli_available = self._cli_path is not None
+        self._process: Any | None = None
         if self._cli_available:
-            logger.info("Codex CLI found on PATH")
+            logger.info("Codex CLI found on PATH: %s", self._cli_path)
         else:
             logger.warning("Codex CLI not found — install with: npm install -g @openai/codex")
 
@@ -74,6 +78,118 @@ class CodexCLIBackend:
                 content = content[:500] + "..."
             lines.append(f"**{role}**: {content}")
         return instruction + "\n\n" + "\n".join(lines)
+
+    def _build_command(self) -> list[str]:
+        model = self.settings.codex_cli_model or "gpt-5.3-codex"
+        return [
+            "codex",
+            "exec",
+            "--json",
+            "--full-auto",
+            "--model",
+            model,
+            "-",
+        ]
+
+    async def _spawn_process(self, cmd: list[str]) -> Any:
+        """Start the Codex subprocess, handling Windows .cmd shims."""
+        is_windows_cmd = (
+            os.name == "nt"
+            and self._cli_path is not None
+            and self._cli_path.lower().endswith((".cmd", ".bat"))
+        )
+
+        shell_cmd = subprocess.list2cmdline(cmd)
+        if is_windows_cmd:
+            try:
+                return await asyncio.create_subprocess_shell(
+                    shell_cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except NotImplementedError:
+                logger.warning(
+                    "Async subprocess shell unsupported by current event loop; "
+                    "falling back to threaded Popen"
+                )
+                return await asyncio.to_thread(
+                    subprocess.Popen,
+                    shell_cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=True,
+                )
+
+        try:
+            return await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except NotImplementedError:
+            logger.warning(
+                "Async subprocess exec unsupported by current event loop; "
+                "falling back to threaded Popen"
+            )
+            return await asyncio.to_thread(
+                subprocess.Popen,
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=False,
+            )
+
+    async def _write_process_stdin(self, process: Any, content: str) -> None:
+        stdin = getattr(process, "stdin", None)
+        if stdin is None:
+            return
+
+        payload = content.encode("utf-8")
+
+        if hasattr(stdin, "drain"):
+            stdin.write(payload)
+            await stdin.drain()
+            stdin.close()
+            return
+
+        await asyncio.to_thread(stdin.write, payload)
+        await asyncio.to_thread(stdin.close)
+
+    async def _iter_process_stdout(self, process: Any) -> AsyncIterator[bytes]:
+        stdout = getattr(process, "stdout", None)
+        if stdout is None:
+            return
+
+        if hasattr(stdout, "__aiter__"):
+            async for raw_line in stdout:
+                yield raw_line
+            return
+
+        while True:
+            raw_line = await asyncio.to_thread(stdout.readline)
+            if not raw_line:
+                break
+            yield raw_line
+
+    async def _wait_for_process(self, process: Any) -> int:
+        result = process.wait()
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    async def _read_process_stderr(self, process: Any) -> bytes:
+        stderr = getattr(process, "stderr", None)
+        if stderr is None:
+            return b""
+
+        result = stderr.read()
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     async def run(
         self,
@@ -104,29 +220,15 @@ class CodexCLIBackend:
             prompt_parts.append(message)
             full_prompt = "\n\n".join(prompt_parts)
 
-            model = self.settings.codex_cli_model or "gpt-5.3-codex"
+            cmd = self._build_command()
+            self._process = await self._spawn_process(cmd)
+            await self._write_process_stdin(self._process, full_prompt)
 
-            cmd = [
-                "codex",
-                "exec",
-                "--json",
-                "--full-auto",
-                "--model",
-                model,
-                full_prompt,
-            ]
-
-            self._process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            if self._process.stdout is None:
+            if getattr(self._process, "stdout", None) is None:
                 yield AgentEvent(type="error", content="Failed to capture Codex CLI stdout")
                 return
 
-            async for raw_line in self._process.stdout:
+            async for raw_line in self._iter_process_stdout(self._process):
                 if self._stop_flag:
                     break
 
@@ -245,13 +347,13 @@ class CodexCLIBackend:
                     yield AgentEvent(type="error", content=error_msg)
 
             # Wait for process to finish
-            await self._process.wait()
+            await self._wait_for_process(self._process)
             exit_code = self._process.returncode
 
             if exit_code and exit_code != 0 and not self._stop_flag:
                 stderr_output = ""
-                if self._process.stderr:
-                    stderr_bytes = await self._process.stderr.read()
+                if getattr(self._process, "stderr", None):
+                    stderr_bytes = await self._read_process_stderr(self._process)
                     stderr_output = stderr_bytes.decode("utf-8", errors="replace").strip()
 
                 base_msg = f"Codex CLI exited with code {exit_code}"
@@ -263,8 +365,9 @@ class CodexCLIBackend:
             yield AgentEvent(type="done", content="")
 
         except Exception as e:
-            logger.error("Codex CLI error: %s", e)
-            yield AgentEvent(type="error", content=f"Codex CLI error: {e}")
+            detail = str(e).strip() or repr(e)
+            logger.exception("Codex CLI error")
+            yield AgentEvent(type="error", content=f"Codex CLI error: {detail}")
 
     async def stop(self) -> None:
         self._stop_flag = True

@@ -1,0 +1,14 @@
+{
+  "id": "todo",
+  "name": "Todo",
+  "version": "1.0.0",
+  "description": "A first-party sample app that manages tasks with extension-scoped storage.",
+  "icon": "list-todo",
+  "route": "todo",
+  "entry": "index.html",
+  "scopes": [
+    "storage.read",
+    "storage.write",
+    "host.open_chat"
+  ]
+}

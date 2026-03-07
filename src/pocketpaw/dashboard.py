@@ -36,7 +36,7 @@ try:
     import uvicorn
     from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import Response
+    from fastapi.responses import FileResponse, Response
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
 except ImportError as _exc:
@@ -145,7 +145,8 @@ _EXTRA_ORIGINS = list(set(_BUILTIN_ORIGINS + _custom_origins))
 async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
-    response.headers["X-Frame-Options"] = "DENY"
+    is_extension_asset = request.url.path.startswith("/extensions/")
+    response.headers["X-Frame-Options"] = "SAMEORIGIN" if is_extension_asset else "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
@@ -158,7 +159,7 @@ async def security_headers_middleware(request: Request, call_next):
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: blob:; "
         "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
-        "frame-ancestors 'none'"
+        + ("frame-ancestors 'self'" if is_extension_asset else "frame-ancestors 'none'")
     )
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
@@ -889,6 +890,21 @@ async def index(request: Request):
         "base.html",
         {"request": request, "v": _static_version(), "app_version": get_version("pocketpaw")},
     )
+
+
+@app.get("/extensions/{extension_id}/")
+@app.get("/extensions/{extension_id}/{asset_path:path}")
+async def serve_extension_asset(extension_id: str, asset_path: str = ""):
+    """Serve built extension assets from bundled or user-installed extensions."""
+    from pocketpaw.extensions import get_extension_registry
+
+    registry = get_extension_registry(force_reload=True)
+    try:
+        file_path = registry.resolve_asset_path(extension_id, asset_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return FileResponse(file_path)
 
 
 # NOTE: Session token exchange, cookie login/logout, QR code, and token

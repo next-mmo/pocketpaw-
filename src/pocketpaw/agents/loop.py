@@ -30,6 +30,8 @@ _GENERATED_PATH_RE = re.compile(
     r"(?:/[^\s`*]+/\.pocketpaw/generated/[^\s`*\)]+)"  # absolute path under generated/
     r")"
 )
+_MAX_TODO_ITEMS_IN_PROMPT = 12
+_TRANSIENT_METADATA_KEYS = frozenset({"extension_chat_context", "composer_assist", "assist"})
 
 
 def _extract_media_paths(text: str) -> list[str]:
@@ -40,6 +42,128 @@ def _extract_media_paths(text: str) -> list[str]:
 def _extract_generated_paths(text: str) -> list[str]:
     """Fallback: extract file paths under ~/.pocketpaw/generated/ from agent text."""
     return _GENERATED_PATH_RE.findall(text)
+
+
+def _filter_memory_metadata(metadata: dict | None) -> dict:
+    """Drop bulky runtime-only payloads before persisting session metadata."""
+    if not metadata:
+        return {}
+
+    filtered = {k: v for k, v in metadata.items() if k not in _TRANSIENT_METADATA_KEYS}
+
+    extension_ctx = metadata.get("extension_chat_context")
+    if isinstance(extension_ctx, dict):
+        source = str(
+            extension_ctx.get("source")
+            or extension_ctx.get("kind")
+            or metadata.get("extension_chat_source")
+            or "extension"
+        ).strip()
+        if source:
+            filtered["extension_chat_source"] = source
+
+        counts = {}
+        for key in ("total_count", "open_count", "done_count"):
+            value = extension_ctx.get(key)
+            if isinstance(value, int):
+                counts[key] = value
+        if counts:
+            filtered["extension_chat_counts"] = counts
+
+    if filtered.get("extension_chat_action") in {None, ""}:
+        filtered.pop("extension_chat_action", None)
+
+    return filtered
+
+
+def _coerce_todo_items(value: object) -> list[str]:
+    items: list[str] = []
+    if not isinstance(value, list):
+        return items
+
+    for item in value:
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+        else:
+            text = str(item).strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _format_todo_items(title: str, items: list[str]) -> str:
+    if not items:
+        return f"{title}:\n- none"
+
+    lines = [f"{title}:"]
+    for text in items[:_MAX_TODO_ITEMS_IN_PROMPT]:
+        lines.append(f"- {text}")
+    if len(items) > _MAX_TODO_ITEMS_IN_PROMPT:
+        lines.append(f"- ... {len(items) - _MAX_TODO_ITEMS_IN_PROMPT} more")
+    return "\n".join(lines)
+
+
+def _extract_todo_request(content: str) -> str:
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    if not lines:
+        return "Help me work with my current todo list."
+
+    first_line = lines[0]
+    if first_line.lower().startswith("/todo"):
+        remainder = first_line[5:].strip(" :-")
+        if remainder:
+            return remainder
+        return "Help me work with my current todo list."
+    return first_line
+
+
+def _resolve_extension_chat_prompt(content: str, metadata: dict | None) -> str:
+    if not metadata:
+        return content
+
+    extension_ctx = metadata.get("extension_chat_context")
+    if not isinstance(extension_ctx, dict):
+        return content
+
+    source = str(extension_ctx.get("source") or extension_ctx.get("kind") or "").lower()
+    if source != "todo":
+        return content
+
+    open_items = _coerce_todo_items(extension_ctx.get("open_todos"))
+    done_items = _coerce_todo_items(extension_ctx.get("done_todos"))
+    total_count = extension_ctx.get("total_count")
+    if not isinstance(total_count, int):
+        total_count = len(open_items) + len(done_items)
+    open_count = extension_ctx.get("open_count")
+    if not isinstance(open_count, int):
+        open_count = len(open_items)
+    done_count = extension_ctx.get("done_count")
+    if not isinstance(done_count, int):
+        done_count = len(done_items)
+
+    user_request = _extract_todo_request(content)
+    action = str(metadata.get("extension_chat_action") or "").strip()
+
+    parts = [
+        "The user opened chat from the PocketPaw Todo app.",
+        f"User request: {user_request}",
+        (
+            "Use the Todo snapshot below as the source of truth for this turn. "
+            "Do not claim you directly changed the Todo app unless you are explicitly "
+            "describing recommended edits for the user to make."
+        ),
+        f"Snapshot summary: {open_count} open, {done_count} done, {total_count} total.",
+    ]
+    if action:
+        parts.insert(2, f"Quick action: {action}")
+
+    parts.extend(
+        [
+            _format_todo_items("Open tasks", open_items),
+            _format_todo_items("Completed tasks", done_items),
+        ]
+    )
+    return "\n\n".join(parts)
 
 
 class AgentLoop:
@@ -230,18 +354,22 @@ class AgentLoop:
                 if scan_result.threat_level != ThreatLevel.NONE:
                     content = scan_result.sanitized_content
 
+            memory_metadata = _filter_memory_metadata(message.metadata)
+
             # 1. Store User Message
             await self.memory.add_to_session(
                 session_key=session_key,
                 role="user",
                 content=content,
-                metadata=message.metadata,
+                metadata=memory_metadata,
             )
 
             # 1b. Inject inbound media file paths so the agent can use them
             if message.media:
                 paths_info = ", ".join(message.media)
                 content += f"\n[Media files on disk: {paths_info}]"
+
+            runtime_content = _resolve_extension_chat_prompt(content, message.metadata)
 
             # 2. Build system prompt + session history concurrently (independent I/O)
             sender_id = message.sender_id
@@ -273,7 +401,10 @@ class AgentLoop:
             cancelled = False
 
             run_iter = router.run(
-                content, system_prompt=system_prompt, history=history, session_key=session_key
+                runtime_content,
+                system_prompt=system_prompt,
+                history=history,
+                session_key=session_key,
             )
             try:
                 async for event in run_iter:

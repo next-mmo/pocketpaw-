@@ -425,6 +425,14 @@ class Settings(BaseSettings):
     session_token_ttl_hours: int = Field(
         default=24, description="TTL in hours for HMAC session tokens issued via /api/auth/session"
     )
+    extension_session_ttl_minutes: int = Field(
+        default=15,
+        description="TTL in minutes for extension runtime tokens issued to sandboxed apps",
+    )
+    extension_disabled_ids: list[str] = Field(
+        default_factory=list,
+        description="Installed extension IDs that should not be mounted or served",
+    )
     api_cors_allowed_origins: list[str] = Field(
         default_factory=list,
         description="Additional CORS origins for external clients (e.g. tauri://localhost)",

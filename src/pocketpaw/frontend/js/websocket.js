@@ -181,8 +181,8 @@ class PocketPawSocket {
         this.send('toggle_agent', { active });
     }
 
-    chat(message) {
-        this.send('chat', { message });
+    chat(message, data = {}) {
+        this.send('chat', { message, ...data });
     }
 
     stopResponse() {

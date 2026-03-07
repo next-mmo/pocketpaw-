@@ -150,6 +150,7 @@ async def _auth_dispatch(request: Request) -> Response | None:
     # Exempt routes — return None to let the request through
     exempt_paths = [
         "/static",
+        "/extensions",
         "/favicon.ico",
         "/ws",  # WebSocket handles its own auth in dashboard_ws.py
         "/v1/ws",  # v1 WebSocket (short path) — same handler, same auth
@@ -278,6 +279,31 @@ async def _auth_dispatch(request: Request) -> Response | None:
                 if oauth_token:
                     is_valid = True
                     request.state.oauth_token = oauth_token
+            except Exception:
+                pass
+
+    # 5b. Check extension runtime token (pex_* prefix) for extension runtime APIs only
+    if not is_valid and request.url.path.startswith("/api/v1/extensions/runtime/"):
+        extension_value = None
+        if token and token.startswith("pex_"):
+            extension_value = token
+        elif auth_header:
+            bearer = (
+                auth_header.removeprefix("Bearer ").strip()
+                if auth_header.startswith("Bearer ")
+                else ""
+            )
+            if bearer.startswith("pex_"):
+                extension_value = bearer
+        if extension_value:
+            try:
+                from pocketpaw.extensions import get_extension_registry
+                from pocketpaw.extensions.tokens import verify_extension_token
+
+                claims = verify_extension_token(extension_value, current_token)
+                if claims and get_extension_registry().get_enabled(claims.extension_id) is not None:
+                    is_valid = True
+                    request.state.extension_session = claims
             except Exception:
                 pass
 
