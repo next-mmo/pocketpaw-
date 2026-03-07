@@ -408,6 +408,7 @@ window.PocketPaw.Chat = {
             },
 
             handleChatInputChange() {
+                this.syncComposerAssistWithInput();
                 this.updateSlashPicker();
             },
 
@@ -526,6 +527,31 @@ window.PocketPaw.Chat = {
                     actions: [],
                     context: null,
                 };
+            },
+
+            syncComposerAssistWithInput() {
+                if (!this.composerAssist.active) {
+                    return;
+                }
+
+                const text = String(this.inputText || '').trimStart();
+                if (!text) {
+                    this.dismissComposerAssist();
+                    return;
+                }
+
+                const prefix = String(this.composerAssist.promptPrefix || '').trim().toLowerCase();
+                if (!prefix) {
+                    return;
+                }
+
+                const normalized = text.toLowerCase();
+                const commandOnly = prefix.replace(/\s+$/, '');
+                const matchesPrefix = normalized === commandOnly || normalized.startsWith(prefix);
+
+                if (!matchesPrefix) {
+                    this.dismissComposerAssist();
+                }
             },
 
             getChatInputPlaceholder() {

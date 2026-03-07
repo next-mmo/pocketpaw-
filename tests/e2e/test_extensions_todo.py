@@ -63,6 +63,10 @@ class TestTodoExtension:
         expect(page.get_by_text("Direct chat mode")).to_be_visible()
         expect(page.get_by_text("Slash Commands")).to_have_count(0)
 
+        chat_input.fill("")
+        expect(page.get_by_text("Todo Copilot")).to_have_count(0)
+        expect(page.get_by_text("Direct chat mode")).to_have_count(0)
+
     def test_todo_crud_and_chat_handoff(
         self,
         page: Page,
