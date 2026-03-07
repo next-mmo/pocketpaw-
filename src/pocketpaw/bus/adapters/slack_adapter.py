@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from pocketpaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketpaw.bus.commands import COMMAND_REGISTRY
 from pocketpaw.bus.format import convert_markdown
 
 logger = logging.getLogger(__name__)
@@ -72,20 +73,7 @@ class SlackAdapter(BaseChannelAdapter):
         # and are forwarded to the bus as InboundMessage with command text.
         # NOTE: Each command must also be registered in the Slack App
         # manifest at api.slack.com → Slash Commands for this to work.
-        for _cmd_name in (
-            "/new",
-            "/sessions",
-            "/resume",
-            "/clear",
-            "/rename",
-            "/status",
-            "/delete",
-            "/backend",
-            "/backends",
-            "/model",
-            "/tools",
-            "/help",
-        ):
+        for _cmd_name in (f"/{name}" for name in COMMAND_REGISTRY):
 
             @app.command(_cmd_name)
             async def _slash_handler(ack, command, _cmd=_cmd_name):

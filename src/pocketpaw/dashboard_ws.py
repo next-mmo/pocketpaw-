@@ -568,6 +568,7 @@ async def websocket_handler(
                 agent_status = {
                     "status": "running" if agent_loop._running else "stopped",
                     "backend": "AgentLoop",
+                    "available": agent_loop._running,
                 }
 
                 await websocket.send_json(

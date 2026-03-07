@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from pocketpaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
+from pocketpaw.bus.commands import COMMAND_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -102,57 +103,19 @@ class DiscordAdapter(BaseChannelAdapter):
             )
             await adapter._publish_inbound(msg)
 
-        @tree.command(name="new", description="Start a fresh PocketPaw conversation")
-        async def new_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/new")
+        # Register all commands from the centralized COMMAND_REGISTRY.
+        # Each gets an optional "args" parameter so users can pass
+        # arguments (e.g. /resume 3, /todo add Buy milk).
+        for _cmd_name, _cmd_desc in COMMAND_REGISTRY.items():
 
-        @tree.command(name="sessions", description="List your conversation sessions")
-        async def sessions_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/sessions")
-
-        @tree.command(name="resume", description="Resume a previous conversation session")
-        async def resume_command(interaction: discord.Interaction, target: str | None = None):
-            content = "/resume" if not target else f"/resume {target}"
-            await _slash_to_inbound(interaction, content)
-
-        @tree.command(name="clear", description="Clear the current session history")
-        async def clear_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/clear")
-
-        @tree.command(name="rename", description="Rename the current session")
-        async def rename_command(interaction: discord.Interaction, title: str):
-            await _slash_to_inbound(interaction, f"/rename {title}")
-
-        @tree.command(name="status", description="Show current session info")
-        async def status_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/status")
-
-        @tree.command(name="delete", description="Delete the current session")
-        async def delete_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/delete")
-
-        @tree.command(name="backend", description="Show or switch agent backend")
-        async def backend_command(interaction: discord.Interaction, name: str | None = None):
-            content = "/backend" if not name else f"/backend {name}"
-            await _slash_to_inbound(interaction, content)
-
-        @tree.command(name="backends", description="List available backends")
-        async def backends_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/backends")
-
-        @tree.command(name="model", description="Show or switch model")
-        async def model_command(interaction: discord.Interaction, name: str | None = None):
-            content = "/model" if not name else f"/model {name}"
-            await _slash_to_inbound(interaction, content)
-
-        @tree.command(name="tools", description="Show or switch tool profile")
-        async def tools_command(interaction: discord.Interaction, profile: str | None = None):
-            content = "/tools" if not profile else f"/tools {profile}"
-            await _slash_to_inbound(interaction, content)
-
-        @tree.command(name="help", description="Show PocketPaw help")
-        async def help_command(interaction: discord.Interaction):
-            await _slash_to_inbound(interaction, "/help")
+            @tree.command(name=_cmd_name, description=_cmd_desc)
+            async def _generic_handler(
+                interaction: discord.Interaction,
+                args: str | None = None,
+                _name: str = _cmd_name,
+            ):
+                content = f"/{_name} {args}" if args else f"/{_name}"
+                await _slash_to_inbound(interaction, content)
 
         @client.event
         async def on_ready():

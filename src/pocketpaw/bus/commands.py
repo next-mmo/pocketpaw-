@@ -30,24 +30,47 @@ _TODO_ACTION_ALIASES: dict[str, str] = {
     "update": "update",
     "delete": "delete",
     "rm": "delete",
+    "confirm": "confirm",
+    "yes": "confirm",
+    "y": "confirm",
+    "cancel": "cancel",
+    "no": "cancel",
+    "n": "cancel",
 }
 
-_COMMANDS = frozenset(
-    {
-        "/new",
-        "/sessions",
-        "/resume",
-        "/help",
-        "/clear",
-        "/rename",
-        "/status",
-        "/delete",
-        "/backend",
-        "/backends",
-        "/model",
-        "/tools",
-    }
-)
+# ── Centralized command registry ──────────────────────────────────
+# Single source of truth for all slash commands.
+# Adapters (Telegram, Discord, Slack, etc.) should import this
+# instead of maintaining their own duplicate lists.
+# Keys are the bare command names (without "/"), values are
+# short descriptions suitable for help text and bot menus.
+COMMAND_REGISTRY: dict[str, str] = {
+    "new": "Start a fresh conversation",
+    "sessions": "List your conversation sessions",
+    "resume": "Resume a previous session",
+    "clear": "Clear session history",
+    "rename": "Rename the current session",
+    "status": "Show session info",
+    "delete": "Delete the current session",
+    "backend": "Show or switch agent backend",
+    "backends": "List available backends",
+    "model": "Show or switch model",
+    "tools": "Show or switch tool profile",
+    "todo": "Manage your todo list",
+    "help": "Show available commands",
+}
+
+
+def get_command_names() -> list[str]:
+    """Return bare command names (without '/') from the registry.
+
+    Adapters should use this to register platform-specific handlers
+    so new commands are automatically picked up everywhere.
+    """
+    return list(COMMAND_REGISTRY.keys())
+
+
+_COMMANDS = frozenset(f"/{name}" for name in COMMAND_REGISTRY)
 
 # Maps backend name → Settings field that holds its model override.
 _BACKEND_MODEL_FIELDS: dict[str, str] = {
@@ -118,6 +141,9 @@ class CommandHandler:
         # so /resume <n> can reference by number
         self._last_shown: dict[str, list[dict]] = {}
         self._on_settings_changed: Callable[[], None] | None = None
+        # Pending todo deletions awaiting /todo confirm
+        # Maps session_key -> {"index": int, "text": str}
+        self._pending_deletes: dict[str, dict] = {}
 
     def set_on_settings_changed(self, callback: Callable[[], None]) -> None:
         """Register a callback invoked after any command mutates settings."""
@@ -753,12 +779,14 @@ class CommandHandler:
                 "/todo done <n> — Mark task #n done\n"
                 "/todo reopen <n> — Mark task #n open again\n"
                 "/todo update <n> <text> — Replace task #n text\n"
-                "/todo delete <n> — Delete task #n\n\n"
+                "/todo delete <n> — Delete task #n (asks for confirmation)\n"
+                "/todo confirm — Confirm a pending deletion\n"
+                "/todo cancel — Cancel a pending deletion\n\n"
                 "Examples:\n"
                 "- `/todo add Buy milk`\n"
                 "- `/todo update 1 Buy oat milk`\n"
                 "- `/todo done 1`\n"
-                "- `/todo delete 1`\n\n"
+                "- `/todo delete 1` → `/todo confirm`\n\n"
                 "Freeform prompts still work too, for example `/todo what should I do next?`."
             )
             return self._build_todo_response(message, help_text)
@@ -786,7 +814,7 @@ class CommandHandler:
                 f'Added todo #{1}: "{text}"\n\n{self._format_todo_list(todos)}',
             )
 
-        if action in {"done", "reopen", "delete"}:
+        if action in {"done", "reopen"}:
             selector, _unused = self._split_todo_selector(remainder)
             index, error = self._resolve_todo_index(todos, selector)
             if error is not None or index is None:
@@ -802,21 +830,70 @@ class CommandHandler:
                     f'Marked todo #{index + 1} done: "{todo["text"]}"\n\n{updated_list}',
                 )
 
-            if action == "reopen":
-                todo["done"] = False
-                self._save_todos(todos)
-                updated_list = self._format_todo_list(todos)
+            # action == "reopen"
+            todo["done"] = False
+            self._save_todos(todos)
+            updated_list = self._format_todo_list(todos)
+            return self._build_todo_response(
+                message,
+                f'Reopened todo #{index + 1}: "{todo["text"]}"\n\n{updated_list}',
+            )
+
+        if action == "delete":
+            selector, _unused = self._split_todo_selector(remainder)
+            index, error = self._resolve_todo_index(todos, selector)
+            if error is not None or index is None:
+                return self._build_todo_response(message, error or "Todo not found.")
+
+            todo = todos[index]
+            # Stage the deletion and ask for confirmation
+            session_key = message.session_key
+            self._pending_deletes[session_key] = {
+                "index": index,
+                "text": todo["text"],
+            }
+            return self._build_todo_response(
+                message,
+                f'⚠️ Delete todo #{index + 1}: "{todo["text"]}"?\n\n'
+                "Type `/todo confirm` to delete or `/todo cancel` to keep it.",
+            )
+
+        if action == "confirm":
+            session_key = message.session_key
+            pending = self._pending_deletes.pop(session_key, None)
+            if pending is None:
+                return self._build_todo_response(
+                    message, "Nothing to confirm. Use `/todo delete <n>` first."
+                )
+            index = pending["index"]
+            # Re-validate: list may have changed since the delete was staged
+            if index < 0 or index >= len(todos):
+                return self._build_todo_response(
+                    message, "Todo list changed since the delete request. Please try again."
+                )
+            if todos[index]["text"] != pending["text"]:
                 return self._build_todo_response(
                     message,
-                    f'Reopened todo #{index + 1}: "{todo["text"]}"\n\n{updated_list}',
+                    "Todo list changed since the delete request. Please try again.",
                 )
-
             deleted = todos.pop(index)
             self._save_todos(todos)
             updated_list = self._format_todo_list(todos)
             return self._build_todo_response(
                 message,
-                f'Deleted todo #{index + 1}: "{deleted["text"]}"\n\n{updated_list}',
+                f'✅ Deleted todo #{index + 1}: "{deleted["text"]}"\n\n{updated_list}',
+            )
+
+        if action == "cancel":
+            session_key = message.session_key
+            pending = self._pending_deletes.pop(session_key, None)
+            if pending is None:
+                return self._build_todo_response(
+                    message, "Nothing to cancel."
+                )
+            return self._build_todo_response(
+                message,
+                f'Cancelled. Todo #{pending["index"] + 1}: "{pending["text"]}" was kept.',
             )
 
         if action == "update":
@@ -845,56 +922,18 @@ class CommandHandler:
     # ------------------------------------------------------------------
 
     def _cmd_help(self, message: InboundMessage) -> OutboundMessage:
-        """List all available commands."""
-        text = (
-            "**PocketPaw Commands:**\n\n"
-            "/new — Start a fresh conversation\n"
-            "/sessions — List your conversation sessions\n"
-            "/resume <n> — Resume session #n from the list\n"
-            "/resume <text> — Search and resume a session by title\n"
-            "/clear — Clear the current session history\n"
-            "/rename <title> — Rename the current session\n"
-            "/status — Show current session info\n"
-            "/delete — Delete the current session\n"
-            "/backend — Show or switch agent backend\n"
-            "/backends — List all available backends\n"
-            "/model — Show or switch model for current backend\n"
-            "/tools — Show or switch tool profile\n"
-            "/help — Show this help message\n\n"
-            "_Tip: Use !command instead of /command on channels"
+        """List all available commands (auto-generated from COMMAND_REGISTRY)."""
+        lines = ["**PocketPaw Commands:**\n"]
+        for name, desc in COMMAND_REGISTRY.items():
+            lines.append(f"/{name} - {desc}")
+        lines.append(
+            "\n_Tip: Use !command instead of /command on channels"
             " where / is intercepted (e.g. Matrix)._"
         )
         return OutboundMessage(
             channel=message.channel,
             chat_id=message.chat_id,
-            content=text,
-        )
-
-    def _cmd_help(self, message: InboundMessage) -> OutboundMessage:
-        """List all available commands."""
-        text = (
-            "**PocketPaw Commands:**\n\n"
-            "/new - Start a fresh conversation\n"
-            "/sessions - List your conversation sessions\n"
-            "/resume <n> - Resume session #n from the list\n"
-            "/resume <text> - Search and resume a session by title\n"
-            "/clear - Clear the current session history\n"
-            "/rename <title> - Rename the current session\n"
-            "/status - Show current session info\n"
-            "/delete - Delete the current session\n"
-            "/backend - Show or switch agent backend\n"
-            "/backends - List all available backends\n"
-            "/model - Show or switch model for current backend\n"
-            "/tools - Show or switch tool profile\n"
-            "/todo - Manage Todo items from chat\n"
-            "/help - Show this help message\n\n"
-            "_Tip: Use !command instead of /command on channels"
-            " where / is intercepted (e.g. Matrix)._"
-        )
-        return OutboundMessage(
-            channel=message.channel,
-            chat_id=message.chat_id,
-            content=text,
+            content="\n".join(lines),
         )
 
 

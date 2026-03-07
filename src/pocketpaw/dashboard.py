@@ -618,6 +618,80 @@ async def reload_skills():
     }
 
 
+# ─── LLM Endpoint Verification ──────────────────────────────────
+@app.post("/api/llm/verify")
+async def verify_llm_endpoint(request: Request):
+    """Verify connectivity to an OpenAI-compatible LLM endpoint.
+
+    Pings the /models endpoint and returns available models + latency.
+    """
+    import time
+
+    import httpx
+
+    data = await request.json()
+    base_url = (data.get("base_url") or "").strip().rstrip("/")
+
+    if not base_url:
+        return {"ok": False, "error": "Base URL is required."}
+
+    # Normalize: ensure we hit /models (OpenAI standard discovery endpoint)
+    models_url = base_url.rstrip("/v1").rstrip("/") + "/v1/models"
+    if base_url.endswith("/v1"):
+        models_url = base_url + "/models"
+
+    api_key = data.get("api_key") or "none"
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(models_url, headers=headers)
+        latency_ms = round((time.monotonic() - start) * 1000)
+
+        if resp.status_code == 200:
+            try:
+                body = resp.json()
+                models = []
+                if isinstance(body, dict) and "data" in body:
+                    models = [m.get("id", "") for m in body["data"] if isinstance(m, dict)]
+                return {
+                    "ok": True,
+                    "latency_ms": latency_ms,
+                    "models": models[:20],  # Cap at 20
+                    "models_count": len(models),
+                }
+            except Exception:
+                return {"ok": True, "latency_ms": latency_ms, "models": []}
+        else:
+            # Some servers don't implement /models but still work for chat
+            # Try a lightweight OPTIONS or HEAD on the base URL
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client2:
+                    head = await client2.get(base_url, headers=headers)
+                if head.status_code < 500:
+                    return {
+                        "ok": True,
+                        "latency_ms": latency_ms,
+                        "models": [],
+                        "warning": f"/models returned {resp.status_code}, but endpoint is reachable.",
+                    }
+            except Exception:
+                pass
+            return {
+                "ok": False,
+                "error": f"Server returned HTTP {resp.status_code}.",
+                "latency_ms": latency_ms,
+            }
+    except httpx.ConnectError:
+        return {"ok": False, "error": f"Cannot connect to {base_url}. Is the server running?"}
+    except httpx.TimeoutException:
+        return {"ok": False, "error": f"Connection timed out after 10s."}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 # ─── Backend Discovery ───────────────────────────────────────────
 @app.get("/api/backends")
 async def list_available_backends():

@@ -408,9 +408,15 @@ class AgentLoop:
             )
             try:
                 async for event in run_iter:
-                    etype = event.type
-                    econtent = event.content
-                    meta = event.metadata or {}
+                    # Defensively handle both AgentEvent objects and plain dicts
+                    if isinstance(event, dict):
+                        etype = event.get("type", "")
+                        econtent = event.get("content", "")
+                        meta = event.get("metadata") or {}
+                    else:
+                        etype = event.type
+                        econtent = event.content
+                        meta = event.metadata or {}
 
                     if etype == "message":
                         full_response += econtent
