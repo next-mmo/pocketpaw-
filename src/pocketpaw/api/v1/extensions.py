@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from pocketpaw.api.v1.chat import _APISessionBridge, _send_message
 from pocketpaw.api.v1.schemas.chat import ChatRequest, ChatResponse
 from pocketpaw.api.v1.schemas.extensions import (
+    CudaInfoResponse,
     ExtensionListResponse,
     ExtensionSessionResponse,
     ExtensionStatusResponse,
@@ -22,6 +23,8 @@ from pocketpaw.api.v1.schemas.extensions import (
     ExtensionStorageValueRequest,
     ExtensionSummary,
     ExtensionToggleRequest,
+    PluginLogResponse,
+    PluginStatusResponse,
 )
 from pocketpaw.api.v1.schemas.sessions import SessionListResponse
 from pocketpaw.config import Settings, get_access_token
@@ -781,6 +784,434 @@ async def extension_chat_stream(
 
     return StreamingResponse(
         _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Plugin Management Endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/plugins/cuda", response_model=CudaInfoResponse)
+async def get_cuda_info_endpoint(request: Request):
+    """Detect CUDA / GPU availability."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.cuda import get_cuda_info
+
+    info = await get_cuda_info()
+    return CudaInfoResponse(
+        available=info.available,
+        driver_version=info.driver_version,
+        cuda_version=info.cuda_version,
+        device_name=info.device_name,
+        vram_mb=info.vram_mb,
+        vram_gb=info.vram_gb,
+        cuda_tag=info.cuda_tag,
+        platform=info.platform,
+        summary=info.summary_line(),
+    )
+
+
+@router.post("/plugins/{plugin_id}/install", response_model=PluginStatusResponse)
+async def install_plugin(plugin_id: str, request: Request):
+    """Install a plugin: create venv, install deps, PyTorch, etc.
+
+    Returns immediately with status="installing". Poll the status endpoint
+    to track progress.
+    """
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry(force_reload=True)
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    sandbox = record.get_sandbox_manager()
+    if sandbox is None:
+        raise HTTPException(status_code=400, detail="Plugin has no sandbox configuration")
+
+    mgr = get_plugin_process_manager()
+    existing = mgr.get(plugin_id)
+    if existing and existing.is_alive:
+        # Already installing/running — return current status instead of error
+        return PluginStatusResponse(
+            plugin_id=plugin_id,
+            status=existing.status,
+            install_progress=existing.install_progress,
+            is_installed=record.is_installed,
+        )
+
+    # Start install in background
+    install_steps = record.manifest.install.steps if record.manifest.install else None
+
+    async def _do_install():
+        try:
+            await mgr.install(plugin_id, sandbox, install_steps=install_steps)
+        except Exception:
+            logger.exception("Plugin %s install background task failed", plugin_id)
+
+    asyncio.create_task(_do_install())
+
+    # Give the task a moment to start and set its own status
+    await asyncio.sleep(0.1)
+
+    proc = mgr.get_or_create(plugin_id)
+
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        install_progress=proc.install_progress,
+        is_installed=record.is_installed,
+    )
+
+
+@router.post("/plugins/{plugin_id}/start", response_model=PluginStatusResponse)
+async def start_plugin(plugin_id: str, request: Request):
+    """Start a plugin daemon process.
+
+    Optionally accepts JSON body with {"model": "filename.gguf"} to select
+    which model to load.  If not provided, picks the first GGUF in models/.
+    """
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry(force_reload=True)
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+    if not record.manifest.start:
+        raise HTTPException(status_code=400, detail="Plugin has no start configuration")
+
+    sandbox = record.get_sandbox_manager()
+    if sandbox is None:
+        raise HTTPException(status_code=400, detail="Plugin has no sandbox configuration")
+    if not sandbox.is_installed:
+        raise HTTPException(status_code=400, detail="Plugin is not installed yet. Run install first.")
+
+    # Determine which model to use
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    model_file = body.get("model", "").strip() if body else ""
+    if not model_file:
+        # Auto-pick the first GGUF file in models/
+        models_dir = record.root_dir / "models"
+        if models_dir.exists():
+            gguf_files = sorted(
+                p.name for p in models_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in (".gguf", ".bin")
+            )
+            if gguf_files:
+                model_file = gguf_files[0]
+
+    if not model_file:
+        raise HTTPException(
+            status_code=400,
+            detail="No model found. Download a GGUF model first.",
+        )
+
+    # Build the model path (relative to plugin root for portability)
+    model_path = str(record.root_dir / "models" / model_file)
+
+    # Clone the start config and inject the model path into the command
+    from copy import deepcopy
+    start_cfg = deepcopy(record.manifest.start)
+    start_cfg.command = start_cfg.command.replace("__MODEL__", model_path)
+    # If command still has no --model flag, append it
+    if "--model" not in start_cfg.command:
+        start_cfg.command += f' --model "{model_path}"'
+
+    mgr = get_plugin_process_manager()
+    proc = await mgr.start(plugin_id, sandbox, start_cfg)
+
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        pid=proc.pid,
+        port=proc.port,
+        url=proc.url,
+        started_at=proc.started_at,
+        is_installed=True,
+    )
+
+
+@router.post("/plugins/{plugin_id}/stop", response_model=PluginStatusResponse)
+async def stop_plugin(plugin_id: str, request: Request):
+    """Stop a running plugin process."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    mgr = get_plugin_process_manager()
+    proc = await mgr.stop(plugin_id)
+    if proc is None:
+        raise HTTPException(status_code=404, detail="No process found for this plugin")
+
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        stopped_at=proc.stopped_at,
+        is_installed=True,
+    )
+
+
+@router.get("/plugins/{plugin_id}/status", response_model=PluginStatusResponse)
+async def get_plugin_status(plugin_id: str, request: Request):
+    """Get the current status of a plugin process."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+
+    if proc is None:
+        return PluginStatusResponse(
+            plugin_id=plugin_id,
+            status="stopped",
+            is_installed=record.is_installed,
+        )
+
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        pid=proc.pid,
+        port=proc.port,
+        url=proc.url,
+        started_at=proc.started_at,
+        stopped_at=proc.stopped_at,
+        error=proc.error,
+        install_progress=proc.install_progress,
+        uptime_seconds=proc.uptime_seconds,
+        is_installed=record.is_installed,
+    )
+
+
+@router.get("/plugins/{plugin_id}/logs", response_model=PluginLogResponse)
+async def get_plugin_logs(plugin_id: str, request: Request, tail: int = 200):
+    """Get recent log lines from a plugin process."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    mgr = get_plugin_process_manager()
+    lines = mgr.get_logs(plugin_id, tail=tail)
+
+    return PluginLogResponse(
+        plugin_id=plugin_id,
+        lines=lines,
+        total=len(lines),
+    )
+
+
+@router.delete("/plugins/{plugin_id}/env")
+async def reset_plugin_env(plugin_id: str, request: Request):
+    """Delete the plugin's venv (reset to pre-install state)."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    # Stop if running
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+    if proc and proc.is_alive:
+        await mgr.stop(plugin_id)
+
+    # Delete venv
+    sandbox = record.get_sandbox_manager()
+    if sandbox:
+        await sandbox.delete_venv()
+
+    return {"status": "ok", "plugin_id": plugin_id, "message": "Environment reset"}
+
+
+_MAX_MODEL_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB
+
+
+@router.post("/plugins/{plugin_id}/upload-model")
+async def upload_model_file(plugin_id: str, request: Request, file: UploadFile):
+    """Upload a GGUF model file to the plugin's models/ directory.
+
+    The frontend downloads the model via the browser and uploads it here
+    so we can save it to the correct location on disk.
+    """
+    import shutil
+
+    _require_admin_or_full_access(request)
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    filename = file.filename or "model.gguf"
+    # Sanitize filename
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    models_dir = record.root_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    target = models_dir / filename
+
+    # Stream to disk to avoid loading the whole model into memory
+    total = 0
+    with open(target, "wb") as f:
+        while chunk := await file.read(1024 * 1024):  # 1 MB chunks
+            total += len(chunk)
+            if total > _MAX_MODEL_BYTES:
+                # Clean up partial file
+                f.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Model file too large (max 20 GB)")
+            f.write(chunk)
+
+    logger.info("Saved model '%s' (%d MB) for plugin '%s'", filename, total // (1024 * 1024), plugin_id)
+
+    return {
+        "status": "ok",
+        "plugin_id": plugin_id,
+        "file": filename,
+        "size_bytes": total,
+    }
+
+
+@router.get("/plugins/{plugin_id}/models")
+async def list_plugin_models(plugin_id: str, request: Request):
+    """List downloaded GGUF model files for a plugin."""
+    _require_admin_or_full_access(request)
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+
+    models_dir = record.root_dir / "models"
+    if not models_dir.exists():
+        return {"plugin_id": plugin_id, "models": []}
+
+    models = []
+    for p in sorted(models_dir.iterdir()):
+        if p.is_file() and p.suffix.lower() in (".gguf", ".bin"):
+            models.append({
+                "file": p.name,
+                "size_bytes": p.stat().st_size,
+                "size_mb": round(p.stat().st_size / (1024 * 1024), 1),
+            })
+
+    return {"plugin_id": plugin_id, "models": models}
+
+
+class _DownloadModelRequest(BaseModel):
+    repo: str
+    file: str
+
+
+@router.post("/plugins/{plugin_id}/download-model")
+async def download_model_from_hf(
+    plugin_id: str,
+    body: _DownloadModelRequest,
+    request: Request,
+):
+    """Download a GGUF model from Hugging Face directly on the server.
+
+    Streams the file from HuggingFace to the plugin's ``models/`` directory,
+    bypassing browser CORS restrictions.  Returns an SSE stream with progress.
+    """
+    import httpx
+
+    _require_admin_or_full_access(request)
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    repo = body.repo.strip()
+    filename = body.file.strip()
+
+    if not repo or not filename:
+        raise HTTPException(status_code=400, detail="repo and file are required")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    models_dir = record.root_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    target = models_dir / filename
+
+    url = f"https://huggingface.co/{repo}/resolve/main/{filename}"
+
+    async def _stream_download():
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30, read=300)) as client:
+                async with client.stream("GET", url) as resp:
+                    if resp.status_code != 200:
+                        yield f"data: {json.dumps({'event': 'error', 'detail': f'HF returned {resp.status_code}'})}\n\n"
+                        return
+
+                    total = int(resp.headers.get("content-length", 0))
+                    received = 0
+
+                    yield f"data: {json.dumps({'event': 'start', 'total': total, 'file': filename})}\n\n"
+
+                    with open(target, "wb") as f:
+                        async for chunk in resp.aiter_bytes(chunk_size=1024 * 1024):
+                            f.write(chunk)
+                            received += len(chunk)
+                            pct = round((received / total) * 100) if total else 0
+                            # Send progress every ~2 MB to avoid flooding
+                            if received % (2 * 1024 * 1024) < (1024 * 1024):
+                                yield f"data: {json.dumps({'event': 'progress', 'received': received, 'total': total, 'percent': pct})}\n\n"
+
+                    yield f"data: {json.dumps({'event': 'done', 'file': filename, 'size_bytes': received})}\n\n"
+
+                    logger.info(
+                        "Downloaded model '%s' (%d MB) from %s for plugin '%s'",
+                        filename, received // (1024 * 1024), repo, plugin_id,
+                    )
+
+        except Exception as exc:
+            logger.exception("Model download failed: %s", exc)
+            # Clean up partial file
+            if target.exists():
+                target.unlink(missing_ok=True)
+            yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _stream_download(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -26,6 +26,13 @@ class ExtensionSummary(APIResponse):
     source: str
     is_removable: bool = False
     asset_base: str
+    # Plugin fields
+    type: str = "spa"
+    is_plugin: bool = False
+    is_installed: bool = True
+    sandbox: dict | None = None
+    has_start: bool = False
+    daemon: bool = False
 
 
 class ExtensionListResponse(APIResponse):
@@ -68,3 +75,38 @@ class ExtensionStorageListResponse(APIResponse):
 class ExtensionStorageDeleteResponse(StatusResponse):
     key: str
     deleted: bool
+
+
+# ── Plugin-specific schemas ──────────────────────────────────────────────
+
+
+class CudaInfoResponse(APIResponse):
+    available: bool = False
+    driver_version: str | None = None
+    cuda_version: str | None = None
+    device_name: str | None = None
+    vram_mb: int | None = None
+    vram_gb: float | None = None
+    cuda_tag: str | None = None
+    platform: str = ""
+    summary: str = ""
+
+
+class PluginStatusResponse(APIResponse):
+    plugin_id: str
+    status: str = "stopped"
+    pid: int | None = None
+    port: int | None = None
+    url: str | None = None
+    started_at: float | None = None
+    stopped_at: float | None = None
+    error: str | None = None
+    install_progress: float = 0.0
+    uptime_seconds: float | None = None
+    is_installed: bool = False
+
+
+class PluginLogResponse(APIResponse):
+    plugin_id: str
+    lines: list[str] = Field(default_factory=list)
+    total: int = 0

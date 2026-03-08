@@ -1,0 +1,9 @@
+# Downloaded GGUF models (large files)
+models/
+
+# Python sandbox virtual environment
+env/
+
+# Cache directories
+cache/
+__pycache__/

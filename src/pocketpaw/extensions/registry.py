@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from pocketpaw.extensions.sandbox import (
+    InstallConfig,
+    InstallStep,
+    SandboxConfig,
+    SandboxManager,
+    StartConfig,
+    TorchConfig,
+)
 
 from pocketpaw.config import Settings, get_config_dir
 
@@ -47,6 +57,22 @@ class ExtensionManifest(BaseModel):
         default=True,
         description="If false, the extension is disabled by default and must be manually enabled",
     )
+    type: Literal["spa", "plugin"] = Field(
+        default="spa",
+        description="Extension type: 'spa' for frontend-only, 'plugin' for sandboxed Python+CUDA",
+    )
+    sandbox: SandboxConfig | None = Field(
+        default=None,
+        description="Sandbox configuration for plugin-type extensions",
+    )
+    install: InstallConfig | None = Field(
+        default=None,
+        description="Installation steps for plugin-type extensions",
+    )
+    start: StartConfig | None = Field(
+        default=None,
+        description="Start/daemon configuration for plugin-type extensions",
+    )
 
     @field_validator("entry")
     @classmethod
@@ -73,13 +99,14 @@ class ExtensionLoadError:
     message: str
 
 
-@dataclass(slots=True)
+@dataclass
 class ExtensionRecord:
     manifest: ExtensionManifest
     source: str
     root_dir: Path
     entry_path: Path
     enabled: bool
+    _sandbox_manager: SandboxManager | None = field(default=None, repr=False)
 
     @property
     def id(self) -> str:
@@ -90,12 +117,36 @@ class ExtensionRecord:
         return self.manifest.route
 
     @property
+    def is_plugin(self) -> bool:
+        """Whether this extension is a full plugin (vs SPA-only)."""
+        return self.manifest.type == "plugin"
+
+    @property
     def is_removable(self) -> bool:
         """External (uploaded) extensions can be removed; built-ins cannot."""
         return self.source == "external"
 
+    @property
+    def is_installed(self) -> bool:
+        """For plugins, check if the sandbox venv exists."""
+        if not self.is_plugin:
+            return True  # SPAs are always "installed"
+        mgr = self.get_sandbox_manager()
+        return mgr.is_installed if mgr else True
+
+    def get_sandbox_manager(self) -> SandboxManager | None:
+        """Get or create the SandboxManager for this plugin."""
+        if not self.is_plugin or self.manifest.sandbox is None:
+            return None
+        if self._sandbox_manager is None:
+            self._sandbox_manager = SandboxManager(
+                plugin_root=self.root_dir,
+                config=self.manifest.sandbox,
+            )
+        return self._sandbox_manager
+
     def to_summary(self) -> dict[str, object]:
-        return {
+        summary: dict[str, object] = {
             "id": self.manifest.id,
             "name": self.manifest.name,
             "version": self.manifest.version,
@@ -109,7 +160,20 @@ class ExtensionRecord:
             "source": self.source,
             "is_removable": self.is_removable,
             "asset_base": f"/extensions/{self.manifest.id}/",
+            "type": self.manifest.type,
+            "is_plugin": self.is_plugin,
+            "is_installed": self.is_installed,
         }
+        if self.manifest.sandbox:
+            summary["sandbox"] = {
+                "python": self.manifest.sandbox.python,
+                "cuda": self.manifest.sandbox.cuda,
+                "has_torch": self.manifest.sandbox.torch is not None,
+            }
+        if self.manifest.start:
+            summary["has_start"] = True
+            summary["daemon"] = self.manifest.start.daemon
+        return summary
 
 
 class ExtensionRegistry:
