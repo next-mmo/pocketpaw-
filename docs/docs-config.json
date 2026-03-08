@@ -2,7 +2,7 @@
   "metadata": {
     "name": "PocketPaw",
     "description": "Self-hosted AI agent controlled via Telegram, Discord, Slack, WhatsApp, or a web dashboard",
-    "url": "https://pocketpaw.com",
+    "url": "https://pocketpaw.xyz",
     "version": "1.0.0"
   },
   "branding": {
@@ -70,7 +70,7 @@
           "showStars": true
         },
         "discord": {
-          "href": "https://dsc.gg/pocketpaw"
+          "href": "https://discord.gg/asRrtm95Zc"
         }
       },
       "cta": {
@@ -1014,7 +1014,7 @@
     "showVersion": true,
     "socials": {
       "github": "https://github.com/pocketpaw/pocketpaw",
-      "discord": "https://dsc.gg/pocketpaw"
+      "discord": "https://discord.gg/asRrtm95Zc"
     },
     "links": [
       {
@@ -1048,7 +1048,7 @@
           },
           {
             "label": "Discord",
-            "href": "https://dsc.gg/pocketpaw",
+            "href": "https://discord.gg/asRrtm95Zc",
             "external": true
           },
           {

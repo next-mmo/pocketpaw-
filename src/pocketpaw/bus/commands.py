@@ -57,6 +57,7 @@ COMMAND_REGISTRY: dict[str, str] = {
     "model": "Show or switch model",
     "tools": "Show or switch tool profile",
     "todo": "Manage your todo list",
+    "kill": "Cancel the current agent run",
     "help": "Show available commands",
 }
 
@@ -144,6 +145,13 @@ class CommandHandler:
         # Pending todo deletions awaiting /todo confirm
         # Maps session_key -> {"index": int, "text": str}
         self._pending_deletes: dict[str, dict] = {}
+
+        # Optional agent loop for /kill (set by app startup when loop is running)
+        self._agent_loop: object | None = None
+
+    def set_agent_loop(self, loop: object | None) -> None:
+        """Set the agent loop instance for session-scoped /kill. Pass None to clear."""
+        self._agent_loop = loop
 
     def set_on_settings_changed(self, callback: Callable[[], None]) -> None:
         """Register a callback invoked after any command mutates settings."""
@@ -334,6 +342,8 @@ class CommandHandler:
             return self._cmd_help(message)
         elif cmd == _TODO_COMMAND:
             return self._cmd_todo(message, args)
+        elif cmd == "/kill":
+            return await self._cmd_kill(message, session_key)
         return None
 
     # ------------------------------------------------------------------
@@ -574,8 +584,7 @@ class CommandHandler:
 
         deleted = await memory.delete_session(resolved)
         # Remove alias so next message uses the default session key
-        if hasattr(memory._store, "remove_session_alias"):
-            await memory._store.remove_session_alias(session_key)
+        await memory.remove_session_alias(session_key)
 
         if deleted:
             return OutboundMessage(
@@ -951,6 +960,32 @@ class CommandHandler:
             channel=message.channel,
             chat_id=message.chat_id,
             content="\n".join(lines),
+        )
+
+    # ------------------------------------------------------------------
+    # /kill
+    # ------------------------------------------------------------------
+
+    async def _cmd_kill(self, message: InboundMessage, session_key: str) -> OutboundMessage:
+        """Handle the /kill command: cancel the agent run for this session only."""
+        loop = self._agent_loop
+        if loop is None:
+            return OutboundMessage(
+                channel=message.channel,
+                chat_id=message.chat_id,
+                content="No active agent run for this session.",
+            )
+        cancelled = await loop.cancel_session(session_key)
+        if cancelled:
+            return OutboundMessage(
+                channel=message.channel,
+                chat_id=message.chat_id,
+                content="Agent run cancelled for this session.",
+            )
+        return OutboundMessage(
+            channel=message.channel,
+            chat_id=message.chat_id,
+            content="No active agent run for this session.",
         )
 
 
