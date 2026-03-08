@@ -1,9 +1,13 @@
-# Downloaded GGUF models (large files)
-models/
-
-# Python sandbox virtual environment
+# Python sandbox
 env/
 
-# Cache directories
-cache/
-__pycache__/
+# Downloaded models
+models/*.gguf
+models/*.bin
+
+# Node modules (UI source)
+ui/node_modules/
+
+# Old vanilla files (replaced by Vite build)
+app.js
+styles.css

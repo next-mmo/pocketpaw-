@@ -1219,3 +1219,84 @@ async def download_model_from_hf(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/plugins/{plugin_id}/proxy/{proxy_path:path}")
+async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request):
+    """Reverse proxy requests to a running plugin server.
+
+    Forwards the request to the plugin's local server, bypassing CORS
+    restrictions that prevent the iframe from talking directly to
+    http://127.0.0.1:{port}.
+    """
+    import httpx
+
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+
+    if proc is None or proc.status != "running" or not proc.port:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Plugin {plugin_id} is not running",
+        )
+
+    target_url = f"http://127.0.0.1:{proc.port}/{proxy_path}"
+
+    # Read request body
+    body = await request.body()
+
+    # Check if client wants streaming
+    is_stream = False
+    if body:
+        try:
+            parsed = json.loads(body)
+            is_stream = parsed.get("stream", False)
+        except Exception:
+            pass
+
+    headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in ("host", "connection", "transfer-encoding")
+    }
+
+    if is_stream:
+        # Stream the SSE response back
+        async def _stream_proxy():
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    "POST",
+                    target_url,
+                    content=body,
+                    headers=headers,
+                ) as resp:
+                    async for chunk in resp.aiter_bytes():
+                        yield chunk
+
+        return StreamingResponse(
+            _stream_proxy(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    else:
+        # Non-streaming: forward and return
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                content=body,
+                headers=headers,
+            )
+            return StreamingResponse(
+                content=iter([resp.content]),
+                status_code=resp.status_code,
+                media_type=resp.headers.get("content-type", "application/json"),
+            )
