@@ -43,6 +43,10 @@ class ExtensionManifest(BaseModel):
     route: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
     entry: str = Field(min_length=1, max_length=256)
     scopes: list[str] = Field(default_factory=list)
+    autostart: bool = Field(
+        default=True,
+        description="If false, the extension is disabled by default and must be manually enabled",
+    )
 
     @field_validator("entry")
     @classmethod
@@ -85,6 +89,11 @@ class ExtensionRecord:
     def route(self) -> str:
         return self.manifest.route
 
+    @property
+    def is_removable(self) -> bool:
+        """External (uploaded) extensions can be removed; built-ins cannot."""
+        return self.source == "external"
+
     def to_summary(self) -> dict[str, object]:
         return {
             "id": self.manifest.id,
@@ -95,8 +104,10 @@ class ExtensionRecord:
             "route": self.manifest.route,
             "entry": self.manifest.entry,
             "scopes": list(self.manifest.scopes),
+            "autostart": self.manifest.autostart,
             "enabled": self.enabled,
             "source": self.source,
+            "is_removable": self.is_removable,
             "asset_base": f"/extensions/{self.manifest.id}/",
         }
 
@@ -120,9 +131,15 @@ class ExtensionRegistry:
         self.errors = []
 
         disabled_ids = set(settings.extension_disabled_ids)
+        enabled_ids = set(settings.extension_enabled_ids)
 
         for source, root in (("builtin", self.builtin_root), ("external", self.external_root)):
-            self._scan_root(source=source, root=root, disabled_ids=disabled_ids)
+            self._scan_root(
+                source=source,
+                root=root,
+                disabled_ids=disabled_ids,
+                enabled_ids=enabled_ids,
+            )
 
         return self
 
@@ -169,7 +186,13 @@ class ExtensionRegistry:
 
         return candidate
 
-    def _scan_root(self, source: str, root: Path, disabled_ids: set[str]) -> None:
+    def _scan_root(
+        self,
+        source: str,
+        root: Path,
+        disabled_ids: set[str],
+        enabled_ids: set[str],
+    ) -> None:
         if not root.exists():
             return
 
@@ -182,6 +205,7 @@ class ExtensionRegistry:
                 extension_dir=extension_dir,
                 manifest_path=manifest_path,
                 disabled_ids=disabled_ids,
+                enabled_ids=enabled_ids,
             )
 
     def _load_manifest(
@@ -191,6 +215,7 @@ class ExtensionRegistry:
         extension_dir: Path,
         manifest_path: Path,
         disabled_ids: set[str],
+        enabled_ids: set[str],
     ) -> None:
         try:
             raw = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -238,12 +263,23 @@ class ExtensionRegistry:
             )
             return
 
+        # Determine enabled state:
+        #   - If explicitly disabled → disabled
+        #   - If autostart=true → enabled by default (unless explicitly disabled)
+        #   - If autostart=false → disabled by default (unless explicitly enabled)
+        if manifest.id in disabled_ids:
+            is_enabled = False
+        elif manifest.autostart:
+            is_enabled = True
+        else:
+            is_enabled = manifest.id in enabled_ids
+
         record = ExtensionRecord(
             manifest=manifest,
             source=source,
             root_dir=extension_dir.resolve(),
             entry_path=entry_path,
-            enabled=manifest.id not in disabled_ids,
+            enabled=is_enabled,
         )
         self.extensions[manifest.id] = record
         self.route_map[manifest.route] = manifest.id

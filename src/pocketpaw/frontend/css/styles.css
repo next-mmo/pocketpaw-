@@ -2,14 +2,17 @@
    PocketPaw Dashboard - Modern Apple Design
    Glassmorphism. SF Pro. Refined.
 
+   Changes (2026-03-08):
+   - Added light/dark theme support via [data-theme] attribute.
    Changes (2026-02-02):
    - Refactored to use UnoCSS for layout and styling.
    - Cleaned up redundant custom classes.
    ===================================================== */
 
 :root {
-  /* Apple-inspired Dark Palette (Used by UnoCSS variables and remaining custom CSS) */
+  /* Apple-inspired Dark Palette (default) */
   --bg-color: #000000;
+  --bg-secondary: #1a1a1a;
   --glass-bg: rgba(28, 28, 30, 0.65);
   --glass-border: rgba(255, 255, 255, 0.12);
   --card-bg: rgba(44, 44, 46, 0.6);
@@ -27,6 +30,16 @@
   --warning-color: #ff9f0a;
   --info-color: #0a84ff;
 
+  /* Surfaces (used by utility overrides in light mode) */
+  --surface-input: rgba(0, 0, 0, 0.3);
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --surface-active: rgba(255, 255, 255, 0.1);
+  --surface-overlay: rgba(0, 0, 0, 0.4);
+  --surface-code: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+  --toast-bg: rgba(35, 35, 35, 0.85);
+
   /* Typography */
   --font-sans:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
@@ -42,6 +55,50 @@
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Light Theme ───────────────────────────────────── */
+[data-theme="light"] {
+  --bg-color: #f5f5f7;
+  --bg-secondary: #e8e8ed;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --card-bg: rgba(255, 255, 255, 0.6);
+
+  --text-primary: #1d1d1f;
+  --text-secondary: rgba(60, 60, 67, 0.6);
+  --text-tertiary: rgba(60, 60, 67, 0.48);
+
+  --accent-color: #007aff;
+  --accent-hover: #0056d6;
+  --success-color: #28a745;
+  --danger-color: #ff3b30;
+  --warning-color: #ff9500;
+  --info-color: #007aff;
+
+  --surface-input: rgba(0, 0, 0, 0.04);
+  --surface-hover: rgba(0, 0, 0, 0.04);
+  --surface-active: rgba(0, 0, 0, 0.08);
+  --surface-overlay: rgba(0, 0, 0, 0.2);
+  --surface-code: rgba(0, 0, 0, 0.06);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+  --toast-bg: rgba(255, 255, 255, 0.92);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.12);
+}
+
+/* Smooth transition when switching themes */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease !important;
 }
 
 /* Reset & Base */
@@ -65,9 +122,9 @@ body {
   background-color: var(--bg-color);
   background-image: radial-gradient(
     circle at 50% 0%,
-    #1a1a1a 0%,
-    #000000 70%
-  ); /* Subtle depth */
+    var(--bg-secondary) 0%,
+    var(--bg-color) 70%
+  );
   color: var(--text-primary);
   height: 100vh;
   overflow: hidden;
@@ -94,7 +151,7 @@ body {
 }
 
 .toast {
-  background: rgba(35, 35, 35, 0.85);
+  background: var(--toast-bg);
   border: 1px solid var(--glass-border);
   border-radius: 14px; /* iOS notification style */
   padding: 14px 18px;
@@ -146,13 +203,13 @@ body {
   width: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb);
   border-radius: 99px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.25);
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 /* Animation Utils */
@@ -394,7 +451,7 @@ body {
   opacity: 0.85;
 }
 .message-content-wrapper pre {
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--surface-input);
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   padding: 12px 14px;
@@ -416,7 +473,7 @@ body {
   overflow-wrap: normal;
 }
 .message-content-wrapper code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-code);
   padding: 2px 5px;
   border-radius: 4px;
   font-size: 0.9em;
@@ -453,7 +510,7 @@ body {
   text-align: left;
 }
 .message-content-wrapper th {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-hover);
   font-weight: 600;
 }
 .message-content-wrapper hr {
@@ -525,4 +582,400 @@ body {
   .apps-launcher-card {
     padding: 12px 8px;
   }
+}
+
+/* =====================================================
+   Light Theme – full override layer
+   Fixes all hardcoded white/black opacity utilities
+   that UnoCSS generates (text-white/80, bg-white/5, etc.)
+   ===================================================== */
+[data-theme="light"] {
+  /* ── Global text overrides ────────────────────────── */
+  color: var(--text-primary);
+}
+
+/* Sidebar */
+[data-theme="light"] aside {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-right-color: var(--glass-border) !important;
+}
+
+/* ── Text overrides ────────────────────────────────── */
+
+/* All white-text elements → dark text in light mode */
+[data-theme="light"] [class*="text-white"] {
+  color: var(--text-primary) !important;
+}
+/* Opacity-based white text → matching tone */
+[data-theme="light"] [class*="text-white/2"] {
+  color: var(--text-tertiary) !important;
+}
+[data-theme="light"] [class*="text-white/3"] {
+  color: var(--text-tertiary) !important;
+}
+[data-theme="light"] [class*="text-white/4"] {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] [class*="text-white/5"] {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] [class*="text-white/6"] {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] [class*="text-white/7"],
+[data-theme="light"] [class*="text-white/8"],
+[data-theme="light"] [class*="text-white/9"] {
+  color: var(--text-primary) !important;
+}
+
+/* ── Semantic color overrides (dark-mode colors → readable on light bg) ── */
+
+/* Amber / warning text — dark-mode amber is too pale for white bg */
+[data-theme="light"] [class*="text-amber-200"] {
+  color: #92400e !important; /* amber-800 */
+}
+[data-theme="light"] [class*="text-amber-300"] {
+  color: #b45309 !important; /* amber-700 */
+}
+[data-theme="light"] [class*="text-amber-400"] {
+  color: #d97706 !important; /* amber-600 — still vivid but readable */
+}
+/* Amber backgrounds → proper light tints */
+[data-theme="light"] [class*="bg-amber-500/5"] {
+  background-color: rgba(245, 158, 11, 0.08) !important;
+}
+[data-theme="light"] [class*="border-amber-500"] {
+  border-color: rgba(245, 158, 11, 0.25) !important;
+}
+
+/* Blue info text — dark-mode blue-400 is too bright */
+[data-theme="light"] [class*="text-blue-400"] {
+  color: #2563eb !important; /* blue-600 */
+}
+[data-theme="light"] [class*="bg-blue-500/5"] {
+  background-color: rgba(59, 130, 246, 0.06) !important;
+}
+[data-theme="light"] [class*="border-blue-500"] {
+  border-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Green / success text */
+[data-theme="light"] [class*="text-green-400"] {
+  color: #16a34a !important; /* green-600 */
+}
+[data-theme="light"] [class*="text-emerald-400"] {
+  color: #059669 !important; /* emerald-600 */
+}
+
+/* Purple text */
+[data-theme="light"] [class*="text-purple-400"] {
+  color: #7c3aed !important; /* purple-600 */
+}
+/* ── Exceptions: elements that MUST keep white text ── */
+
+/* Solid accent buttons — same-element matching (both classes on same el)
+   IMPORTANT: bg-accent (solid) keeps white text;
+   bg-accent/XX (tinted) should NOT keep white text */
+[data-theme="light"] [class~="bg-accent"][class*="text-white"],
+[data-theme="light"] [class~="bg-accent"] [class*="text-white"],
+[data-theme="light"] [class*="bg-emerald"][class*="text-white"],
+[data-theme="light"] [class*="bg-emerald"] [class*="text-white"],
+[data-theme="light"] [class*="bg-green-"][class*="text-white"],
+[data-theme="light"] [class*="bg-green-"] [class*="text-white"],
+[data-theme="light"] [class*="bg-red-"][class*="text-white"],
+[data-theme="light"] [class*="bg-red-"] [class*="text-white"] {
+  color: #ffffff !important;
+}
+/* Inline-style background buttons */
+[data-theme="light"] [style*="background"] [class*="text-white"] {
+  color: #ffffff !important;
+}
+/* User chat bubble text stays white (bg with accent-color var) */
+[data-theme="light"] [class*="bg-[var(--accent"] {
+  color: #ffffff !important;
+}
+[data-theme="light"] [class*="bg-[var(--accent"] span,
+[data-theme="light"] [class*="bg-[var(--accent"] p,
+[data-theme="light"] [class*="bg-[var(--accent"] div {
+  color: #ffffff !important;
+}
+/* Send/stop button text stays white */
+[data-theme="light"] button[class*="bg-[var(--accent"],
+[data-theme="light"] button[class*="bg-red-"] {
+  color: #ffffff !important;
+}
+
+/* ── Accent tinted backgrounds ─────────────────────── */
+/* UnoCSS can't apply opacity to CSS variables (bg-accent/15 → solid accent).
+   Override to proper RGBA tints so they're light in light mode. */
+[data-theme="light"] [class*="bg-accent/5"] {
+  background-color: rgba(0, 122, 255, 0.05) !important;
+}
+[data-theme="light"] [class*="bg-accent/10"] {
+  background-color: rgba(0, 122, 255, 0.08) !important;
+}
+[data-theme="light"] [class*="bg-accent/15"] {
+  background-color: rgba(0, 122, 255, 0.12) !important;
+}
+[data-theme="light"] [class*="bg-accent/20"] {
+  background-color: rgba(0, 122, 255, 0.15) !important;
+}
+[data-theme="light"] [class*="bg-accent/25"] {
+  background-color: rgba(0, 122, 255, 0.2) !important;
+}
+[data-theme="light"] [class*="bg-accent/30"] {
+  background-color: rgba(0, 122, 255, 0.25) !important;
+}
+/* border-accent/XX → proper alpha borders */
+[data-theme="light"] [class*="border-accent/"] {
+  border-color: rgba(0, 122, 255, 0.2) !important;
+}
+
+/* ── Background overrides ──────────────────────────── */
+
+/* bg-white/X → subtle dark tints in light mode */
+[data-theme="light"] [class*="bg-white/5"],
+[data-theme="light"] [class*="bg-white/8"] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+[data-theme="light"] [class*="bg-white/10"],
+[data-theme="light"] [class*="bg-white/12"],
+[data-theme="light"] [class*="bg-white/15"] {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* bg-black/X → light tints */
+[data-theme="light"] [class*="bg-black/2"],
+[data-theme="light"] [class*="bg-black/3"] {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+[data-theme="light"] [class*="bg-black/4"] {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* bg-white/[0.XX] arbitrary values → visible on light bg */
+[data-theme="light"] [class*="bg-white/[0.0"] {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+/* ── App / Extension Cards ─────────────────────────── */
+[data-theme="light"] .apps-launcher-card {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  box-shadow:
+    0 1px 4px rgba(0, 0, 0, 0.08),
+    0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .apps-launcher-card:hover {
+  background: #ffffff !important;
+  border-color: rgba(0, 122, 255, 0.3) !important;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(0, 122, 255, 0.15);
+}
+
+/* border-white/X → dark border tints */
+[data-theme="light"] [class*="border-white/"] {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+/* ── Inputs ─────────────────────────────────────────── */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--glass-border) !important;
+}
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: var(--text-tertiary) !important;
+}
+[data-theme="light"] select option {
+  background: #ffffff;
+  color: #1d1d1f;
+}
+/* Chat input inside the pill: override bg-transparent */
+[data-theme="light"] input[type="text"][class*="bg-transparent"] {
+  background-color: transparent !important;
+}
+
+/* ── Chat Input Bar Area ────────────────────────────── */
+
+/* The input container: bg-black → white */
+[data-theme="light"] .shrink-0.relative > div[class*="bg-black"] {
+  background: var(--bg-color) !important;
+}
+/* The gradient fade above input: from-black → from bg-color */
+[data-theme="light"] [class*="from-black"][class*="to-transparent"] {
+  background: linear-gradient(to top, var(--bg-color), transparent) !important;
+}
+/* The input pill: bg-[#2c2c2e] → white glass */
+[data-theme="light"] form[class*="backdrop-blur"] {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+/* focus glow on input pill */
+[data-theme="light"] form[class*="backdrop-blur"]:focus-within {
+  background: rgba(255, 255, 255, 0.95) !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* ── Top Navigation Pill Switcher ──────────────────── */
+
+/* Container: bg-black/20 → light gray */
+[data-theme="light"] div[class*="bg-black/20"][class*="rounded-"] {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ── Modal Containers ───────────────────────────────── */
+
+/* All modals use bg-[#1c1c1e]/95 or bg-[#1c1c1e] → white glass */
+[data-theme="light"] .settings-modal,
+[data-theme="light"] .fixed.inset-0 > div[class*="backdrop-blur"],
+[data-theme="light"] [class*="#1c1c1e"],
+[data-theme="light"] [class*="#2c2c2e"] {
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(24px) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* ── Misc Components ────────────────────────────────── */
+
+/* Status bar at bottom of sidebar */
+[data-theme="light"] [class*="bg-black/20"] {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb) !important;
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover) !important;
+}
+
+/* Chat message bubbles: code blocks */
+[data-theme="light"] .message-content-wrapper pre {
+  background: rgba(0, 0, 0, 0.04);
+}
+[data-theme="light"] .message-content-wrapper code {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Toast */
+[data-theme="light"] .toast {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+/* Settings nav */
+[data-theme="light"] .settings-nav-item {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 767px) {
+  [data-theme="light"] .settings-nav-item {
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+  [data-theme="light"] .channels-nav-item {
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+}
+
+/* Login overlay */
+[data-theme="light"] [class*="bg-black/80"] {
+  background: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Backdrop overlays (modal backdrops, etc.) */
+[data-theme="light"] [class*="bg-black/40"] {
+  background: rgba(0, 0, 0, 0.15) !important;
+}
+[data-theme="light"] [class*="bg-black/50"] {
+  background: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Extensions / glass-dark card */
+[data-theme="light"] .glass-dark {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Shadows */
+[data-theme="light"] [class*="shadow-sm"] {
+  --un-shadow-color: rgba(0, 0, 0, 0.06);
+}
+[data-theme="light"] [class*="shadow-2xl"] {
+  --un-shadow-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Placeholder text */
+[data-theme="light"] [class*="placeholder-white"]::placeholder {
+  color: var(--text-tertiary) !important;
+}
+
+/* Deep Work gradient fades */
+[data-theme="light"] [class*="from-black"] {
+  --un-gradient-from: transparent !important;
+}
+
+/* Slash picker / composer assist overlays */
+[data-theme="light"] div[class*="bg-\[linear-gradient"] {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+[data-theme="light"] div[class*="bg-\[radial-gradient"] {
+  background: rgba(245, 248, 255, 0.96) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Activity view empty state */
+[data-theme="light"] [class*="bg-\[var\(--card-bg\)\]"] {
+  background: var(--card-bg) !important;
+}
+
+/* Toggle switch track in sidebar */
+[data-theme="light"] [class*="peer-checked:bg-"] {
+  color: inherit;
+}
+
+/* Dividers: bg-white/10 as separators */
+[data-theme="light"] [class*="bg-white/10"][class*="h-px"],
+[data-theme="light"] [class*="bg-white/10"][class*="w-px"],
+[data-theme="light"] div[class*="bg-white/10"][style*="height"] {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ── Activity & Terminal views ──────────────────────── */
+
+/* Activity + Terminal containers: bg-black → light bg */
+[data-theme="light"] div[class*="bg-black"][class*="font-mono"] {
+  background: var(--bg-color) !important;
+}
+
+/* Log text: override all text inside terminal-output */
+[data-theme="light"] .terminal-output {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .terminal-output div {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .terminal-output span {
+  color: var(--text-primary) !important;
+}
+
+/* Timestamps: first span in each log row → muted */
+[data-theme="light"] .terminal-output > div > span:first-child,
+[data-theme="light"] .terminal-output .flex > span:first-child {
+  color: var(--text-tertiary) !important;
+}
+
+/* Activity/Terminal empty state */
+[data-theme="light"]
+  div[class*="bg-black"][class*="font-mono"]
+  [class*="text-white"] {
+  color: var(--text-tertiary) !important;
 }

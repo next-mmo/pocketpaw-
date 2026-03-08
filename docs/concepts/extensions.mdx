@@ -1,0 +1,157 @@
+---
+title: Extension System
+description: "PocketPaw extensions are sandboxed micro-apps that run inside the dashboard. They use iframes for isolation, scoped tokens for security, and extension-scoped storage for data persistence."
+section: Core Concepts
+ogType: article
+keywords:
+  ["extensions", "plugins", "apps", "sandboxed iframe", "extension manifest"]
+tags: ["concepts", "extensions"]
+---
+
+# Extension System
+
+PocketPaw's extension system lets you add sandboxed micro-apps to the dashboard. Extensions run in isolated iframes and communicate with PocketPaw through a secure postMessage bridge and scoped API tokens.
+
+## How Extensions Work
+
+```
+┌──────────────────────────────────────────────┐
+│  PocketPaw Dashboard                         │
+│  ┌────────────────────────────────────────┐  │
+│  │  Tab Bar: [Apps] [Todo] [My Plugin]    │  │
+│  ├────────────────────────────────────────┤  │
+│  │  ┌──────────────────────────────────┐  │  │
+│  │  │  Sandboxed <iframe>              │  │  │
+│  │  │  ─────────────────────────       │  │  │
+│  │  │  Extension code runs here        │  │  │
+│  │  │  Uses extensions-sdk.js          │  │  │
+│  │  │  Talks to host via postMessage   │  │  │
+│  │  └──────────────────────────────────┘  │  │
+│  └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+```
+
+Each extension:
+
+- Runs in a **sandboxed iframe** (`allow-downloads allow-forms allow-same-origin allow-scripts`)
+- Receives a **scoped session token** (`pex_...`) that limits API access to declared scopes
+- Has its own **key-value storage** isolated from other extensions
+- Can **navigate the host** and **open the chat composer** via postMessage
+
+## Extension Types
+
+| Type         | Location                            | Git Tracked | Removable            |
+| ------------ | ----------------------------------- | ----------- | -------------------- |
+| **Built-in** | `src/pocketpaw/extensions/builtin/` | ✅ Yes      | ❌ No (disable only) |
+| **External** | `~/.pocketpaw/extensions/`          | ❌ No       | ✅ Yes               |
+
+- **Built-in**: Ship with PocketPaw. The `todo` extension is a first-party example.
+- **External**: Installed by users via ZIP upload or manually placing folders. Community plugins live here.
+
+## The Manifest (`extension.json`)
+
+Every extension folder must contain an `extension.json` manifest:
+
+```json
+{
+  "id": "my-extension",
+  "name": "My Extension",
+  "version": "1.0.0",
+  "description": "A cool extension that does something useful.",
+  "icon": "puzzle",
+  "route": "my-extension",
+  "entry": "index.html",
+  "scopes": ["storage.read", "storage.write", "host.open_chat"]
+}
+```
+
+### Manifest Fields
+
+| Field         | Type   | Required | Description                                     |
+| ------------- | ------ | -------- | ----------------------------------------------- |
+| `id`          | string | ✅       | Unique ID (`^[a-z0-9][a-z0-9_-]{1,63}$`)        |
+| `name`        | string | ✅       | Display name (max 80 chars)                     |
+| `version`     | string | ✅       | Semver-style version (max 32 chars)             |
+| `description` | string | ❌       | Short description (max 280 chars)               |
+| `icon`        | string | ❌       | Lucide icon name (e.g. `list-todo`, `puzzle`)   |
+| `route`       | string | ✅       | URL route segment (`^[a-z0-9][a-z0-9-]{1,63}$`) |
+| `entry`       | string | ✅       | Relative path to entry HTML file                |
+| `scopes`      | array  | ❌       | Requested API scopes (see below)                |
+
+### Available Scopes
+
+| Scope            | Description                                  |
+| ---------------- | -------------------------------------------- |
+| `storage.read`   | Read from extension-scoped key-value storage |
+| `storage.write`  | Write to extension-scoped key-value storage  |
+| `chat.send`      | Send messages to the AI agent (blocking)     |
+| `chat.stream`    | Stream messages from the AI agent (SSE)      |
+| `sessions.read`  | List chat sessions                           |
+| `host.navigate`  | Navigate the dashboard UI                    |
+| `host.open_chat` | Open the chat view with pre-filled text      |
+
+## Installing Extensions
+
+### Via Dashboard Upload
+
+1. Go to **Apps** in the dashboard
+2. Click **Upload .zip**
+3. Select a ZIP file containing `extension.json` + assets
+4. The extension is installed to `~/.pocketpaw/extensions/<id>/`
+
+### Via Manual Placement
+
+1. Create a folder in `~/.pocketpaw/extensions/my-extension/`
+2. Add `extension.json` and your HTML/JS/CSS files
+3. Click **Reload** in the dashboard Apps view
+
+### Removing Extensions
+
+- **External**: Click the 🗑️ trash icon on the extension card, or use `DELETE /api/v1/extensions/{id}`
+- **Built-in**: Cannot be deleted — only disabled via the toggle
+
+## Extension SDK
+
+Extensions include the SDK via a script tag:
+
+```html
+<script src="/static/js/extensions-sdk.js"></script>
+```
+
+The SDK exposes `window.PocketPawExtensionSDK` with these methods:
+
+```javascript
+const sdk = window.PocketPawExtensionSDK;
+
+// Wait for context (token + host info)
+const ctx = await sdk.ready();
+
+// Key-value storage
+await sdk.storage.set("myKey", { foo: "bar" });
+const val = await sdk.storage.get("myKey");
+await sdk.storage.delete("myKey");
+const all = await sdk.storage.list();
+
+// AI Chat
+const reply = await sdk.chat.send("What's the weather?");
+await sdk.chat.stream(
+  "Tell me a story",
+  {},
+  {
+    onChunk: (data) => console.log(data.content),
+    onEnd: (data) => console.log("Done!", data),
+  },
+);
+
+// Host navigation
+sdk.host.navigate("#/settings");
+sdk.host.openChat("Help me with something");
+```
+
+## Security
+
+- Each extension token (`pex_...`) is HMAC-signed with the master access token
+- Tokens expire after 15 minutes (configurable via `extension_session_ttl_minutes`)
+- Scope enforcement is per-request: a token with only `storage.read` cannot call `/chat`
+- Extension tokens are bound to a single extension ID
+- The iframe sandbox prevents extensions from accessing the parent DOM directly

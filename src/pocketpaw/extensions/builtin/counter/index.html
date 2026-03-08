@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PocketPaw Counter</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <!-- PocketPaw Extension SDK — gives us storage, chat, etc. -->
+    <script src="/static/js/extensions-sdk.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PocketPaw Extension</p>
+          <h1>Counter</h1>
+          <p class="lede">
+            A minimal sample app showing how to use the Extension SDK.<br />
+            Fork this to build your own extensions!
+          </p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="counter-display">
+          <span id="count-value">0</span>
+        </div>
+        <div class="counter-controls">
+          <button id="btn-decrement" class="btn secondary" title="Decrement">
+            −
+          </button>
+          <button id="btn-reset" class="btn ghost" title="Reset">Reset</button>
+          <button id="btn-increment" class="btn primary" title="Increment">
+            +
+          </button>
+        </div>
+        <p id="status" class="status">Connecting to PocketPaw…</p>
+      </section>
+
+      <section class="docs">
+        <h2>How this extension works</h2>
+        <ul>
+          <li>
+            <strong>extension.json</strong> — manifest with id, name, scopes
+          </li>
+          <li><strong>index.html</strong> — this page (entry point)</li>
+          <li><strong>styles.css</strong> — all styling</li>
+          <li><strong>app.js</strong> — logic using the PocketPaw SDK</li>
+        </ul>
+        <p class="hint">
+          To create your own: copy this folder, edit
+          <code>extension.json</code>, zip it, and upload via the Apps page.
+        </p>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

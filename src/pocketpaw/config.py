@@ -433,6 +433,10 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Installed extension IDs that should not be mounted or served",
     )
+    extension_enabled_ids: list[str] = Field(
+        default_factory=list,
+        description="Non-autostart extension IDs that have been manually enabled by the user",
+    )
     api_cors_allowed_origins: list[str] = Field(
         default_factory=list,
         description="Additional CORS origins for external clients (e.g. tauri://localhost)",

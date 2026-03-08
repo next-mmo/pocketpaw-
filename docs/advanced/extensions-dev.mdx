@@ -1,0 +1,367 @@
+---
+title: Building Extensions
+description: "Step-by-step guide to building a PocketPaw extension — from scaffolding to packaging. Learn how to create community-sharable micro-apps with storage, AI chat, and host navigation."
+section: Advanced
+ogType: article
+keywords:
+  [
+    "build extension",
+    "extension development",
+    "community plugin",
+    "extension tutorial",
+  ]
+tags: ["advanced", "extensions", "community"]
+---
+
+# Building Extensions
+
+This guide walks you through building a PocketPaw extension from scratch, testing it locally, and packaging it for community distribution.
+
+## Quick Start: Minimal Extension
+
+Create a folder with two files:
+
+```
+my-hello/
+├── extension.json
+└── index.html
+```
+
+### extension.json
+
+```json
+{
+  "id": "hello-world",
+  "name": "Hello World",
+  "version": "1.0.0",
+  "description": "My first PocketPaw extension",
+  "icon": "hand-metal",
+  "route": "hello",
+  "entry": "index.html",
+  "scopes": []
+}
+```
+
+### index.html
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello World</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 2rem;
+        background: #0a0a0a;
+        color: #fff;
+        font-family: system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>👋 Hello from PocketPaw!</h1>
+    <p>This is a minimal extension.</p>
+  </body>
+</html>
+```
+
+### Install It
+
+1. Copy the `my-hello/` folder to `~/.pocketpaw/extensions/`
+2. Open the Dashboard → Apps → Reload
+
+Or ZIP the folder and upload it:
+
+```bash
+cd my-hello && zip -r ../my-hello.zip . && cd ..
+```
+
+Then upload via Dashboard → Apps → **Upload .zip**
+
+---
+
+## Using the Extension SDK
+
+For extensions that need to interact with PocketPaw (storage, chat, navigation), include the SDK:
+
+```html
+<script src="/static/js/extensions-sdk.js"></script>
+```
+
+### Wait for Context
+
+The SDK needs a context object (token, API base) from the host dashboard. Always start with:
+
+```javascript
+const sdk = window.PocketPawExtensionSDK;
+const ctx = await sdk.ready();
+console.log("Extension:", ctx.extension.name);
+console.log("API Base:", ctx.apiBase);
+```
+
+### Using Storage
+
+Extensions get isolated key-value storage (persisted as JSON on disk):
+
+```javascript
+// Write
+await sdk.storage.set("tasks", [
+  { id: 1, text: "Buy milk", done: false },
+  { id: 2, text: "Walk dog", done: true },
+]);
+
+// Read
+const tasks = await sdk.storage.get("tasks");
+
+// List all keys
+const { items } = await sdk.storage.list();
+
+// Delete
+await sdk.storage.delete("tasks");
+```
+
+> **Requires scopes:** `storage.read`, `storage.write`
+
+### Using AI Chat
+
+Send messages to the AI agent and get responses:
+
+```javascript
+// Blocking (wait for full response)
+const reply = await sdk.chat.send("Summarize my tasks for today");
+console.log(reply.content);
+
+// Streaming (get chunks in real-time)
+await sdk.chat.stream(
+  "Write a poem about coding",
+  {},
+  {
+    onChunk: ({ content }) => {
+      document.getElementById("output").textContent += content;
+    },
+    onEnd: (data) => {
+      console.log("Usage:", data.usage);
+    },
+    onError: (err) => {
+      console.error("Error:", err.detail);
+    },
+  },
+);
+```
+
+> **Requires scopes:** `chat.send` and/or `chat.stream`
+
+### Navigating the Host
+
+```javascript
+// Open a specific view
+sdk.host.navigate("#/settings");
+
+// Open chat with pre-filled text
+sdk.host.openChat("Help me create a todo list");
+
+// Open another extension
+sdk.host.navigate({ route: "todo" });
+```
+
+> **Requires scope:** `host.navigate` and/or `host.open_chat`
+
+---
+
+## Full Example: Note Pad Extension
+
+```
+notepad/
+├── extension.json
+├── index.html
+└── app.js
+```
+
+### extension.json
+
+```json
+{
+  "id": "notepad",
+  "name": "Note Pad",
+  "version": "1.0.0",
+  "description": "A simple note-taking extension with persistent storage",
+  "icon": "notebook-pen",
+  "route": "notepad",
+  "entry": "index.html",
+  "scopes": ["storage.read", "storage.write", "host.open_chat"]
+}
+```
+
+### index.html
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Note Pad</title>
+    <script src="/static/js/extensions-sdk.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      body {
+        background: #0f0f0f;
+        color: #e0e0e0;
+        font-family: system-ui, sans-serif;
+        padding: 1.5rem;
+      }
+      h1 {
+        font-size: 1.3rem;
+        margin-bottom: 1rem;
+      }
+      textarea {
+        width: 100%;
+        min-height: 300px;
+        padding: 1rem;
+        background: #1a1a1a;
+        color: #fff;
+        border: 1px solid #333;
+        border-radius: 8px;
+        font-family: monospace;
+        resize: vertical;
+      }
+      .bar {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+      button {
+        padding: 0.5rem 1rem;
+        border: none;
+        border-radius: 6px;
+        background: #2563eb;
+        color: #fff;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      button:hover {
+        background: #1d4ed8;
+      }
+      .status {
+        font-size: 0.75rem;
+        color: #666;
+        margin-top: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📝 Note Pad</h1>
+    <textarea id="editor" placeholder="Start typing..."></textarea>
+    <div class="bar">
+      <button onclick="save()">💾 Save</button>
+      <button onclick="askAI()">🤖 Ask AI to improve</button>
+    </div>
+    <div class="status" id="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
+```
+
+### app.js
+
+```javascript
+const sdk = window.PocketPawExtensionSDK;
+const editor = document.getElementById("editor");
+const status = document.getElementById("status");
+
+async function init() {
+  await sdk.ready();
+  const content = await sdk.storage.get("note_content");
+  if (content) editor.value = content;
+  status.textContent = "Loaded";
+}
+
+async function save() {
+  await sdk.storage.set("note_content", editor.value);
+  status.textContent = "Saved at " + new Date().toLocaleTimeString();
+}
+
+async function askAI() {
+  const text = editor.value.trim();
+  if (!text) return;
+  sdk.host.openChat(`Improve this note:\n\n${text}`);
+}
+
+init();
+```
+
+---
+
+## Packaging for Distribution
+
+### ZIP Format
+
+Community extensions are distributed as ZIP files. The ZIP can contain files either:
+
+**Option A:** Flat (extension.json at root)
+
+```
+my-extension.zip
+├── extension.json
+├── index.html
+├── app.js
+└── styles.css
+```
+
+**Option B:** Wrapped in a folder
+
+```
+my-extension.zip
+└── my-extension/
+    ├── extension.json
+    ├── index.html
+    ├── app.js
+    └── styles.css
+```
+
+Both formats are accepted by the upload endpoint.
+
+### Best Practices
+
+1. **Keep it small** — Extensions load in iframes. Bundle your CSS/JS inline or use minimal files
+2. **Use the SDK** — Don't make raw API calls. The SDK handles token refresh and auth
+3. **Declare minimal scopes** — Only request scopes you actually use
+4. **Dark theme** — The dashboard is dark. Match it with `background: #0f0f0f`
+5. **Handle offline** — Storage calls may fail; use try/catch
+6. **No external CDNs** — CSP restricts external script sources. Bundle dependencies inline
+
+### Manifest ID Rules
+
+- Must match `^[a-z0-9][a-z0-9_-]{1,63}$`
+- Must be unique across all installed extensions
+- Cannot collide with built-in extension IDs (e.g., `todo`)
+
+---
+
+## API Reference
+
+Extensions interact with PocketPaw through these scoped APIs:
+
+| Scope           | Endpoint                                        | Method | Description                  |
+| --------------- | ----------------------------------------------- | ------ | ---------------------------- |
+| `storage.read`  | `/api/v1/extensions/runtime/{id}/storage`       | GET    | List all storage items       |
+| `storage.read`  | `/api/v1/extensions/runtime/{id}/storage/{key}` | GET    | Get a storage item           |
+| `storage.write` | `/api/v1/extensions/runtime/{id}/storage/{key}` | PUT    | Set a storage item           |
+| `storage.write` | `/api/v1/extensions/runtime/{id}/storage/{key}` | DELETE | Delete a storage item        |
+| `chat.send`     | `/api/v1/extensions/runtime/{id}/chat`          | POST   | Send chat message (blocking) |
+| `chat.stream`   | `/api/v1/extensions/runtime/{id}/chat/stream`   | POST   | Stream chat response (SSE)   |
+| `sessions.read` | `/api/v1/extensions/runtime/{id}/sessions`      | GET    | List chat sessions           |
+
+Management APIs (admin-only, not for extension runtime):
+
+| Endpoint                          | Method | Description               |
+| --------------------------------- | ------ | ------------------------- |
+| `/api/v1/extensions`              | GET    | List all extensions       |
+| `/api/v1/extensions/upload`       | POST   | Upload extension ZIP      |
+| `/api/v1/extensions/{id}`         | DELETE | Remove external extension |
+| `/api/v1/extensions/{id}/enabled` | POST   | Enable/disable extension  |
+| `/api/v1/extensions/reload`       | POST   | Reload extension registry |

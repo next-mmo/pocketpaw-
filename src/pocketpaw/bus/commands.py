@@ -251,10 +251,11 @@ class CommandHandler:
 
     def _is_todo_enabled(self) -> bool:
         """Check whether the Todo extension is enabled in settings."""
-        from pocketpaw.config import Settings
+        from pocketpaw.extensions import get_extension_registry
 
-        settings = Settings.load()
-        return _TODO_EXTENSION_ID not in settings.extension_disabled_ids
+        registry = get_extension_registry()
+        record = registry.get(_TODO_EXTENSION_ID)
+        return record is not None and record.enabled
 
     def is_command(self, content: str) -> bool:
         """Check if the message content is a recognised command."""

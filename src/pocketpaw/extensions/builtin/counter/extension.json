@@ -1,0 +1,11 @@
+{
+  "id": "counter",
+  "name": "Counter",
+  "version": "1.0.0",
+  "description": "A minimal sample app — perfect starting point for community extension developers.",
+  "icon": "hash",
+  "route": "counter",
+  "entry": "index.html",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"]
+}

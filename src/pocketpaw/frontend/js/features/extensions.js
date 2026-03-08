@@ -29,6 +29,7 @@ window.PocketPaw.Extensions = {
         errors: [],
         loading: false,
         reloading: false,
+        uploadingExtension: false,
         openTabs: [],
         activeTabId: "",
         sessions: {},
@@ -301,6 +302,100 @@ window.PocketPaw.Extensions = {
 
       getDisabledExtensions() {
         return this.extensionsHost.items.filter((item) => !item.enabled);
+      },
+
+      getBuiltinExtensions() {
+        return this.extensionsHost.items.filter(
+          (item) => item.source === "builtin",
+        );
+      },
+
+      getUploadedExtensions() {
+        return this.extensionsHost.items.filter(
+          (item) => item.source === "external",
+        );
+      },
+
+      // ── Upload / Delete ───────────────────────────────────
+
+      triggerExtensionUpload() {
+        const input = document.getElementById("extensionUploadInput");
+        if (input) input.click();
+      },
+
+      async uploadExtension(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Reset input so the same file can be re-uploaded
+        event.target.value = "";
+
+        if (!file.name.toLowerCase().endsWith(".zip")) {
+          this.showToast("Only .zip files are accepted", "error");
+          return;
+        }
+
+        this.extensionsHost.uploadingExtension = true;
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const resp = await fetch("/api/v1/extensions/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "Upload failed");
+          }
+
+          const data = await resp.json();
+          this.extensionsHost.items = data.extensions || [];
+          this.extensionsHost.errors = data.errors || [];
+          this.showToast("Extension installed successfully!", "success");
+          this.$nextTick(() => {
+            if (window.refreshIcons) window.refreshIcons();
+          });
+        } catch (error) {
+          console.error("Extension upload failed:", error);
+          this.showToast(error.message || "Upload failed", "error");
+        } finally {
+          this.extensionsHost.uploadingExtension = false;
+        }
+      },
+
+      async deleteExtension(extension, event) {
+        if (event) event.stopPropagation();
+
+        if (
+          !confirm(
+            `Remove "${extension.name}"? This will delete all extension files.`,
+          )
+        ) {
+          return;
+        }
+
+        try {
+          const resp = await fetch(`/api/v1/extensions/${extension.id}`, {
+            method: "DELETE",
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || "Delete failed");
+          }
+
+          // Close tab if open
+          this.closeAppTab(extension.id);
+
+          // Reload list
+          await this.loadExtensions(true);
+          this.showToast(`"${extension.name}" removed`, "success");
+        } catch (error) {
+          console.error("Extension delete failed:", error);
+          this.showToast(error.message || "Delete failed", "error");
+        }
       },
 
       // ── Sessions ─────────────────────────────────────────

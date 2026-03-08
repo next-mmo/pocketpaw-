@@ -21,8 +21,10 @@ class ExtensionSummary(APIResponse):
     route: str
     entry: str
     scopes: list[str] = Field(default_factory=list)
+    autostart: bool = True
     enabled: bool
     source: str
+    is_removable: bool = False
     asset_base: str
 
 

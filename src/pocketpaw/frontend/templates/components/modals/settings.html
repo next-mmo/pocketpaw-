@@ -158,7 +158,44 @@
           x-show="settingsSection === 'general' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">General</h3>
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
+            General
+          </h3>
+
+          <!-- Theme Selector -->
+          <div class="flex flex-col gap-1.5">
+            <label
+              class="text-[12px] font-medium text-[var(--text-secondary)] uppercase tracking-wide"
+              >Appearance</label
+            >
+            <div class="flex gap-2">
+              <template
+                x-for="opt in [
+                { id: 'system', label: 'System', icon: 'monitor' },
+                { id: 'light',  label: 'Light',  icon: 'sun' },
+                { id: 'dark',   label: 'Dark',   icon: 'moon' }
+              ]"
+                :key="opt.id"
+              >
+                <button
+                  @click="setTheme(opt.id)"
+                  class="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-[13px] font-medium border transition-all"
+                  :class="themeMode === opt.id
+                    ? 'bg-[var(--accent-color)]/15 border-[var(--accent-color)]/40 text-[var(--accent-color)]'
+                    : 'bg-[var(--surface-input)] border-[var(--glass-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-tertiary)]'"
+                >
+                  <i :data-lucide="opt.icon" class="w-4 h-4"></i>
+                  <span x-text="opt.label"></span>
+                </button>
+              </template>
+            </div>
+            <small class="text-[var(--text-tertiary)] text-[11px]"
+              >System follows your OS preference. Changes apply
+              instantly.</small
+            >
+          </div>
 
           <!-- Agent Backend (dynamic) -->
           <div
@@ -1140,7 +1177,11 @@
           x-show="settingsSection === 'apikeys' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">API Keys</h3>
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
+            API Keys
+          </h3>
           <p class="text-[12px] text-white/50 -mt-1 mb-2">
             Keys are encrypted at rest. Only keys needed for your current
             backend and provider are shown.
@@ -1747,7 +1788,9 @@
           x-show="settingsSection === 'behavior' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
             Behavior & Safety
           </h3>
 
@@ -1942,7 +1985,11 @@
           x-show="settingsSection === 'memory' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">Memory</h3>
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
+            Memory
+          </h3>
 
           <!-- Memory Backend -->
           <div class="flex flex-col gap-1.5">
@@ -2128,7 +2175,9 @@
           x-show="settingsSection === 'services' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
             Search & Services
           </h3>
 
@@ -2343,7 +2392,11 @@
           x-show="settingsSection === 'system' && settingsSearchResults.length === 0"
           class="space-y-4"
         >
-          <h3 class="text-[14px] font-semibold text-white/80 mb-3">System</h3>
+          <h3
+            class="text-[14px] font-semibold text-[var(--text-secondary)] mb-3"
+          >
+            System
+          </h3>
 
           <!-- Web Server -->
           <div class="space-y-3">

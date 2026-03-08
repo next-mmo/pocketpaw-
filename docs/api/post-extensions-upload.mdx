@@ -1,0 +1,146 @@
+---
+title: Upload Extension
+description: "Upload a PocketPaw extension as a ZIP file. The ZIP must contain a valid extension.json manifest. The extension is installed to the external extensions directory (~/.pocketpaw/extensions/)."
+api: POST /api/v1/extensions/upload
+baseUrl: http://localhost:8888
+layout: "@/layouts/APIEndpointLayout.astro"
+auth: bearer
+section: API Reference
+ogType: article
+keywords: ["upload extension", "install extension", "extension zip"]
+tags: ["api", "extensions"]
+---
+
+## Overview
+
+Upload an extension as a ZIP file. The ZIP must contain an `extension.json` manifest at the root level or inside a single wrapper directory. The extension is validated and installed to `~/.pocketpaw/extensions/<id>/`.
+
+Built-in extensions cannot be overwritten — only external extensions can be uploaded or replaced.
+
+## Request Body
+
+Send as `multipart/form-data`:
+
+<ParamTable type="body">
+  <Param name="file" type="file" required>
+    ZIP file containing the extension. Must have a `.zip` extension. Maximum
+    size: 50 MB.
+  </Param>
+</ParamTable>
+
+## Response
+
+Returns the updated extensions list (same format as `GET /extensions`).
+
+<ResponseField name="extensions" type="array">
+  Array of extension summaries with the newly installed extension included.
+</ResponseField>
+<ResponseField name="errors" type="array">
+  Any loading errors from the extension registry.
+</ResponseField>
+
+## Error Responses
+
+| Status | Reason                                                                         |
+| ------ | ------------------------------------------------------------------------------ |
+| 400    | Not a `.zip` file, invalid ZIP, no `extension.json` found, or invalid manifest |
+| 403    | Extension tokens cannot access management APIs                                 |
+| 409    | Cannot overwrite a built-in extension                                          |
+| 413    | File exceeds 50 MB size limit                                                  |
+
+<RequestExample>
+<Tabs items={["cURL", "JavaScript", "Python"]}>
+  <Tab title="cURL">
+    ```bash
+    curl -X POST "http://localhost:8888/api/v1/extensions/upload" \
+      -H "Authorization: Bearer <token>" \
+      -F "file=@my-extension.zip"
+    ```
+  </Tab>
+  <Tab title="JavaScript">
+    ```javascript
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    const response = await fetch("/api/v1/extensions/upload", {
+      method: "POST",
+      headers: { "Authorization": "Bearer <token>" },
+      body: formData,
+    });
+    const data = await response.json();
+    console.log(data.extensions);
+    ```
+
+  </Tab>
+  <Tab title="Python">
+    ```python
+    import requests
+
+    with open("my-extension.zip", "rb") as f:
+        response = requests.post(
+            "http://localhost:8888/api/v1/extensions/upload",
+            headers={"Authorization": "Bearer <token>"},
+            files={"file": ("my-extension.zip", f, "application/zip")},
+        )
+    print(response.json())
+    ```
+
+  </Tab>
+</Tabs>
+</RequestExample>
+
+<ResponseExample>
+<Tabs items={["200", "400", "409"]}>
+  <Tab title="200">
+    ```json
+    {
+      "extensions": [
+        {
+          "id": "todo",
+          "name": "Todo",
+          "version": "1.0.0",
+          "description": "A first-party sample app...",
+          "icon": "list-todo",
+          "route": "todo",
+          "entry": "index.html",
+          "scopes": ["storage.read", "storage.write", "host.open_chat"],
+          "enabled": true,
+          "source": "builtin",
+          "is_removable": false,
+          "asset_base": "/extensions/todo/"
+        },
+        {
+          "id": "my-extension",
+          "name": "My Extension",
+          "version": "1.0.0",
+          "description": "Uploaded extension",
+          "icon": "puzzle",
+          "route": "my-extension",
+          "entry": "index.html",
+          "scopes": ["storage.read"],
+          "enabled": true,
+          "source": "external",
+          "is_removable": true,
+          "asset_base": "/extensions/my-extension/"
+        }
+      ],
+      "errors": []
+    }
+    ```
+  </Tab>
+  <Tab title="400">
+    ```json
+    {
+      "detail": "ZIP must contain extension.json at the root or inside a single directory"
+    }
+    ```
+  </Tab>
+  <Tab title="409">
+    ```json
+    {
+      "detail": "Cannot overwrite built-in extension 'todo'"
+    }
+    ```
+  </Tab>
+</Tabs>
+</ResponseExample>

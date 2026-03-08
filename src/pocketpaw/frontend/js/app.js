@@ -39,6 +39,9 @@ function app() {
     showScreenshot: false,
     screenshotSrc: "",
 
+    // Theme ("system" | "dark" | "light")
+    themeMode: localStorage.getItem("pocketpaw_theme") || "system",
+
     // Login gate
     showLogin: false,
     loginToken: "",
@@ -199,6 +202,9 @@ function app() {
     },
 
     init() {
+      // Apply theme immediately to prevent flash
+      this.applyTheme();
+
       this.log("PocketPaw Dashboard initialized", "info");
 
       // Handle Auth Token (URL capture → exchange for session token)
@@ -661,6 +667,46 @@ function app() {
      */
     saveSettings() {
       socket.saveSettings(this.settings);
+    },
+
+    /**
+     * Apply the theme based on themeMode preference.
+     * "system" follows OS prefers-color-scheme,
+     * "dark"  forces dark,
+     * "light" forces light.
+     */
+    applyTheme() {
+      const root = document.documentElement;
+      let resolved = this.themeMode;
+      if (resolved === "system") {
+        resolved = window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark";
+      }
+      root.setAttribute("data-theme", resolved);
+
+      // Listen for OS-level changes when in system mode
+      if (!this._themeMediaListener) {
+        const mql = window.matchMedia("(prefers-color-scheme: light)");
+        this._themeMediaListener = () => {
+          if (this.themeMode === "system") this.applyTheme();
+        };
+        mql.addEventListener("change", this._themeMediaListener);
+      }
+    },
+
+    /**
+     * Set and persist theme mode. Called from the Settings UI.
+     */
+    setTheme(mode) {
+      this.themeMode = mode;
+      localStorage.setItem("pocketpaw_theme", mode);
+      // Add transition class for smooth switch
+      document.documentElement.classList.add("theme-transition");
+      this.applyTheme();
+      setTimeout(() => {
+        document.documentElement.classList.remove("theme-transition");
+      }, 350);
     },
 
     /**
