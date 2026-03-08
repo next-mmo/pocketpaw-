@@ -271,7 +271,7 @@ export default function SettingsPanel() {
                 Install
               </Button>
             )}
-            {isInstalled && status === "stopped" && (
+            {isInstalled && (status === "stopped" || status === "error") && (
               <Button
                 type="primary"
                 icon={<PlayCircleOutlined />}

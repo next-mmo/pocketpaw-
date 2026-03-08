@@ -164,6 +164,12 @@ class SandboxManager:
         env["PYTHONNOUSERSITE"] = "1"
         env["UV_PYTHON_PREFERENCE"] = "only-managed"
 
+        # Ensure UTF-8 output encoding on Windows to prevent cp1252 crashes
+        # when plugins log unicode characters (emoji, special symbols, etc.)
+        if platform.system() == "Windows":
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
+
         # Shared uv cache across all plugins
         # This saves disk space and speeds up installs since Python versions
         # and pip wheels are only downloaded once.

@@ -911,15 +911,16 @@ async def start_plugin(plugin_id: str, request: Request):
 
     model_file = body.get("model", "").strip() if body else ""
     if not model_file:
-        # Auto-pick the first GGUF file in models/
+        # Auto-pick the smallest GGUF file in models/ (smallest is safest default)
         models_dir = record.root_dir / "models"
         if models_dir.exists():
-            gguf_files = sorted(
-                p.name for p in models_dir.iterdir()
-                if p.is_file() and p.suffix.lower() in (".gguf", ".bin")
+            gguf_paths = sorted(
+                (p for p in models_dir.iterdir()
+                 if p.is_file() and p.suffix.lower() in (".gguf", ".bin")),
+                key=lambda p: p.stat().st_size,
             )
-            if gguf_files:
-                model_file = gguf_files[0]
+            if gguf_paths:
+                model_file = gguf_paths[0].name
 
     if not model_file:
         raise HTTPException(
