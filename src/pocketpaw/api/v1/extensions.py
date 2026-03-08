@@ -8,6 +8,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from pocketpaw.api.v1.chat import _APISessionBridge, _send_message
 from pocketpaw.api.v1.schemas.chat import ChatRequest, ChatResponse
@@ -193,12 +194,16 @@ async def download_sample_extension(extension_id: str, request: Request):
 
 
 @router.post("/extensions/upload", response_model=ExtensionListResponse)
-async def upload_extension(request: Request, file: UploadFile):
+async def upload_extension(request: Request, file: UploadFile, force: bool = False):
     """Upload a local extension as a ZIP file.
 
     The ZIP must contain an extension.json manifest at the root level
     (or inside a single wrapper directory). The extension is installed
     into ``~/.pocketpaw/extensions/<id>/``.
+
+    If the extension ID already exists, the API returns a ``409 Conflict``
+    with a detail indicating whether the user must confirm an overwrite.
+    Re-send the request with ``?force=true`` to proceed.
     """
     import shutil
     import tempfile
@@ -266,14 +271,20 @@ async def upload_extension(request: Request, file: UploadFile):
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid manifest: {exc}")
 
-    # Prevent overwriting built-in extensions
+    # Conflict check — require confirmation before overwriting
     registry = get_extension_registry(force_reload=True)
     existing = registry.get(manifest.id)
-    if existing and existing.source == "builtin":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot overwrite built-in extension '{manifest.id}'",
-        )
+    if existing and not force:
+        if existing.source == "builtin":
+            raise HTTPException(
+                status_code=409,
+                detail=f"overwrite_builtin_required:{manifest.name}",
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail=f"overwrite_required:{manifest.name}",
+            )
 
     # Extract to external extensions dir
     external_dir = get_external_extensions_dir()
@@ -298,6 +309,197 @@ async def upload_extension(request: Request, file: UploadFile):
     logger.info("Installed extension '%s' v%s from upload", manifest.id, manifest.version)
     return _load_list_response()
 
+
+class _InstallFromPathRequest(BaseModel):
+    path: str
+
+
+@router.post("/extensions/install-from-path", response_model=ExtensionListResponse)
+async def install_extension_from_path(
+    request: Request,
+    body: _InstallFromPathRequest,
+    force: bool = False,
+):
+    """Install an extension from a local folder on disk.
+
+    The folder must contain an ``extension.json`` manifest at its root.
+    The extension is copied into ``~/.pocketpaw/extensions/<id>/``.
+
+    If the extension ID already exists, the API returns a ``409 Conflict``.
+    Re-send the request with ``?force=true`` to proceed.
+    """
+    import shutil
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    _require_admin_or_full_access(request)
+
+    src_dir = Path(body.path).resolve()
+
+    if not src_dir.exists():
+        raise HTTPException(status_code=400, detail=f"Path does not exist: {body.path}")
+
+    if not src_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"Path is not a directory: {body.path}")
+
+    manifest_path = src_dir / "extension.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="Folder does not contain an extension.json manifest",
+        )
+
+    # Parse and validate manifest
+    try:
+        raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid extension.json: {exc}")
+
+    try:
+        manifest = ExtensionManifest.model_validate(raw_manifest)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid manifest: {exc}")
+
+    # Conflict check — require confirmation before overwriting
+    registry = get_extension_registry(force_reload=True)
+    existing = registry.get(manifest.id)
+    if existing and not force:
+        if existing.source == "builtin":
+            raise HTTPException(
+                status_code=409,
+                detail=f"overwrite_builtin_required:{manifest.name}",
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail=f"overwrite_required:{manifest.name}",
+            )
+
+    # Copy to external extensions dir
+    external_dir = get_external_extensions_dir()
+    target_dir = external_dir / manifest.id
+
+    try:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        shutil.copytree(src_dir, target_dir)
+    except Exception as exc:
+        logger.exception("Failed to install extension from path")
+        raise HTTPException(status_code=500, detail=f"Failed to install extension: {exc}")
+
+    logger.info(
+        "Installed extension '%s' v%s from folder: %s",
+        manifest.id,
+        manifest.version,
+        src_dir,
+    )
+    return _load_list_response()
+
+
+@router.post("/extensions/upload-folder", response_model=ExtensionListResponse)
+async def upload_extension_folder(
+    request: Request,
+    force: bool = False,
+):
+    """Upload an extension as a set of files from a folder picker.
+
+    The frontend sends all files from a ``webkitdirectory`` input as
+    multipart form fields named ``files``, with each file's relative
+    path encoded in its ``filename``.  The backend reconstructs the
+    folder tree, validates the manifest, and installs the extension.
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path, PurePosixPath
+
+    from pydantic import ValidationError
+
+    _require_admin_or_full_access(request)
+
+    form = await request.form()
+    file_items = form.getlist("files")
+
+    if not file_items:
+        raise HTTPException(status_code=400, detail="No files received")
+
+    # Write every file into a temp directory, preserving relative paths
+    tmpdir_obj = tempfile.mkdtemp()
+    tmpdir = Path(tmpdir_obj)
+
+    try:
+        total_bytes = 0
+        for upload in file_items:
+            # The filename carries the relative path (e.g. "extension.json"
+            # or "css/styles.css").  Reject path traversal.
+            rel = upload.filename or ""
+            if not rel or ".." in rel or rel.startswith("/"):
+                raise HTTPException(status_code=400, detail=f"Unsafe path: {rel}")
+
+            dest = tmpdir / PurePosixPath(rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            data = await upload.read()
+            total_bytes += len(data)
+            if total_bytes > _MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Total upload too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+                )
+            dest.write_bytes(data)
+
+        # Validate manifest
+        manifest_path = tmpdir / "extension.json"
+        if not manifest_path.exists():
+            raise HTTPException(
+                status_code=400,
+                detail="Folder does not contain an extension.json manifest at the root",
+            )
+
+        try:
+            raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid extension.json: {exc}")
+
+        try:
+            manifest = ExtensionManifest.model_validate(raw_manifest)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid manifest: {exc}")
+
+        # Conflict check
+        registry = get_extension_registry(force_reload=True)
+        existing = registry.get(manifest.id)
+        if existing and not force:
+            if existing.source == "builtin":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"overwrite_builtin_required:{manifest.name}",
+                )
+            else:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"overwrite_required:{manifest.name}",
+                )
+
+        # Copy to external extensions dir
+        external_dir = get_external_extensions_dir()
+        target_dir = external_dir / manifest.id
+
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        shutil.copytree(tmpdir, target_dir)
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to install extension from folder upload")
+        raise HTTPException(status_code=500, detail=f"Failed to install extension: {exc}")
+    finally:
+        # Clean up temp dir
+        shutil.rmtree(tmpdir_obj, ignore_errors=True)
+
+    logger.info("Installed extension '%s' v%s from folder upload", manifest.id, manifest.version)
+    return _load_list_response()
 
 @router.delete("/extensions/{extension_id}")
 async def delete_extension(extension_id: str, request: Request):

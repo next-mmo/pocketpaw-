@@ -337,32 +337,177 @@ window.PocketPaw.Extensions = {
 
         this.extensionsHost.uploadingExtension = true;
         try {
-          const formData = new FormData();
-          formData.append("file", file);
-
-          const resp = await fetch("/api/v1/extensions/upload", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!resp.ok) {
-            const err = await resp.json().catch(() => ({}));
-            throw new Error(err.detail || "Upload failed");
-          }
-
-          const data = await resp.json();
-          this.extensionsHost.items = data.extensions || [];
-          this.extensionsHost.errors = data.errors || [];
-          this.showToast("Extension installed successfully!", "success");
-          this.$nextTick(() => {
-            if (window.refreshIcons) window.refreshIcons();
-          });
+          await this._doUploadExtension(file, false);
         } catch (error) {
           console.error("Extension upload failed:", error);
           this.showToast(error.message || "Upload failed", "error");
         } finally {
           this.extensionsHost.uploadingExtension = false;
         }
+      },
+
+      async _doUploadExtension(file, force) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const url = force
+          ? "/api/v1/extensions/upload?force=true"
+          : "/api/v1/extensions/upload";
+
+        const resp = await fetch(url, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (resp.status === 409) {
+          const err = await resp.json().catch(() => ({}));
+          const detail = err.detail || "";
+
+          let extName = "";
+          let promptMsg = "";
+
+          if (detail.startsWith("overwrite_builtin_required:")) {
+            extName = detail.replace("overwrite_builtin_required:", "");
+            promptMsg =
+              `"${extName}" is a built-in extension.\n\n` +
+              `Uploading will override the built-in version with your custom one. ` +
+              `You can restore the original by deleting the uploaded version later.\n\n` +
+              `Continue?`;
+          } else if (detail.startsWith("overwrite_required:")) {
+            extName = detail.replace("overwrite_required:", "");
+            promptMsg =
+              `"${extName}" is already installed.\n\n` +
+              `Do you want to replace it with the uploaded version?`;
+          } else {
+            throw new Error(detail || "Upload conflict");
+          }
+
+          if (!confirm(promptMsg)) return;
+
+          // Retry with force
+          await this._doUploadExtension(file, true);
+          return;
+        }
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || "Upload failed");
+        }
+
+        const data = await resp.json();
+        this.extensionsHost.items = data.extensions || [];
+        this.extensionsHost.errors = data.errors || [];
+        this.showToast("Extension installed successfully!", "success");
+        this.$nextTick(() => {
+          if (window.refreshIcons) window.refreshIcons();
+        });
+      },
+
+      triggerFolderUpload() {
+        const input = document.getElementById("extensionFolderInput");
+        if (input) input.click();
+      },
+
+      async uploadExtensionFolder(event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+
+        // Reset input so the same folder can be re-selected
+        event.target.value = "";
+
+        // Collect files and strip the top-level folder prefix from paths
+        // webkitRelativePath gives e.g. "counter-sample/extension.json"
+        // We strip "counter-sample/" to get "extension.json"
+        const fileList = Array.from(files);
+        const firstPath = fileList[0]?.webkitRelativePath || "";
+        const topFolder = firstPath.split("/")[0];
+
+        // Verify extension.json exists in the selected folder
+        const hasManifest = fileList.some((f) => {
+          const rel = f.webkitRelativePath.replace(topFolder + "/", "");
+          return rel === "extension.json";
+        });
+
+        if (!hasManifest) {
+          this.showToast(
+            "Selected folder does not contain an extension.json manifest",
+            "error",
+          );
+          return;
+        }
+
+        this.extensionsHost.uploadingExtension = true;
+        try {
+          await this._doUploadFolder(fileList, topFolder, false);
+        } catch (error) {
+          console.error("Extension folder upload failed:", error);
+          this.showToast(error.message || "Upload failed", "error");
+        } finally {
+          this.extensionsHost.uploadingExtension = false;
+        }
+      },
+
+      async _doUploadFolder(fileList, topFolder, force) {
+        const formData = new FormData();
+
+        for (const file of fileList) {
+          // Strip top-level folder name so "counter-sample/extension.json"
+          // becomes "extension.json"
+          const rel = file.webkitRelativePath.replace(topFolder + "/", "");
+          formData.append("files", file, rel);
+        }
+
+        const url = force
+          ? "/api/v1/extensions/upload-folder?force=true"
+          : "/api/v1/extensions/upload-folder";
+
+        const resp = await fetch(url, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (resp.status === 409) {
+          const err = await resp.json().catch(() => ({}));
+          const detail = err.detail || "";
+
+          let extName = "";
+          let promptMsg = "";
+
+          if (detail.startsWith("overwrite_builtin_required:")) {
+            extName = detail.replace("overwrite_builtin_required:", "");
+            promptMsg =
+              `"${extName}" is a built-in extension.\n\n` +
+              `Uploading will override the built-in version with your custom one. ` +
+              `You can restore the original by deleting the uploaded version later.\n\n` +
+              `Continue?`;
+          } else if (detail.startsWith("overwrite_required:")) {
+            extName = detail.replace("overwrite_required:", "");
+            promptMsg =
+              `"${extName}" is already installed.\n\n` +
+              `Do you want to replace it with the uploaded version?`;
+          } else {
+            throw new Error(detail || "Upload conflict");
+          }
+
+          if (!confirm(promptMsg)) return;
+
+          // Retry with force
+          await this._doUploadFolder(fileList, topFolder, true);
+          return;
+        }
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.detail || "Upload failed");
+        }
+
+        const data = await resp.json();
+        this.extensionsHost.items = data.extensions || [];
+        this.extensionsHost.errors = data.errors || [];
+        this.showToast("Extension installed successfully!", "success");
+        this.$nextTick(() => {
+          if (window.refreshIcons) window.refreshIcons();
+        });
       },
 
       async deleteExtension(extension, event) {

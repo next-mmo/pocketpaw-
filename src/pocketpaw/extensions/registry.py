@@ -232,10 +232,23 @@ class ExtensionRegistry:
             return
 
         if manifest.id in self.extensions:
-            self.errors.append(
-                ExtensionLoadError(str(manifest_path), f"duplicate extension id: {manifest.id}")
-            )
-            return
+            existing = self.extensions[manifest.id]
+            # Allow external extensions to shadow/override built-in ones
+            if source == "external" and existing.source == "builtin":
+                logger.info(
+                    "External extension '%s' overrides built-in version",
+                    manifest.id,
+                )
+                # Remove old route mapping so the new one can take its place
+                old_route = existing.manifest.route
+                if old_route in self.route_map:
+                    del self.route_map[old_route]
+                del self.extensions[manifest.id]
+            else:
+                self.errors.append(
+                    ExtensionLoadError(str(manifest_path), f"duplicate extension id: {manifest.id}")
+                )
+                return
 
         if manifest.route in self.route_map:
             self.errors.append(
