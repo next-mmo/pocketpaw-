@@ -4,10 +4,12 @@ import {
   MessageOutlined,
   SettingOutlined,
   UnorderedListOutlined,
+  CompassOutlined,
 } from "@ant-design/icons";
 import ChatPanel from "./components/ChatPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import ConversationList from "./components/ConversationList";
+import DiscoverPanel from "./components/DiscoverPanel";
 import { useServerStore, API_BASE, PLUGIN_ID } from "./stores/serverStore";
 
 const { Sider, Content } = Layout;
@@ -143,6 +145,11 @@ export default function App() {
                     icon: <MessageOutlined />,
                   },
                   {
+                    label: "Discover",
+                    value: "discover",
+                    icon: <CompassOutlined />,
+                  },
+                  {
                     label: "Settings",
                     value: "settings",
                     icon: <SettingOutlined />,
@@ -169,7 +176,13 @@ export default function App() {
           </div>
 
           <Content style={{ overflow: "hidden" }}>
-            {activeTab === "chat" ? <ChatPanel /> : <SettingsPanel />}
+            {activeTab === "chat" ? (
+              <ChatPanel />
+            ) : activeTab === "discover" ? (
+              <DiscoverPanel />
+            ) : (
+              <SettingsPanel />
+            )}
           </Content>
         </Layout>
       </Layout>
