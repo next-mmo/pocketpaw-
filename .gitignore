@@ -62,3 +62,6 @@ idocs/
 *.pyo
 
 temp
+skills-lock.json
+.agent/
+.agents/
