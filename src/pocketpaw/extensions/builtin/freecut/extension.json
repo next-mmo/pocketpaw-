@@ -17,10 +17,7 @@
     }
   },
   "install": {
-    "steps": [
-      { "pip": "requirements.txt" },
-      { "run": "npm install", "path": "upstream" }
-    ]
+    "steps": [{ "run": "bash build.sh" }, { "pip": "requirements.txt" }]
   },
   "start": {
     "command": "python -m uvicorn main:app --host 127.0.0.1 --port __PORT__ --app-dir ./upstream/backend",
