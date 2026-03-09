@@ -80,8 +80,8 @@ def main() -> None:
     node_modules = UPSTREAM_DIR / "node_modules"
     if not node_modules.exists():
         print("==> Installing dependencies...", flush=True)
-        pnpm = which("pnpm")
-        run([pnpm, "install"], cwd=UPSTREAM_DIR)
+        npm = which("npm")
+        run([npm, "install"], cwd=UPSTREAM_DIR)
 
     # 4. Build with relative base for iframe loading
     print("==> Building FreeCut frontend...", flush=True)
