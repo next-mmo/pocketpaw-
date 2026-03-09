@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shlex
 import signal
 import sys
 import time
@@ -18,6 +19,30 @@ from pathlib import Path
 from pocketpaw.extensions.sandbox import SandboxManager, SandboxConfig, StartConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _split_command_win(cmd: str) -> list[str]:
+    """Split a command string into a list on Windows.
+
+    ``shlex.split`` uses POSIX rules that mangle backslash-heavy Windows
+    paths, so we use a simple state-machine that respects double-quoted
+    tokens while keeping everything else whitespace-delimited.
+    """
+    parts: list[str] = []
+    current: list[str] = []
+    in_quote = False
+    for char in cmd:
+        if char == '"':
+            in_quote = not in_quote
+        elif char in (" ", "\t") and not in_quote:
+            if current:
+                parts.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if current:
+        parts.append("".join(current))
+    return parts
 
 
 @dataclass
@@ -222,29 +247,102 @@ class PluginProcessManager:
         if proc.port:
             cmd = cmd.replace("__PORT__", str(proc.port))
 
-        logger.info("Starting plugin %s: %s", plugin_id, cmd)
+        # Replace bare 'python' with the full venv python path
+        # so we always use the sandbox's Python, not system Python.
+        venv_python = str(sandbox.python_path)
+        if cmd.startswith("python "):
+            cmd = f"{venv_python} {cmd[7:]}"
+        elif cmd.startswith("python3 "):
+            cmd = f"{venv_python} {cmd[8:]}"
+
+        logger.info("Starting plugin %s: %s (cwd=%s)", plugin_id, cmd, sandbox.root)
 
         try:
+            # On Windows, uvicorn uses SelectorEventLoop which does NOT
+            # support asyncio.create_subprocess_*.  We fall back to
+            # subprocess.Popen + a background reader thread instead.
             if sys.platform == "win32":
-                process = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                    cwd=sandbox.root,
-                    env=env,
-                )
+                cmd_parts = _split_command_win(cmd)
             else:
-                process = await asyncio.create_subprocess_shell(
-                    cmd,
+                cmd_parts = shlex.split(cmd)
+
+            logger.info("Plugin %s cmd_parts: %s", plugin_id, cmd_parts)
+
+            if sys.platform == "win32":
+                import subprocess as _sp
+                import threading
+
+                popen = _sp.Popen(
+                    cmd_parts,
+                    stdout=_sp.PIPE,
+                    stderr=_sp.STDOUT,
+                    cwd=str(sandbox.root),
+                    env=env,
+                    creationflags=_sp.CREATE_NO_WINDOW,
+                )
+                proc.pid = popen.pid
+
+                # Wrap Popen in a thin adapter so _monitor_output can await
+                class _PopenAdapter:
+                    """Make a Popen look enough like asyncio.subprocess.Process."""
+
+                    def __init__(self, p: _sp.Popen):
+                        self._p = p
+                        self._stdout_queue: asyncio.Queue[bytes] = asyncio.Queue()
+                        self._loop = asyncio.get_event_loop()
+                        self._reader = threading.Thread(
+                            target=self._read_stdout, daemon=True,
+                        )
+                        self._reader.start()
+
+                    # ---------- internal ----------
+                    def _read_stdout(self) -> None:
+                        try:
+                            assert self._p.stdout is not None
+                            for raw_line in iter(self._p.stdout.readline, b""):
+                                self._loop.call_soon_threadsafe(
+                                    self._stdout_queue.put_nowait, raw_line,
+                                )
+                            # Signal EOF
+                            self._loop.call_soon_threadsafe(
+                                self._stdout_queue.put_nowait, b"",
+                            )
+                        except Exception:
+                            self._loop.call_soon_threadsafe(
+                                self._stdout_queue.put_nowait, b"",
+                            )
+
+                    # ---------- public (async) ----------
+                    @property
+                    def stdout(self):
+                        return self
+
+                    async def readline(self) -> bytes:
+                        return await self._stdout_queue.get()
+
+                    async def wait(self) -> int:
+                        loop = asyncio.get_event_loop()
+                        return await loop.run_in_executor(None, self._p.wait)
+
+                    def terminate(self) -> None:
+                        self._p.terminate()
+
+                    def kill(self) -> None:
+                        self._p.kill()
+
+                process = _PopenAdapter(popen)  # type: ignore[assignment]
+            else:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd_parts,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=sandbox.root,
                     env=env,
                     preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN),
                 )
+                proc.pid = process.pid
 
             proc._process = process
-            proc.pid = process.pid
 
             # Start output monitoring
             proc._output_task = asyncio.create_task(
@@ -252,9 +350,12 @@ class PluginProcessManager:
             )
 
         except Exception as exc:
-            logger.exception("Failed to start plugin %s", plugin_id)
+            logger.exception(
+                "Failed to start plugin %s (cmd=%r, cwd=%s, exc_type=%s, exc=%r)",
+                plugin_id, cmd, sandbox.root, type(exc).__name__, exc,
+            )
             proc.status = "error"
-            proc.error = str(exc)
+            proc.error = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
             proc.stopped_at = time.time()
 
         return proc
@@ -359,12 +460,25 @@ class PluginProcessManager:
         # Process ended
         if proc._process:
             returncode = await proc._process.wait()
+            logger.info(
+                "Plugin %s process exited with code %s (logs: %d lines)",
+                proc.plugin_id,
+                returncode,
+                len(proc.log_lines),
+            )
             if proc.status not in ("stopping", "stopped"):
                 if returncode == 0:
                     proc.status = "stopped"
                 else:
                     proc.status = "error"
-                    proc.error = f"Process exited with code {returncode}"
+                    if proc.log_lines:
+                        # Include last few log lines in error for context
+                        last_lines = " | ".join(
+                            line.strip() for line in proc.log_lines[-3:] if line.strip()
+                        )
+                        proc.error = f"Process exited with code {returncode}: {last_lines}" if last_lines else f"Process exited with code {returncode}"
+                    else:
+                        proc.error = f"Process exited with code {returncode} (no output captured — check that the command and model path are valid)"
                 proc.stopped_at = time.time()
 
     @staticmethod

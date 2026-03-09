@@ -183,8 +183,9 @@
                   @click="setTheme(opt.id)"
                   class="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-[13px] font-medium border transition-all"
                   :class="themeMode === opt.id
-                    ? 'bg-[var(--accent-color)]/15 border-[var(--accent-color)]/40 text-[var(--accent-color)]'
+                    ? 'border-[var(--accent-color)] text-[var(--accent-color)]'
                     : 'bg-[var(--surface-input)] border-[var(--glass-border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-tertiary)]'"
+                  :style="themeMode === opt.id ? 'background: color-mix(in srgb, var(--accent-color) 15%, transparent); border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);' : ''"
                 >
                   <i :data-lucide="opt.icon" class="w-4 h-4"></i>
                   <span x-text="opt.label"></span>
