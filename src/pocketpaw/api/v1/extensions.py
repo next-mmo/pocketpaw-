@@ -819,6 +819,26 @@ async def get_cuda_info_endpoint(request: Request):
     )
 
 
+@router.get("/plugins/node")
+async def get_node_info_endpoint(request: Request):
+    """Detect Node.js / pnpm availability."""
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.nodejs import get_node_info
+
+    info = await get_node_info()
+    return {
+        "node_available": info.node_available,
+        "node_version": info.node_version,
+        "node_path": info.node_path,
+        "pnpm_available": info.pnpm_available,
+        "pnpm_version": info.pnpm_version,
+        "pnpm_path": info.pnpm_path,
+        "managed": info.managed,
+        "summary": info.summary_line(),
+    }
+
+
 @router.post("/plugins/{plugin_id}/install", response_model=PluginStatusResponse)
 async def install_plugin(plugin_id: str, request: Request):
     """Install a plugin: create venv, install deps, PyTorch, etc.

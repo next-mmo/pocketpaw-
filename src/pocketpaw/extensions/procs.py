@@ -190,6 +190,9 @@ class PluginProcessManager:
                         )
                     elif hasattr(step, "torch") and step.torch:
                         await sandbox.install_torch(on_output=output_queue)
+                    elif hasattr(step, "node") and step.node:
+                        from pocketpaw.extensions.nodejs import ensure_node
+                        await ensure_node(on_output=output_queue)
 
             proc.install_progress = 1.0
             proc.status = "stopped"

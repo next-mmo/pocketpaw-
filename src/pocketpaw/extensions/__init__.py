@@ -7,6 +7,7 @@ Supports two extension types:
 """
 
 from .cuda import CudaInfo, detect_cuda, get_cuda_info
+from .nodejs import NodeInfo, detect_node, ensure_node, get_node_info
 from .procs import PluginProcess, PluginProcessManager, get_plugin_process_manager
 from .registry import (
     ALLOWED_EXTENSION_SCOPES,
@@ -32,6 +33,7 @@ from .tokens import ExtensionTokenClaims, create_extension_token, verify_extensi
 __all__ = [
     "ALLOWED_EXTENSION_SCOPES",
     "CudaInfo",
+    "NodeInfo",
     "ExtensionLoadError",
     "ExtensionManifest",
     "ExtensionRecord",
@@ -48,8 +50,11 @@ __all__ = [
     "TorchConfig",
     "create_extension_token",
     "detect_cuda",
+    "detect_node",
+    "ensure_node",
     "get_builtin_extensions_dir",
     "get_cuda_info",
+    "get_node_info",
     "get_extension_registry",
     "get_external_extensions_dir",
     "get_plugin_process_manager",

@@ -34,8 +34,8 @@ fi
 
 # Install deps if node_modules missing
 if [ ! -d "node_modules" ]; then
-  echo "==> Installing npm dependencies..."
-  npm install
+  echo "==> Installing dependencies..."
+  pnpm install
 fi
 
 # Build with relative base for iframe loading

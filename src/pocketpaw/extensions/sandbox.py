@@ -58,6 +58,7 @@ class InstallStep(BaseModel):
     run: str | None = Field(default=None, description="Shell command to run")
     pip: str | None = Field(default=None, description="requirements file to pip install")
     torch: bool | None = Field(default=None, description="If true, install PyTorch")
+    node: bool | None = Field(default=None, description="If true, ensure Node.js + pnpm")
     path: str | None = Field(default=None, description="Working directory (relative)")
 
 
@@ -143,8 +144,8 @@ class SandboxManager:
     def get_env(self) -> dict[str, str]:
         """Build the environment dict for running commands in the sandbox.
 
-        Sets up PATH to prioritize the venv, sets VIRTUAL_ENV,
-        and applies custom env vars from the manifest.
+        Sets up PATH to prioritize the venv (and managed Node.js if installed),
+        sets VIRTUAL_ENV, and applies custom env vars from the manifest.
         All plugins share a single ``~/.pocketpaw/uv-cache`` directory so
         downloaded Python versions and pip wheels are reused across plugins.
         """
@@ -159,6 +160,14 @@ class SandboxManager:
             env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
 
         env["VIRTUAL_ENV"] = str(self.venv_path)
+
+        # Add PocketPaw-managed Node.js to PATH (if installed)
+        from pocketpaw.extensions.nodejs import get_node_env
+        node_env = get_node_env()
+        if "PATH" in node_env:
+            env["PATH"] = node_env["PATH"].replace(
+                os.environ.get("PATH", ""), env["PATH"]
+            )
 
         # Isolation flags (from Pinokio's approach)
         env["PYTHONNOUSERSITE"] = "1"
