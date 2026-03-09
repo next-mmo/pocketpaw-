@@ -2,14 +2,15 @@
  * Playback & Navigation shortcuts: Space, Arrow Left/Right, Home/End, Up/Down snap points.
  */
 
+import { useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
-import { usePlaybackStore } from '@/features/preview/stores/playback-store';
+import { usePlaybackStore } from '@/shared/state/playback';
 import { useItemsStore } from '../../stores/items-store';
 import { useMarkersStore } from '../../stores/markers-store';
 import { useTransitionsStore } from '../../stores/transitions-store';
 import { HOTKEYS, HOTKEY_OPTIONS } from '@/config/hotkeys';
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts';
-import { useSourcePlayerStore } from '@/features/preview/stores/source-player-store';
+import { useSourcePlayerStore } from '@/shared/state/source-player';
 import { getFilteredItemSnapEdges } from '../../utils/timeline-snap-utils';
 import { getVisibleTrackIds } from '../../utils/group-utils';
 
@@ -36,7 +37,14 @@ export function usePlaybackShortcuts(
 ) {
   const togglePlayPause = usePlaybackStore((s) => s.togglePlayPause);
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame);
+  const setPreviewFrame = usePlaybackStore((s) => s.setPreviewFrame);
+  const setDisplayedFrame = usePlaybackStore((s) => s.setDisplayedFrame);
   const isPlaying = usePlaybackStore((s) => s.isPlaying);
+  const commitTimelineSeek = useCallback((frame: number) => {
+    setPreviewFrame(null);
+    setDisplayedFrame(null);
+    setCurrentFrame(frame);
+  }, [setPreviewFrame, setDisplayedFrame, setCurrentFrame]);
 
   // Playback: Space - Play/Pause
   useHotkeys(
@@ -55,7 +63,7 @@ export function usePlaybackShortcuts(
         callbacks.onPlay();
       }
     },
-    HOTKEY_OPTIONS,
+    { ...HOTKEY_OPTIONS, eventListenerOptions: { capture: true } },
     [togglePlayPause, isPlaying, callbacks]
   );
 
@@ -70,10 +78,10 @@ export function usePlaybackShortcuts(
         return;
       }
       const currentFrame = usePlaybackStore.getState().currentFrame;
-      setCurrentFrame(Math.max(0, currentFrame - 1));
+      commitTimelineSeek(Math.max(0, currentFrame - 1));
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 
   // Navigation: Arrow Right - Next frame
@@ -87,10 +95,10 @@ export function usePlaybackShortcuts(
         return;
       }
       const currentFrame = usePlaybackStore.getState().currentFrame;
-      setCurrentFrame(currentFrame + 1);
+      commitTimelineSeek(currentFrame + 1);
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 
   // Navigation: Home - Go to start
@@ -103,10 +111,10 @@ export function usePlaybackShortcuts(
         playerMethods.seek(0);
         return;
       }
-      setCurrentFrame(0);
+      commitTimelineSeek(0);
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 
   // Navigation: End - Go to end of timeline (last frame of last item)
@@ -124,10 +132,10 @@ export function usePlaybackShortcuts(
         const itemEnd = item.from + item.durationInFrames;
         return Math.max(max, itemEnd);
       }, 0);
-      setCurrentFrame(lastFrame);
+      commitTimelineSeek(lastFrame);
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 
   // Navigation: Down - Jump to next snap point (clip edge or marker)
@@ -138,11 +146,11 @@ export function usePlaybackShortcuts(
       const currentFrame = usePlaybackStore.getState().currentFrame;
       const nextEdge = getSnapPoints().find((edge) => edge > currentFrame);
       if (nextEdge !== undefined) {
-        setCurrentFrame(nextEdge);
+        commitTimelineSeek(nextEdge);
       }
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 
   // Navigation: Up - Jump to previous snap point (clip edge or marker)
@@ -160,10 +168,10 @@ export function usePlaybackShortcuts(
         }
       }
       if (previousEdge !== undefined) {
-        setCurrentFrame(previousEdge);
+        commitTimelineSeek(previousEdge);
       }
     },
     HOTKEY_OPTIONS,
-    [setCurrentFrame]
+    [commitTimelineSeek]
   );
 }

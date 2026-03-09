@@ -11,6 +11,7 @@
  * 4. Collect audio from media items and encode with AudioDataSource
  * 5. Finalize and return the video blob
  */
+
 import type { ExportSettings } from '@/types/export';
 
 // Codec mapping for mediabunny
@@ -59,10 +60,7 @@ export interface ClientRenderResult {
 /**
  * Maps export settings to client-compatible settings
  */
-export function mapToClientSettings(
-  settings: ExportSettings,
-  fps: number,
-): ClientExportSettings {
+export function mapToClientSettings(settings: ExportSettings, fps: number): ClientExportSettings {
   // Map codec to mediabunny codec
   const codecMap: Record<ExportSettings['codec'], ClientCodec> = {
     h264: 'avc',
@@ -107,9 +105,7 @@ export function mapToClientSettings(
 /**
  * Get default audio codec for a container
  */
-export function getDefaultAudioCodec(
-  container: ClientContainer,
-): ClientAudioCodec {
+export function getDefaultAudioCodec(container: ClientContainer): ClientAudioCodec {
   switch (container) {
     case 'mp4':
     case 'mov':
@@ -129,20 +125,14 @@ export function getDefaultAudioCodec(
 /**
  * Check if a container is audio-only
  */
-function isAudioOnlyContainer(
-  container: ClientContainer,
-): container is ClientAudioContainer {
+function isAudioOnlyContainer(container: ClientContainer): container is ClientAudioContainer {
   return ['mp3', 'wav', 'flac', 'aac'].includes(container);
 }
 
 /**
  * Check if a codec is supported by WebCodecs in this browser
  */
-async function isCodecSupported(
-  codec: ClientCodec,
-  width: number,
-  height: number,
-): Promise<boolean> {
+async function isCodecSupported(codec: ClientCodec, width: number, height: number): Promise<boolean> {
   if (!('VideoEncoder' in window)) {
     return false;
   }
@@ -171,10 +161,7 @@ async function isCodecSupported(
 /**
  * Get list of supported codecs for client-side rendering
  */
-export async function getSupportedCodecs(
-  width: number,
-  height: number,
-): Promise<ClientCodec[]> {
+export async function getSupportedCodecs(width: number, height: number): Promise<ClientCodec[]> {
   const codecs: ClientCodec[] = ['avc', 'hevc', 'vp8', 'vp9', 'av1'];
   const supported: ClientCodec[] = [];
 
@@ -188,25 +175,50 @@ export async function getSupportedCodecs(
 }
 
 /**
- * @deprecated All encoding is now handled by the Python backend.
- * This function is no longer called and kept only for API compatibility.
+ * Create mediabunny output format based on container type
  */
-export async function createOutputFormat(
-  _container: ClientContainer,
-  _options?: { fastStart?: boolean },
-): Promise<never> {
-  throw new Error(
-    '[BackendOnly] createOutputFormat is disabled. All video encoding goes through the Python backend at http://127.0.0.1:7890.',
-  );
+export async function createOutputFormat(container: ClientContainer, options?: { fastStart?: boolean }) {
+  const mediabunny = await import('mediabunny');
+  const {
+    Mp4OutputFormat,
+    WebMOutputFormat,
+    MovOutputFormat,
+    MkvOutputFormat,
+    Mp3OutputFormat,
+    WavOutputFormat,
+    AdtsOutputFormat,
+  } = mediabunny;
+
+  switch (container) {
+    case 'mp4':
+      return new Mp4OutputFormat({
+        fastStart: options?.fastStart ? 'in-memory' : false,
+      });
+    case 'mov':
+      return new MovOutputFormat({
+        fastStart: options?.fastStart ? 'in-memory' : false,
+      });
+    case 'webm':
+      return new WebMOutputFormat();
+    case 'mkv':
+      return new MkvOutputFormat();
+    case 'mp3':
+      return new Mp3OutputFormat();
+    case 'aac':
+      return new AdtsOutputFormat();
+    case 'wav':
+      return new WavOutputFormat();
+    default:
+      return new Mp4OutputFormat({
+        fastStart: options?.fastStart ? 'in-memory' : false,
+      });
+  }
 }
 
 /**
  * Get the MIME type for a container/codec combination
  */
-export function getMimeType(
-  container: ClientContainer,
-  codec?: ClientCodec,
-): string {
+export function getMimeType(container: ClientContainer, codec?: ClientCodec): string {
   // Audio-only containers
   if (container === 'mp3') return 'audio/mpeg';
   if (container === 'aac') return 'audio/aac';
@@ -231,10 +243,7 @@ export function getMimeType(
 /**
  * Validate client export settings
  */
-export function validateSettings(settings: ClientExportSettings): {
-  valid: boolean;
-  error?: string;
-} {
+export function validateSettings(settings: ClientExportSettings): { valid: boolean; error?: string } {
   if (settings.resolution.width <= 0 || settings.resolution.height <= 0) {
     return { valid: false, error: 'Invalid resolution' };
   }
@@ -244,10 +253,7 @@ export function validateSettings(settings: ClientExportSettings): {
   }
 
   // Check for even dimensions (required by most codecs)
-  if (
-    settings.resolution.width % 2 !== 0 ||
-    settings.resolution.height % 2 !== 0
-  ) {
+  if (settings.resolution.width % 2 !== 0 || settings.resolution.height % 2 !== 0) {
     return { valid: false, error: 'Resolution must have even dimensions' };
   }
 
@@ -257,10 +263,7 @@ export function validateSettings(settings: ClientExportSettings): {
 /**
  * Estimate file size based on settings and duration
  */
-export function estimateFileSize(
-  settings: ClientExportSettings,
-  durationSeconds: number,
-): number {
+export function estimateFileSize(settings: ClientExportSettings, durationSeconds: number): number {
   if (settings.mode === 'audio' || isAudioOnlyContainer(settings.container)) {
     // Audio-only estimation
     const audioBits = (settings.audioBitrate ?? 192_000) * durationSeconds;
@@ -279,9 +282,7 @@ export function estimateFileSize(
 /**
  * Get audio bitrate options based on quality
  */
-export function getAudioBitrateForQuality(
-  quality: ClientExportSettings['quality'],
-): number {
+export function getAudioBitrateForQuality(quality: ClientExportSettings['quality']): number {
   const bitrateMap: Record<ClientExportSettings['quality'], number> = {
     low: 96_000, // 96 kbps
     medium: 192_000, // 192 kbps

@@ -1,11 +1,12 @@
 /**
  * Waveform Processing Worker
  *
- * Backend-only waveform generation using Python FFmpeg API.
- * Emits init/chunk/complete messages to keep existing cache pipeline unchanged.
+ * Handles audio sample extraction and waveform generation off the main thread.
+ * Uses mediabunny for hardware-accelerated audio decoding.
+ * Sends progressive updates as samples are processed.
  */
 
-const API_BASE_URL = 'http://127.0.0.1:7890';
+import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/media/ac3-decoder';
 
 export interface WaveformRequest {
   type: 'generate';
@@ -49,9 +50,7 @@ export interface WaveformErrorResponse {
   error: string;
 }
 
-export type WaveformWorkerMessage =
-  | WaveformRequest
-  | { type: 'abort'; requestId: string };
+export type WaveformWorkerMessage = WaveformRequest | { type: 'abort'; requestId: string };
 export type WaveformWorkerResponse =
   | WaveformProgressResponse
   | WaveformInitResponse
@@ -59,99 +58,11 @@ export type WaveformWorkerResponse =
   | WaveformCompleteResponse
   | WaveformErrorResponse;
 
-interface ActiveRequestState {
-  aborted: boolean;
-  controller: AbortController;
-}
+// Track active requests for abort support
+const activeRequests = new Map<string, { aborted: boolean }>();
 
-interface MetadataResponse {
-  metadata?: {
-    duration?: number;
-    channels?: number;
-    type?: string;
-  };
-}
-
-interface WaveformApiResponse {
-  waveform?: {
-    peaks?: number[];
-    duration?: number;
-    channels?: number;
-  };
-}
-
-const activeRequests = new Map<string, ActiveRequestState>();
-
-function throwIfAborted(state: ActiveRequestState): void {
-  if (state.aborted) {
-    throw new Error('Aborted');
-  }
-}
-
-async function fetchSourceFile(
-  blobUrl: string,
-  signal: AbortSignal,
-): Promise<File> {
-  const response = await fetch(blobUrl, { signal });
-  if (!response.ok) {
-    throw new Error(`Failed to read media blob (${response.status})`);
-  }
-  const blob = await response.blob();
-  return new File([blob], 'waveform-source', {
-    type: blob.type || 'application/octet-stream',
-  });
-}
-
-async function getMediaMetadata(
-  file: File,
-  signal: AbortSignal,
-): Promise<{ duration: number; channels: number }> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await fetch(`${API_BASE_URL}/api/metadata`, {
-    method: 'POST',
-    body: formData,
-    signal,
-  });
-
-  if (!response.ok) {
-    return { duration: 0, channels: 1 };
-  }
-
-  const result: MetadataResponse = await response.json();
-  return {
-    duration: Math.max(0, result.metadata?.duration ?? 0),
-    channels: Math.max(1, result.metadata?.channels ?? 1),
-  };
-}
-
-async function getWaveformFromBackend(
-  file: File,
-  samplesPerSecond: number,
-  duration: number,
-  signal: AbortSignal,
-): Promise<Float32Array> {
-  const targetSamples = Math.max(1, Math.ceil(duration * samplesPerSecond));
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('num_peaks', String(targetSamples));
-  formData.append('channels', '1');
-
-  const response = await fetch(`${API_BASE_URL}/api/waveform`, {
-    method: 'POST',
-    body: formData,
-    signal,
-  });
-
-  if (!response.ok) {
-    throw new Error(`Waveform generation failed (${response.status})`);
-  }
-
-  const result: WaveformApiResponse = await response.json();
-  const peaks = result.waveform?.peaks ?? [];
-  return Float32Array.from(peaks);
+async function getMediabunny() {
+  return import('mediabunny');
 }
 
 self.onmessage = async (event: MessageEvent<WaveformWorkerMessage>) => {
@@ -161,86 +72,79 @@ self.onmessage = async (event: MessageEvent<WaveformWorkerMessage>) => {
     const state = activeRequests.get(event.data.requestId);
     if (state) {
       state.aborted = true;
-      state.controller.abort();
     }
     return;
   }
 
   if (type !== 'generate') return;
 
-  const {
-    requestId,
-    blobUrl,
-    samplesPerSecond,
-    binDurationSec = 30,
-  } = event.data;
-  const state: ActiveRequestState = {
-    aborted: false,
-    controller: new AbortController(),
-  };
+  const { requestId, blobUrl, samplesPerSecond, binDurationSec = 30 } = event.data;
+  const state = { aborted: false };
   activeRequests.set(requestId, state);
 
+  let disposeInput: { dispose?: () => void } | null = null;
+
   try {
-    self.postMessage({
-      type: 'progress',
-      requestId,
-      progress: 5,
-    } as WaveformProgressResponse);
+    // Send initial progress
+    self.postMessage({ type: 'progress', requestId, progress: 5 } as WaveformProgressResponse);
 
-    const file = await fetchSourceFile(blobUrl, state.controller.signal);
-    throwIfAborted(state);
+    // Load mediabunny. Register AC-3 decoder lazily only for matching codecs.
+    const mediabunny = await getMediabunny();
+    const { Input, UrlSource, AudioSampleSink, ALL_FORMATS } = mediabunny;
 
-    self.postMessage({
-      type: 'progress',
-      requestId,
-      progress: 20,
-    } as WaveformProgressResponse);
+    if (state.aborted) throw new Error('Aborted');
 
-    const metadata = await getMediaMetadata(file, state.controller.signal);
-    throwIfAborted(state);
+    // Create input from blob URL
+    const input = new Input({
+      source: new UrlSource(blobUrl),
+      formats: ALL_FORMATS,
+    });
+    disposeInput = input as { dispose?: () => void };
 
-    const peaks = await getWaveformFromBackend(
-      file,
-      samplesPerSecond,
-      metadata.duration,
-      state.controller.signal,
-    );
-    throwIfAborted(state);
+    // Get primary audio track
+    const audioTrack = await input.getPrimaryAudioTrack();
+    if (!audioTrack) {
+      throw new Error('No audio track found');
+    }
 
-    const duration =
-      metadata.duration > 0
-        ? metadata.duration
-        : peaks.length / Math.max(1, samplesPerSecond);
-    const channels = metadata.channels;
+    const audioCodec = typeof audioTrack.codec === 'string' ? audioTrack.codec : undefined;
+    if (isAc3AudioCodec(audioCodec)) {
+      await ensureAc3DecoderRegistered();
+    }
 
+    self.postMessage({ type: 'progress', requestId, progress: 10 } as WaveformProgressResponse);
+
+    // Get audio metadata
+    const trackSampleRate = audioTrack.sampleRate || 0;
+    const fallbackSampleRate = trackSampleRate > 0 ? trackSampleRate : 48000;
+    const channels = audioTrack.numberOfChannels || 1;
+    const duration = await audioTrack.computeDuration();
+
+    if (state.aborted) throw new Error('Aborted');
+
+    // Create audio sample sink
+    const sink = new AudioSampleSink(audioTrack);
+
+    const numOutputSamples = Math.max(1, Math.ceil(duration * samplesPerSecond));
+    const peaks = new Float32Array(numOutputSamples);
+    const binSampleCount = Math.max(1, Math.round(samplesPerSecond * binDurationSec));
+    let processedEndTimeSec = 0;
+    let nextChunkStart = 0;
+    let maxPeak = 0;
+
+    self.postMessage({ type: 'progress', requestId, progress: 20 } as WaveformProgressResponse);
     self.postMessage({
       type: 'init',
       requestId,
       duration,
       channels,
       sampleRate: samplesPerSecond,
-      totalSamples: peaks.length,
+      totalSamples: numOutputSamples,
     } as WaveformInitResponse);
 
-    const binSampleCount = Math.max(
-      1,
-      Math.round(samplesPerSecond * binDurationSec),
-    );
-    let maxPeak = 0;
-    const totalBins = Math.max(1, Math.ceil(peaks.length / binSampleCount));
-    let emittedBins = 0;
-
-    for (let start = 0; start < peaks.length; start += binSampleCount) {
-      throwIfAborted(state);
-      const end = Math.min(start + binSampleCount, peaks.length);
+    const emitChunk = (start: number, end: number) => {
+      if (end <= start) return;
       const chunk = peaks.slice(start, end);
-
-      for (let i = 0; i < chunk.length; i++) {
-        if (chunk[i]! > maxPeak) {
-          maxPeak = chunk[i]!;
-        }
-      }
-
       self.postMessage(
         {
           type: 'chunk',
@@ -248,40 +152,118 @@ self.onmessage = async (event: MessageEvent<WaveformWorkerMessage>) => {
           startIndex: start,
           peaks: chunk,
         } as WaveformChunkResponse,
-        { transfer: [chunk.buffer as ArrayBuffer] },
+        { transfer: [chunk.buffer] }
       );
+    };
 
-      emittedBins++;
-      const progress = 20 + Math.round((emittedBins / totalBins) * 75);
-      self.postMessage({
-        type: 'progress',
-        requestId,
-        progress: Math.min(progress, 95),
-      } as WaveformProgressResponse);
+    // Process samples
+    for await (const sample of sink.samples()) {
+      try {
+        if (state.aborted) {
+          throw new Error('Aborted');
+        }
+
+        // Avoid toAudioBuffer() in workers (AudioBuffer is not available in worker globals).
+        const frameCount = sample.numberOfFrames;
+        const channelCount = Math.max(1, sample.numberOfChannels);
+        const sampleData = sample as {
+          sampleRate?: number;
+          timestamp?: number;
+          duration?: number;
+        };
+        const sampleRate = (sampleData.sampleRate && sampleData.sampleRate > 0)
+          ? sampleData.sampleRate
+          : fallbackSampleRate;
+        const sampleDurationSec = (sampleData.duration && sampleData.duration > 0)
+          ? sampleData.duration
+          : frameCount / sampleRate;
+        const sampleTimestampSec = Number.isFinite(sampleData.timestamp)
+          ? Math.max(0, sampleData.timestamp as number)
+          : processedEndTimeSec;
+        const sampleStartOutputIndex = Math.max(0, Math.floor(sampleTimestampSec * samplesPerSecond));
+        const channelData: Float32Array[] = [];
+        for (let c = 0; c < channelCount; c++) {
+          const ch = new Float32Array(frameCount);
+          sample.copyTo(ch, { planeIndex: c, format: 'f32-planar' });
+          channelData.push(ch);
+        }
+
+        for (let i = 0; i < frameCount; i++) {
+          let sum = 0;
+          for (let c = 0; c < channelCount; c++) {
+            sum += channelData[c]![i] ?? 0;
+          }
+
+          const mono = sum / channelCount;
+          const peak = Math.abs(mono);
+          const outputIndex = Math.min(
+            numOutputSamples - 1,
+            sampleStartOutputIndex + Math.floor((i * samplesPerSecond) / sampleRate)
+          );
+
+          if (peak > peaks[outputIndex]!) {
+            peaks[outputIndex] = peak;
+            if (peak > maxPeak) {
+              maxPeak = peak;
+            }
+          }
+        }
+
+        processedEndTimeSec = Math.max(
+          processedEndTimeSec,
+          sampleTimestampSec + sampleDurationSec
+        );
+
+        // Flush full bins that can no longer change.
+        const completedOutputExclusive = Math.min(
+          numOutputSamples,
+          Math.floor(processedEndTimeSec * samplesPerSecond)
+        );
+        while (nextChunkStart + binSampleCount <= completedOutputExclusive) {
+          const end = nextChunkStart + binSampleCount;
+          emitChunk(nextChunkStart, end);
+          nextChunkStart = end;
+        }
+
+        // Update progress (20-80% range for sample extraction)
+        const progress = 20 + Math.min(
+          60,
+          Math.round((processedEndTimeSec / Math.max(duration, 0.001)) * 60)
+        );
+        self.postMessage({ type: 'progress', requestId, progress } as WaveformProgressResponse);
+      } finally {
+        // Always close the sample to prevent resource leaks
+        sample.close();
+      }
     }
 
-    throwIfAborted(state);
+    if (state.aborted) throw new Error('Aborted');
 
-    self.postMessage({
-      type: 'progress',
-      requestId,
-      progress: 100,
-    } as WaveformProgressResponse);
-    self.postMessage({
+    self.postMessage({ type: 'progress', requestId, progress: 80 } as WaveformProgressResponse);
+
+    // Flush remaining tail.
+    if (nextChunkStart < numOutputSamples) {
+      emitChunk(nextChunkStart, numOutputSamples);
+    }
+
+    self.postMessage({ type: 'progress', requestId, progress: 90 } as WaveformProgressResponse);
+    self.postMessage({ type: 'progress', requestId, progress: 95 } as WaveformProgressResponse);
+
+    // Send completion marker with peak stats.
+    const response: WaveformCompleteResponse = {
       type: 'complete',
       requestId,
       maxPeak,
-    } as WaveformCompleteResponse);
+    };
+    self.postMessage(response);
+
   } catch (err) {
     const error = err instanceof Error ? err.message : 'Unknown error';
     if (error !== 'Aborted') {
-      self.postMessage({
-        type: 'error',
-        requestId,
-        error,
-      } as WaveformErrorResponse);
+      self.postMessage({ type: 'error', requestId, error } as WaveformErrorResponse);
     }
   } finally {
+    disposeInput?.dispose?.();
     activeRequests.delete(requestId);
   }
 };

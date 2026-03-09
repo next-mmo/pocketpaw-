@@ -4,16 +4,19 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import type { TimelineItem } from '@/types/timeline';
 import type { TransformProperties, CanvasSettings } from '@/types/transform';
-import { useGizmoStore } from '@/features/preview/stores/gizmo-store';
-import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store';
-import { useThrottledFrame } from '@/features/preview/hooks/use-throttled-frame';
-import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
+import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview';
+import { useMediaLibraryStore } from '@/features/editor/deps/media-library';
+import { useTimelineStore } from '@/features/editor/deps/timeline-store';
 import {
   resolveTransform,
   getSourceDimensions,
-} from '@/lib/composition-runtime/utils/transform-resolver';
-import { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
-import { autoKeyframeProperty as autoKeyframeProp } from '@/features/keyframes/utils/auto-keyframe';
+} from '@/features/editor/deps/composition-runtime';
+import {
+  getAutoKeyframeOperation as getAutoKeyframeOp,
+  type AutoKeyframeOperation,
+  resolveAnimatedTransform,
+  KeyframeToggle,
+} from '@/features/editor/deps/keyframes';
 import {
   PropertySection,
   PropertyRow,
@@ -21,7 +24,6 @@ import {
   AlignmentButtons,
   type AlignmentType,
 } from '../components';
-import { KeyframeToggle } from '@/features/keyframes/components/keyframe-toggle';
 
 interface LayoutSectionProps {
   items: TimelineItem[];
@@ -78,35 +80,48 @@ export const LayoutSection = memo(function LayoutSection({
     };
   }, [activeGizmo, previewTransform, itemIds]);
 
-  // Memoize all transform values at once to avoid 5 separate iterations
-  // This resolves transforms once per render instead of 5 times
-  // Includes keyframe animation to show current animated values
+  // Resolve transforms once for all items, applying keyframe animation and
+  // gizmo preview overrides. Reused by mixed-value fields and align/distribute.
+  const resolvedTransformsByItem = useMemo(() => {
+    const resolved = new Map<string, TransformValues>();
+    for (const item of items) {
+      const transform = (() => {
+        if (gizmoPreview && gizmoPreview.itemId === item.id) {
+          return gizmoPreview.transform;
+        }
+        const sourceDimensions = getSourceDimensions(item);
+        const baseResolved = resolveTransform(item, canvas, sourceDimensions);
+        const itemKeyframes = allKeyframes.find((k) => k.itemId === item.id);
+        if (!itemKeyframes) return baseResolved;
+        const relativeFrame = currentFrame - item.from;
+        return resolveAnimatedTransform(baseResolved, itemKeyframes, relativeFrame);
+      })();
+
+      resolved.set(item.id, {
+        x: transform.x,
+        y: transform.y,
+        width: transform.width,
+        height: transform.height,
+        rotation: transform.rotation,
+      });
+    }
+    return resolved;
+  }, [items, canvas, gizmoPreview, allKeyframes, currentFrame]);
+
+  // Memoize all transform values at once to avoid repeated iterations.
   const { x, y, width, height, rotation } = useMemo(() => {
     if (items.length === 0) {
       return { x: 0, y: 0, width: 0, height: 0, rotation: 0 };
     }
 
-    // Resolve transforms once for all items, applying keyframe animations
-    const resolvedValues = items.map((item) => {
-      // If gizmo is active for this item, use the preview transform
-      if (gizmoPreview && gizmoPreview.itemId === item.id) {
-        return gizmoPreview.transform;
-      }
-      const sourceDimensions = getSourceDimensions(item);
-      const baseResolved = resolveTransform(item, canvas, sourceDimensions);
+    const resolvedValues = items
+      .map((item) => resolvedTransformsByItem.get(item.id))
+      .filter((value): value is TransformValues => value !== undefined);
 
-      // Apply keyframe animation if item has keyframes
-      const itemKeyframes = allKeyframes.find((k) => k.itemId === item.id);
-      if (itemKeyframes) {
-        // Calculate frame relative to item start
-        const relativeFrame = currentFrame - item.from;
-        return resolveAnimatedTransform(baseResolved, itemKeyframes, relativeFrame);
-      }
+    if (resolvedValues.length === 0) {
+      return { x: 0, y: 0, width: 0, height: 0, rotation: 0 };
+    }
 
-      return baseResolved;
-    });
-
-    // Helper to get mixed or single value
     const getValue = (getter: (resolved: TransformValues) => number): MixedValue => {
       const values = resolvedValues.map(getter);
       const firstValue = values[0]!;
@@ -120,7 +135,7 @@ export const LayoutSection = memo(function LayoutSection({
       height: getValue((r) => r.height),
       rotation: getValue((r) => r.rotation),
     };
-  }, [items, canvas, gizmoPreview, allKeyframes, currentFrame]);
+  }, [items, resolvedTransformsByItem]);
 
   // Store current aspect ratio for linked dimensions
   const currentAspectRatio = useMemo(() => {
@@ -128,21 +143,24 @@ export const LayoutSection = memo(function LayoutSection({
     return height > 0 ? width / height : 1;
   }, [width, height]);
 
-  // Get keyframe actions for auto-keyframing
-  const addKeyframe = useTimelineStore((s) => s.addKeyframe);
-  const updateKeyframe = useTimelineStore((s) => s.updateKeyframe);
+  // Get batched keyframe action for auto-keyframing
+  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations);
+  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap);
 
-  // Helper: Check if a property has keyframes and auto-keyframe on value change
-  // Returns true if keyframes were handled, false if base transform should be updated
-  const autoKeyframeProperty = useCallback(
-    (itemId: string, property: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity', value: number): boolean => {
+  // Helper: Build auto-keyframe operations for properties that are already animated.
+  const getAutoKeyframeOperation = useCallback(
+    (
+      itemId: string,
+      property: 'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity',
+      value: number
+    ): AutoKeyframeOperation | null => {
       const item = items.find((i) => i.id === itemId);
-      if (!item) return false;
+      if (!item) return null;
 
       const itemKeyframes = allKeyframes.find((k) => k.itemId === itemId);
-      return autoKeyframeProp(item, itemKeyframes, property, value, currentFrame, addKeyframe, updateKeyframe);
+      return getAutoKeyframeOp(item, itemKeyframes, property, value, currentFrame);
     },
-    [items, allKeyframes, currentFrame, addKeyframe, updateKeyframe]
+    [items, allKeyframes, currentFrame]
   );
 
   // Live preview for X position (during scrub)
@@ -162,10 +180,17 @@ export const LayoutSection = memo(function LayoutSection({
     (value: number) => {
       // Try auto-keyframe first for items with keyframes
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        if (!autoKeyframeProperty(itemId, 'x', value)) {
+        const operation = getAutoKeyframeOperation(itemId, 'x', value);
+        if (operation) {
+          autoOps.push(operation);
+        } else {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       // Fall back to base transform for items without keyframes
       if (!allHandled) {
@@ -173,7 +198,7 @@ export const LayoutSection = memo(function LayoutSection({
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeProperty]
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation, applyAutoKeyframeOperations]
   );
 
   // Live preview for Y position (during scrub)
@@ -192,17 +217,24 @@ export const LayoutSection = memo(function LayoutSection({
   const handleYChange = useCallback(
     (value: number) => {
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        if (!autoKeyframeProperty(itemId, 'y', value)) {
+        const operation = getAutoKeyframeOperation(itemId, 'y', value);
+        if (operation) {
+          autoOps.push(operation);
+        } else {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         onTransformChange(itemIds, { y: value });
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeProperty]
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation, applyAutoKeyframeOperations]
   );
 
   // Live preview for width (during scrub)
@@ -228,12 +260,20 @@ export const LayoutSection = memo(function LayoutSection({
       const newHeight = aspectLocked && height !== 'mixed' ? Math.round(value / currentAspectRatio) : null;
 
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        const widthHandled = autoKeyframeProperty(itemId, 'width', value);
-        const heightHandled = newHeight !== null ? autoKeyframeProperty(itemId, 'height', newHeight) : true;
+        const widthOperation = getAutoKeyframeOperation(itemId, 'width', value);
+        const heightOperation = newHeight !== null ? getAutoKeyframeOperation(itemId, 'height', newHeight) : null;
+        const widthHandled = Boolean(widthOperation);
+        const heightHandled = newHeight !== null ? Boolean(heightOperation) : true;
+        if (widthOperation) autoOps.push(widthOperation);
+        if (heightOperation) autoOps.push(heightOperation);
         if (!widthHandled || !heightHandled) {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         if (newHeight !== null) {
@@ -244,7 +284,16 @@ export const LayoutSection = memo(function LayoutSection({
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, aspectLocked, height, currentAspectRatio, autoKeyframeProperty]
+    [
+      itemIds,
+      onTransformChange,
+      clearPreview,
+      aspectLocked,
+      height,
+      currentAspectRatio,
+      getAutoKeyframeOperation,
+      applyAutoKeyframeOperations,
+    ]
   );
 
   // Live preview for height (during scrub)
@@ -270,12 +319,20 @@ export const LayoutSection = memo(function LayoutSection({
       const newWidth = aspectLocked && width !== 'mixed' ? Math.round(value * currentAspectRatio) : null;
 
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        const heightHandled = autoKeyframeProperty(itemId, 'height', value);
-        const widthHandled = newWidth !== null ? autoKeyframeProperty(itemId, 'width', newWidth) : true;
+        const heightOperation = getAutoKeyframeOperation(itemId, 'height', value);
+        const widthOperation = newWidth !== null ? getAutoKeyframeOperation(itemId, 'width', newWidth) : null;
+        const heightHandled = Boolean(heightOperation);
+        const widthHandled = newWidth !== null ? Boolean(widthOperation) : true;
+        if (heightOperation) autoOps.push(heightOperation);
+        if (widthOperation) autoOps.push(widthOperation);
         if (!heightHandled || !widthHandled) {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         if (newWidth !== null) {
@@ -286,7 +343,16 @@ export const LayoutSection = memo(function LayoutSection({
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, aspectLocked, width, currentAspectRatio, autoKeyframeProperty]
+    [
+      itemIds,
+      onTransformChange,
+      clearPreview,
+      aspectLocked,
+      width,
+      currentAspectRatio,
+      getAutoKeyframeOperation,
+      applyAutoKeyframeOperations,
+    ]
   );
 
   // Live preview for rotation (during drag)
@@ -305,17 +371,24 @@ export const LayoutSection = memo(function LayoutSection({
   const handleRotationChange = useCallback(
     (value: number) => {
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        if (!autoKeyframeProperty(itemId, 'rotation', value)) {
+        const operation = getAutoKeyframeOperation(itemId, 'rotation', value);
+        if (operation) {
+          autoOps.push(operation);
+        } else {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         onTransformChange(itemIds, { rotation: value });
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeProperty]
+    [itemIds, onTransformChange, clearPreview, getAutoKeyframeOperation, applyAutoKeyframeOperations]
   );
 
   // Get media items for fallback source dimensions lookup
@@ -409,52 +482,87 @@ export const LayoutSection = memo(function LayoutSection({
 
   const handleAlign = useCallback(
     (alignment: AlignmentType) => {
-      // Calculate new position based on alignment
-      const currentWidth = width === 'mixed' ? canvas.width : width;
-      const currentHeight = height === 'mixed' ? canvas.height : height;
-      const currentX = x === 'mixed' ? 0 : x;
-      const currentY = y === 'mixed' ? 0 : y;
-
-      let newX: number | undefined;
-      let newY: number | undefined;
-
-      switch (alignment) {
-        case 'left':
-          newX = -canvas.width / 2 + currentWidth / 2;
-          break;
-        case 'center-h':
-          newX = 0;
-          break;
-        case 'right':
-          newX = canvas.width / 2 - currentWidth / 2;
-          break;
-        case 'top':
-          newY = -canvas.height / 2 + currentHeight / 2;
-          break;
-        case 'center-v':
-          newY = 0;
-          break;
-        case 'bottom':
-          newY = canvas.height / 2 - currentHeight / 2;
-          break;
-      }
-
-      // Only update if position actually changed (within tolerance)
       const tolerance = 0.5;
-      const updates: Partial<TransformProperties> = {};
-      if (newX !== undefined && Math.abs(newX - currentX) > tolerance) {
-        updates.x = newX;
-      }
-      if (newY !== undefined && Math.abs(newY - currentY) > tolerance) {
-        updates.y = newY;
+      const nextTransforms = new Map<string, Partial<TransformProperties>>();
+      const entries = items
+        .map((item) => {
+          const resolved = resolvedTransformsByItem.get(item.id);
+          return resolved ? { itemId: item.id, ...resolved } : null;
+        })
+        .filter((entry): entry is {
+          itemId: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          rotation: number;
+        } => entry !== null);
+
+      if (entries.length === 0) return;
+
+      if (alignment === 'distribute-h' || alignment === 'distribute-v') {
+        if (entries.length < 3) return;
+        const axis = alignment === 'distribute-h' ? 'x' : 'y';
+        const sorted = [...entries].sort((a, b) => a[axis] - b[axis]);
+        const first = sorted[0]!;
+        const last = sorted[sorted.length - 1]!;
+        const step = (last[axis] - first[axis]) / (sorted.length - 1);
+
+        for (let i = 1; i < sorted.length - 1; i++) {
+          const entry = sorted[i]!;
+          const target = first[axis] + (step * i);
+          if (Math.abs(target - entry[axis]) <= tolerance) continue;
+          if (axis === 'x') {
+            nextTransforms.set(entry.itemId, { x: target });
+          } else {
+            nextTransforms.set(entry.itemId, { y: target });
+          }
+        }
+      } else {
+        for (const entry of entries) {
+          let newX: number | undefined;
+          let newY: number | undefined;
+
+          switch (alignment) {
+            case 'left':
+              newX = -canvas.width / 2 + entry.width / 2;
+              break;
+            case 'center-h':
+              newX = 0;
+              break;
+            case 'right':
+              newX = canvas.width / 2 - entry.width / 2;
+              break;
+            case 'top':
+              newY = -canvas.height / 2 + entry.height / 2;
+              break;
+            case 'center-v':
+              newY = 0;
+              break;
+            case 'bottom':
+              newY = canvas.height / 2 - entry.height / 2;
+              break;
+            default:
+              break;
+          }
+
+          const updates: Partial<TransformProperties> = {};
+          if (newX !== undefined && Math.abs(newX - entry.x) > tolerance) {
+            updates.x = newX;
+          }
+          if (newY !== undefined && Math.abs(newY - entry.y) > tolerance) {
+            updates.y = newY;
+          }
+          if (Object.keys(updates).length > 0) {
+            nextTransforms.set(entry.itemId, updates);
+          }
+        }
       }
 
-      // Skip if no actual changes
-      if (Object.keys(updates).length === 0) return;
-
-      onTransformChange(itemIds, updates);
+      if (nextTransforms.size === 0) return;
+      updateItemsTransformMap(nextTransforms, { operation: 'move' });
     },
-    [itemIds, onTransformChange, x, y, width, height, canvas]
+    [items, resolvedTransformsByItem, canvas, updateItemsTransformMap]
   );
 
   return (

@@ -2,19 +2,29 @@ import { useMemo } from 'react';
 import type { TimelineItem } from '@/types/timeline';
 import type { ResolvedTransform } from '@/types/transform';
 import type { ItemKeyframes } from '@/types/keyframe';
-import type { TimelineState } from '@/features/timeline/types';
-import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
-import { usePlaybackStore } from '@/features/preview/stores/playback-store';
+import { useTimelineStore, type TimelineState } from '@/features/preview/deps/timeline-store';
+import { usePlaybackStore } from '@/shared/state/playback';
+import { getResolvedPlaybackFrame } from '@/shared/state/playback/frame-resolution';
 import { useGizmoStore, isFullTransform } from '@/features/preview/stores/gizmo-store';
 import {
   resolveTransform,
   getSourceDimensions,
-} from '@/lib/composition-runtime/utils/transform-resolver';
-import { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
+} from '@/features/preview/deps/composition-runtime';
+import { resolveAnimatedTransform } from '@/features/preview/deps/keyframes';
+import { expandTextTransformForPreview } from '../utils/text-layout';
 
 interface ProjectSize {
   width: number;
   height: number;
+}
+
+function applyTextExpansion(
+  item: TimelineItem,
+  transform: ResolvedTransform,
+  preview: Record<string, { properties?: Parameters<typeof expandTextTransformForPreview>[2] }> | null,
+): ResolvedTransform {
+  if (item.type !== 'text') return transform;
+  return expandTextTransformForPreview(item, transform, preview?.[item.id]?.properties);
 }
 
 /**
@@ -26,9 +36,22 @@ export function useVisualTransforms(
 ): Map<string, ResolvedTransform> {
   const allKeyframes = useTimelineStore((s: TimelineState) => s.keyframes);
   const currentFrame = usePlaybackStore((s) => s.currentFrame);
+  const previewFrame = usePlaybackStore((s) => s.previewFrame);
+  const displayedFrame = usePlaybackStore((s) => s.displayedFrame);
+  const isPlaying = usePlaybackStore((s) => s.isPlaying);
+  const currentFrameEpoch = usePlaybackStore((s) => s.currentFrameEpoch);
+  const previewFrameEpoch = usePlaybackStore((s) => s.previewFrameEpoch);
   const activeGizmo = useGizmoStore((s) => s.activeGizmo);
   const gizmoPreviewTransform = useGizmoStore((s) => s.previewTransform);
   const preview = useGizmoStore((s) => s.preview);
+  const animationFrame = getResolvedPlaybackFrame({
+    currentFrame,
+    previewFrame,
+    displayedFrame,
+    isPlaying,
+    currentFrameEpoch,
+    previewFrameEpoch,
+  });
 
   return useMemo(() => {
     const transforms = new Map<string, ResolvedTransform>();
@@ -42,14 +65,14 @@ export function useVisualTransforms(
       );
 
       const itemKeyframes = allKeyframes.find((k: ItemKeyframes) => k.itemId === item.id);
-      const relativeFrame = currentFrame - item.from;
+      const relativeFrame = animationFrame - item.from;
       let animatedTransform = baseResolved;
       if (itemKeyframes) {
         animatedTransform = resolveAnimatedTransform(baseResolved, itemKeyframes, relativeFrame);
       }
 
       if (activeGizmo?.itemId === item.id && gizmoPreviewTransform) {
-        transforms.set(item.id, {
+        let gizmoTransform: ResolvedTransform = {
           x: gizmoPreviewTransform.x,
           y: gizmoPreviewTransform.y,
           width: gizmoPreviewTransform.width,
@@ -57,14 +80,17 @@ export function useVisualTransforms(
           rotation: gizmoPreviewTransform.rotation,
           opacity: gizmoPreviewTransform.opacity,
           cornerRadius: gizmoPreviewTransform.cornerRadius ?? 0,
-        });
+        };
+        gizmoTransform = applyTextExpansion(item, gizmoTransform, preview);
+        transforms.set(item.id, gizmoTransform);
         continue;
       }
 
       const previewTransform = preview?.[item.id]?.transform;
       if (previewTransform) {
+        let resolvedPreview: ResolvedTransform;
         if (isFullTransform(previewTransform)) {
-          transforms.set(item.id, {
+          resolvedPreview = {
             x: previewTransform.x,
             y: previewTransform.y,
             width: previewTransform.width,
@@ -72,20 +98,22 @@ export function useVisualTransforms(
             rotation: previewTransform.rotation,
             opacity: previewTransform.opacity ?? animatedTransform.opacity,
             cornerRadius: previewTransform.cornerRadius ?? animatedTransform.cornerRadius,
-          });
+          };
         } else {
-          transforms.set(item.id, {
+          resolvedPreview = {
             ...animatedTransform,
             ...previewTransform,
             cornerRadius: previewTransform.cornerRadius ?? animatedTransform.cornerRadius,
-          });
+          };
         }
+        resolvedPreview = applyTextExpansion(item, resolvedPreview, preview);
+        transforms.set(item.id, resolvedPreview);
         continue;
       }
 
-      transforms.set(item.id, animatedTransform);
+      transforms.set(item.id, applyTextExpansion(item, animatedTransform, preview));
     }
 
     return transforms;
-  }, [items, projectSize, allKeyframes, currentFrame, activeGizmo?.itemId, gizmoPreviewTransform, preview]);
+  }, [items, projectSize, allKeyframes, animationFrame, activeGizmo?.itemId, gizmoPreviewTransform, preview]);
 }

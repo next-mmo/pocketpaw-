@@ -1,15 +1,24 @@
-import { useEffect } from 'react';
-import { RouterProvider, createRouter } from '@tanstack/react-router';
-import { BackendIndicator } from '@/components/backend-indicator';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { GlobalTooltip } from '@/components/ui/global-tooltip';
-import { Toaster } from '@/components/ui/sonner';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { routeTree } from './routeTree.gen';
+import { useEffect } from "react";
+import {
+  RouterProvider,
+  createRouter,
+  createHashHistory,
+} from "@tanstack/react-router";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { GlobalTooltip } from "@/components/ui/global-tooltip";
+import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/components/error-boundary";
+import { routeTree } from "./routeTree.gen";
 
-const router = createRouter({ routeTree });
+// Use hash history to ensure file:// paths in Electron do not cause "Not Found" errors
+const hashHistory = createHashHistory();
 
-declare module '@tanstack/react-router' {
+const router = createRouter({
+  routeTree,
+  history: hashHistory,
+});
+
+declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
   }
@@ -36,11 +45,11 @@ export function App() {
       // Only preventDefault (blocks browser zoom), event still propagates to react-hotkeys-hook
       if (e.ctrlKey || e.metaKey) {
         if (
-          e.key === '+' ||
-          e.key === '=' ||
-          e.key === '-' ||
-          e.key === '_' ||
-          e.key === '0'
+          e.key === "+" ||
+          e.key === "=" ||
+          e.key === "-" ||
+          e.key === "_" ||
+          e.key === "0"
         ) {
           e.preventDefault();
           // DO NOT call stopPropagation() - we want react-hotkeys-hook to still receive this
@@ -50,24 +59,24 @@ export function App() {
 
     // Add listeners at capture phase to intercept before browser handles them
     document.addEventListener(
-      'wheel',
+      "wheel",
       preventBrowserZoom,
       wheelListenerOptions,
     );
     document.addEventListener(
-      'keydown',
+      "keydown",
       preventKeyboardZoom,
       keyListenerOptions,
     );
 
     return () => {
       document.removeEventListener(
-        'wheel',
+        "wheel",
         preventBrowserZoom,
         wheelListenerOptions,
       );
       document.removeEventListener(
-        'keydown',
+        "keydown",
         preventKeyboardZoom,
         keyListenerOptions,
       );
@@ -84,7 +93,6 @@ export function App() {
         <RouterProvider router={router} />
         <GlobalTooltip />
         <Toaster />
-        <BackendIndicator />
       </TooltipProvider>
     </ErrorBoundary>
   );

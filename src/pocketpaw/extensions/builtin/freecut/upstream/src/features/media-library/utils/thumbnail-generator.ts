@@ -1,10 +1,11 @@
 /**
  * Thumbnail generation utilities for media library
  *
- * Uses the Python backend for video frame extraction with proper aspect ratio preservation.
+ * Uses mediabunny for video frame extraction with proper aspect ratio preservation.
  * Images use browser's Image API with aspect ratio preservation.
  * Audio files get a generated waveform placeholder.
  */
+
 import { getMimeType } from './validation';
 
 interface ThumbnailOptions {
@@ -19,65 +20,83 @@ const DEFAULT_THUMBNAIL_OPTIONS: Required<ThumbnailOptions> = {
   timestamp: 1,
 };
 
-const BACKEND_API = 'http://127.0.0.1:7890';
-
-function decodeBase64(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer as ArrayBuffer;
-}
-
-function dataUriToBlob(value: string): Blob {
-  if (value.startsWith('data:')) {
-    const comma = value.indexOf(',');
-    const header = value.slice(0, comma);
-    const b64 = value.slice(comma + 1);
-    const mimeMatch = header.match(/^data:([^;]+);base64$/);
-    const mime = mimeMatch?.[1] ?? 'image/jpeg';
-    return new Blob([decodeBase64(b64)], { type: mime });
-  }
-  return new Blob([decodeBase64(value)], { type: 'image/jpeg' });
-}
+// Dynamically import mediabunny (heavy library)
+const loadMediabunny = () => import('mediabunny');
 
 /**
- * Generate thumbnail for video file using the Python backend.
- * Preserves aspect ratio - portrait videos stay portrait, landscape stays landscape.
+ * Generate thumbnail for video file using mediabunny
+ * Preserves aspect ratio - portrait videos stay portrait, landscape stays landscape
  */
 async function generateVideoThumbnail(
   file: File,
-  options: ThumbnailOptions = {},
+  options: ThumbnailOptions = {}
 ): Promise<Blob> {
   const opts = { ...DEFAULT_THUMBNAIL_OPTIONS, ...options };
 
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('timestamp', String(opts.timestamp));
-  formData.append('max_size', String(opts.maxSize));
-  formData.append(
-    'quality',
-    String(Math.max(1, Math.min(100, Math.round(opts.quality * 100)))),
-  );
+  const { Input, BlobSource, CanvasSink, ALL_FORMATS } = await loadMediabunny();
+  let input: InstanceType<typeof Input> | null = null;
+  let sink: InstanceType<typeof CanvasSink> | null = null;
 
-  const response = await fetch(`${BACKEND_API}/api/thumbnail`, {
-    method: 'POST',
-    body: formData,
-  });
+  try {
+    input = new Input({
+      source: new BlobSource(file),
+      formats: ALL_FORMATS,
+    });
 
-  if (!response.ok) {
-    throw new Error(
-      `Thumbnail generation failed (${response.status}): ${await response.text()}`,
-    );
+    const videoTrack = await input.getPrimaryVideoTrack();
+    if (!videoTrack) {
+      throw new Error('No video track found');
+    }
+
+    // Calculate dimensions preserving aspect ratio - larger dimension = maxSize
+    const dw = videoTrack.displayWidth || 1;
+    const dh = videoTrack.displayHeight || 1;
+    const width = dw > dh
+      ? opts.maxSize
+      : Math.floor(opts.maxSize * dw / dh);
+    const height = dh > dw
+      ? opts.maxSize
+      : Math.floor(opts.maxSize * dh / dw);
+
+    sink = new CanvasSink(videoTrack, {
+      width,
+      height,
+      fit: 'fill',
+    });
+
+    // Get timestamp, clamped to valid range
+    const duration = await input.computeDuration();
+    const timestamp = Math.min(opts.timestamp, Math.max(0, duration - 0.1));
+
+    const wrapped = await sink.getCanvas(timestamp);
+    if (!wrapped) {
+      throw new Error('Failed to extract frame from video');
+    }
+
+    const canvas = wrapped.canvas as OffscreenCanvas | HTMLCanvasElement;
+
+    // Convert to blob
+    if ('convertToBlob' in canvas) {
+      return canvas.convertToBlob({ type: 'image/webp', quality: opts.quality });
+    }
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+            return;
+          }
+          reject(new Error('Failed to create blob'));
+        },
+        'image/webp',
+        opts.quality
+      );
+    });
+  } finally {
+    (sink as unknown as { dispose?: () => void } | null)?.dispose?.();
+    input?.dispose?.();
   }
-
-  const result = (await response.json()) as { thumbnail?: string };
-  if (!result.thumbnail) {
-    throw new Error('No thumbnail returned from backend');
-  }
-
-  return dataUriToBlob(result.thumbnail);
 }
 
 /**
@@ -85,7 +104,7 @@ async function generateVideoThumbnail(
  */
 async function generateAudioThumbnail(
   file: File,
-  options: ThumbnailOptions = {},
+  options: ThumbnailOptions = {}
 ): Promise<Blob> {
   const opts = { ...DEFAULT_THUMBNAIL_OPTIONS, ...options };
   const width = opts.maxSize;
@@ -130,15 +149,13 @@ async function generateAudioThumbnail(
     ctx.font = 'bold 14px "IBM Plex Sans", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const displayName =
-      file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
+    const displayName = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
     ctx.fillText(displayName, width / 2, height - 20);
 
     canvas.toBlob(
-      (blob) =>
-        blob ? resolve(blob) : reject(new Error('Failed to create blob')),
+      (blob) => blob ? resolve(blob) : reject(new Error('Failed to create blob')),
       'image/webp',
-      opts.quality,
+      opts.quality
     );
   });
 }
@@ -148,7 +165,7 @@ async function generateAudioThumbnail(
  */
 async function generateImageThumbnail(
   file: File,
-  options: ThumbnailOptions = {},
+  options: ThumbnailOptions = {}
 ): Promise<Blob> {
   const opts = { ...DEFAULT_THUMBNAIL_OPTIONS, ...options };
 
@@ -163,14 +180,12 @@ async function generateImageThumbnail(
 
     img.onload = () => {
       // Calculate dimensions - larger dimension = maxSize
-      const width =
-        img.naturalWidth > img.naturalHeight
-          ? opts.maxSize
-          : Math.floor((opts.maxSize * img.naturalWidth) / img.naturalHeight);
-      const height =
-        img.naturalHeight > img.naturalWidth
-          ? opts.maxSize
-          : Math.floor((opts.maxSize * img.naturalHeight) / img.naturalWidth);
+      const width = img.naturalWidth > img.naturalHeight
+        ? opts.maxSize
+        : Math.floor(opts.maxSize * img.naturalWidth / img.naturalHeight);
+      const height = img.naturalHeight > img.naturalWidth
+        ? opts.maxSize
+        : Math.floor(opts.maxSize * img.naturalHeight / img.naturalWidth);
 
       canvas.width = width;
       canvas.height = height;
@@ -186,7 +201,7 @@ async function generateImageThumbnail(
           reject(new Error('Failed to create blob'));
         },
         'image/webp',
-        opts.quality,
+        opts.quality
       );
     };
 
@@ -204,7 +219,7 @@ async function generateImageThumbnail(
  */
 export async function generateThumbnail(
   file: File,
-  options: ThumbnailOptions = {},
+  options: ThumbnailOptions = {}
 ): Promise<Blob> {
   const mimeType = getMimeType(file);
 

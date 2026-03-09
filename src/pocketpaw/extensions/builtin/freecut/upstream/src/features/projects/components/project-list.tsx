@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react';
-import { Search, ArrowUpDown, X } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useState, useMemo } from "react";
+import { Link } from "@tanstack/react-router";
+import { Search, ArrowUpDown, X, Info } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,8 +17,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ProjectCard } from './project-card';
+} from "@/components/ui/dropdown-menu";
+import { ProjectCard } from "./project-card";
 import {
   useFilteredProjects,
   useSortField,
@@ -25,18 +26,18 @@ import {
   useFilterResolution,
   useFilterFps,
   useHasActiveFilters,
-} from '../hooks/use-project-selectors';
-import { useProjectFilters } from '../hooks/use-project-actions';
-import { getUniqueResolutions, getUniqueFps } from '../utils/project-helpers';
-import { useProjects } from '../hooks/use-project-selectors';
-import type { Project } from '@/types/project';
+} from "../hooks/use-project-selectors";
+import { useProjectFilters } from "../hooks/use-project-actions";
+import { getUniqueResolutions, getUniqueFps } from "../utils/project-helpers";
+import { useProjects } from "../hooks/use-project-selectors";
+import type { Project } from "@/types/project";
 
 interface ProjectListProps {
   onEditProject?: (project: Project) => void;
 }
 
 export function ProjectList({ onEditProject }: ProjectListProps) {
-  const [localSearchQuery, setLocalSearchQuery] = useState('');
+  const [localSearchQuery, setLocalSearchQuery] = useState("");
 
   // Selectors
   const allProjects = useProjects();
@@ -58,7 +59,10 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
   } = useProjectFilters();
 
   // Get unique values for filters
-  const uniqueResolutions = useMemo(() => getUniqueResolutions(allProjects), [allProjects]);
+  const uniqueResolutions = useMemo(
+    () => getUniqueResolutions(allProjects),
+    [allProjects],
+  );
   const uniqueFps = useMemo(() => getUniqueFps(allProjects), [allProjects]);
 
   // Debounced search handler
@@ -72,12 +76,12 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
   };
 
   const handleClearFilters = () => {
-    setLocalSearchQuery('');
+    setLocalSearchQuery("");
     clearFilters();
   };
 
   const toggleSortDirection = () => {
-    setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    setSortDirection(sortDirection === "asc" ? "desc" : "asc");
   };
 
   const isEmpty = allProjects.length === 0;
@@ -103,7 +107,7 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
                 variant="ghost"
                 size="icon"
                 className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
-                onClick={() => handleSearchChange('')}
+                onClick={() => handleSearchChange("")}
               >
                 <X className="w-3 h-3" />
               </Button>
@@ -112,8 +116,10 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
 
           {/* Resolution Filter */}
           <Select
-            value={filterResolution || 'all'}
-            onValueChange={(value) => setFilterResolution(value === 'all' ? undefined : value)}
+            value={filterResolution || "all"}
+            onValueChange={(value) =>
+              setFilterResolution(value === "all" ? undefined : value)
+            }
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="All Resolutions" />
@@ -130,8 +136,10 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
 
           {/* FPS Filter */}
           <Select
-            value={filterFps?.toString() || 'all'}
-            onValueChange={(value) => setFilterFps(value === 'all' ? undefined : Number(value))}
+            value={filterFps?.toString() || "all"}
+            onValueChange={(value) =>
+              setFilterFps(value === "all" ? undefined : Number(value))
+            }
           >
             <SelectTrigger className="w-[140px]">
               <SelectValue placeholder="All FPS" />
@@ -156,22 +164,29 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuLabel>Sort by</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setSortField('name')}>
-                Name {sortField === 'name' && `(${sortDirection === 'asc' ? '↑' : '↓'})`}
+              <DropdownMenuItem onClick={() => setSortField("name")}>
+                Name{" "}
+                {sortField === "name" &&
+                  `(${sortDirection === "asc" ? "↑" : "↓"})`}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortField('updatedAt')}>
-                Last Modified{' '}
-                {sortField === 'updatedAt' && `(${sortDirection === 'asc' ? '↑' : '↓'})`}
+              <DropdownMenuItem onClick={() => setSortField("updatedAt")}>
+                Last Modified{" "}
+                {sortField === "updatedAt" &&
+                  `(${sortDirection === "asc" ? "↑" : "↓"})`}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortField('createdAt')}>
-                Date Created {sortField === 'createdAt' && `(${sortDirection === 'asc' ? '↑' : '↓'})`}
+              <DropdownMenuItem onClick={() => setSortField("createdAt")}>
+                Date Created{" "}
+                {sortField === "createdAt" &&
+                  `(${sortDirection === "asc" ? "↑" : "↓"})`}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortField('resolution')}>
-                Resolution {sortField === 'resolution' && `(${sortDirection === 'asc' ? '↑' : '↓'})`}
+              <DropdownMenuItem onClick={() => setSortField("resolution")}>
+                Resolution{" "}
+                {sortField === "resolution" &&
+                  `(${sortDirection === "asc" ? "↑" : "↓"})`}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={toggleSortDirection}>
-                {sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                {sortDirection === "asc" ? "Ascending" : "Descending"}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -189,11 +204,19 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
       {/* Empty State - No Projects */}
       {isEmpty && (
         <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-          <h2 className="text-3xl font-semibold text-foreground mb-2">Welcome to FreeCut</h2>
+          <h2 className="text-3xl font-semibold text-foreground mb-2">
+            Welcome to FreeCut
+          </h2>
           <p className="text-muted-foreground max-w-md mb-6">
-            Get started by creating your first video project. Choose your resolution, frame rate, and
-            start editing!
+            Get started by creating your first video project. Choose your
+            resolution, frame rate, and start editing!
           </p>
+          <Button variant="outline" className="gap-2" asChild>
+            <Link to="/about">
+              <Info className="w-4 h-4" />
+              Learn More about FreeCut
+            </Link>
+          </Button>
         </div>
       )}
 
@@ -203,10 +226,12 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
           <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
             <Search className="w-8 h-8 text-muted-foreground" />
           </div>
-          <h3 className="text-xl font-semibold text-foreground mb-2">No projects found</h3>
+          <h3 className="text-xl font-semibold text-foreground mb-2">
+            No projects found
+          </h3>
           <p className="text-muted-foreground max-w-md mb-6">
-            We couldn't find any projects matching your search criteria. Try adjusting your filters or
-            search terms.
+            We couldn't find any projects matching your search criteria. Try
+            adjusting your filters or search terms.
           </p>
           <Button variant="outline" onClick={handleClearFilters}>
             Clear Filters
@@ -220,14 +245,18 @@ export function ProjectList({ onEditProject }: ProjectListProps) {
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm text-muted-foreground">
               {filteredProjects.length === allProjects.length
-                ? `${allProjects.length} project${allProjects.length === 1 ? '' : 's'}`
-                : `${filteredProjects.length} of ${allProjects.length} project${allProjects.length === 1 ? '' : 's'}`}
+                ? `${allProjects.length} project${allProjects.length === 1 ? "" : "s"}`
+                : `${filteredProjects.length} of ${allProjects.length} project${allProjects.length === 1 ? "" : "s"}`}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredProjects.map((project) => (
-              <ProjectCard key={project.id} project={project} onEdit={onEditProject} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                onEdit={onEditProject}
+              />
             ))}
           </div>
         </div>

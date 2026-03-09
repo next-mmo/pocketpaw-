@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Item Actions - Cross-domain operations that affect items, transitions, and keyframes.
  */
 
@@ -8,10 +8,15 @@ import { useItemsStore } from '../items-store';
 import { useTransitionsStore } from '../transitions-store';
 import { useKeyframesStore } from '../keyframes-store';
 import { useTimelineSettingsStore } from '../timeline-settings-store';
-import { useSelectionStore } from '@/features/editor/stores/selection-store';
+import { useSelectionStore } from '@/shared/state/selection';
+import { useMediaLibraryStore } from '@/features/timeline/deps/media-library-store';
+import {
+  mediaLibraryService,
+  opfsService,
+} from '@/features/timeline/deps/media-library-service';
 import { toast } from 'sonner';
 import { execute, applyTransitionRepairs, logger } from './shared';
-import { blobUrlManager } from '@/lib/blob-url-manager';
+import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
 import { timelineToSourceFrames } from '../../utils/source-calculations';
 import { computeClampedSlipDelta } from '../../utils/slip-utils';
 import { computeSlideContinuitySourceDelta } from '../../utils/slide-utils';
@@ -213,7 +218,7 @@ export function splitItem(
 ): { leftItem: TimelineItem; rightItem: TimelineItem } | null {
   const item = useItemsStore.getState().items.find((i) => i.id === id);
   if (item) {
-    // Bounds check first — out-of-range splits are a silent no-op (handled by _splitItem),
+    // Bounds check first â€” out-of-range splits are a silent no-op (handled by _splitItem),
     // must not fall through to transition zone check which would false-positive.
     if (splitFrame <= item.from || splitFrame >= item.from + item.durationInFrames) {
       return null;
@@ -300,7 +305,7 @@ export function rateStretchItem(
  * Extracts the video frame at the current playhead, stores it as a media entry,
  * splits the video clip at the playhead, and inserts a still image between the halves.
  *
- * This is async because frame extraction requires backend media processing. The timeline
+ * This is async because frame extraction requires mediabunny. The timeline
  * mutations are batched in a single command for undo/redo atomicity.
  */
 export async function insertFreezeFrame(
@@ -311,7 +316,7 @@ export async function insertFreezeFrame(
   const item = items.find((i) => i.id === itemId);
   if (!item || item.type !== 'video') return false;
 
-  // Validate playhead is within item bounds (exclusive of edges — need room to split)
+  // Validate playhead is within item bounds (exclusive of edges â€” need room to split)
   const itemStart = item.from;
   const itemEnd = item.from + item.durationInFrames;
   if (playheadFrame <= itemStart || playheadFrame >= itemEnd) return false;
@@ -331,7 +336,6 @@ export async function insertFreezeFrame(
   const sourceFrame = sourceStart + timelineToSourceFrames(timelineOffset, speed, fps, sourceFps);
 
   // Get media metadata for resolution and fps info
-  const { useMediaLibraryStore } = await import('@/features/media-library/stores/media-library-store');
   const mediaItems = useMediaLibraryStore.getState().mediaItems;
   const media = mediaItems.find((m) => m.id === item.mediaId);
   if (!media) {
@@ -345,42 +349,62 @@ export async function insertFreezeFrame(
 
   try {
     // Step 1: Get the media file blob
-    const { mediaLibraryService } = await import('@/features/media-library/services/media-library-service');
     const blob = await mediaLibraryService.getMediaFile(media.id);
     if (!blob) {
       logger.error('[insertFreezeFrame] Could not access media file');
       return false;
     }
 
-    // Step 2: Extract frame using backend FFmpeg
-    const frameWidth = media.width || 1920;
-    const frameHeight = media.height || 1080;
-    const sourceFile = blob instanceof File
-      ? blob
-      : new File([blob], media.fileName || 'source-video', {
-        type: media.mimeType || 'video/mp4',
-      });
-
-    const formData = new FormData();
-    formData.append('file', sourceFile);
-    formData.append('timestamp', String(timestampSeconds));
-    formData.append('width', String(frameWidth));
-    formData.append('height', String(frameHeight));
-
-    const frameResponse = await fetch('http://127.0.0.1:7890/api/frame', {
-      method: 'POST',
-      body: formData,
+    // Step 2: Extract frame using mediabunny at native resolution
+    const { Input, BlobSource, CanvasSink, ALL_FORMATS } = await import('mediabunny');
+    const input = new Input({
+      source: new BlobSource(blob as File),
+      formats: ALL_FORMATS,
     });
 
-    if (!frameResponse.ok) {
-      logger.error('[insertFreezeFrame] Backend frame extraction failed', await frameResponse.text());
+    const videoTrack = await input.getPrimaryVideoTrack();
+    if (!videoTrack) {
+      input.dispose();
+      logger.error('[insertFreezeFrame] No video track found');
       return false;
     }
 
-    const frameBlob = await frameResponse.blob();
+    const frameWidth = videoTrack.displayWidth;
+    const frameHeight = videoTrack.displayHeight;
+
+    const sink = new CanvasSink(videoTrack, {
+      width: frameWidth,
+      height: frameHeight,
+      fit: 'fill',
+    });
+
+    const wrapped = await sink.getCanvas(timestampSeconds);
+    if (!wrapped) {
+      (sink as unknown as { dispose?: () => void }).dispose?.();
+      input.dispose();
+      logger.error('[insertFreezeFrame] Failed to extract frame');
+      return false;
+    }
+
+    const canvas = wrapped.canvas as OffscreenCanvas | HTMLCanvasElement;
+    let frameBlob: Blob;
+    if ('convertToBlob' in canvas) {
+      frameBlob = await canvas.convertToBlob({ type: 'image/png' });
+    } else {
+      frameBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('Failed to create blob'))),
+          'image/png'
+        );
+      });
+    }
+
+    // Clean up mediabunny resources
+    (sink as unknown as { dispose?: () => void }).dispose?.();
+    input.dispose();
 
     // Step 3: Store frame as media in IndexedDB
-    const { createMedia, saveThumbnail, associateMediaWithProject } = await import('@/lib/storage/indexeddb');
+    const { createMedia, saveThumbnail, associateMediaWithProject } = await import('@/infrastructure/storage/indexeddb');
     const currentProjectId = useMediaLibraryStore.getState().currentProjectId;
     if (!currentProjectId) {
       logger.error('[insertFreezeFrame] No project context');
@@ -389,19 +413,19 @@ export async function insertFreezeFrame(
 
     const frameMediaId = crypto.randomUUID();
     const frameBlobUrl = blobUrlManager.acquire(frameMediaId, frameBlob);
-    const fileName = `freeze-frame-${item.label || 'video'}-${Math.round(timestampSeconds * 100) / 100}s.jpg`;
+    const fileName = `freeze-frame-${item.label || 'video'}-${Math.round(timestampSeconds * 100) / 100}s.png`;
 
     const mediaMetadata: MediaMetadata = {
       id: frameMediaId,
       storageType: 'opfs',
       fileName,
       fileSize: frameBlob.size,
-      mimeType: 'image/jpeg',
+      mimeType: 'image/png',
       duration: 0,
       width: frameWidth,
       height: frameHeight,
       fps: 0,
-      codec: 'jpeg',
+      codec: 'png',
       bitrate: 0,
       tags: ['freeze-frame'],
       createdAt: Date.now(),
@@ -409,7 +433,6 @@ export async function insertFreezeFrame(
     };
 
     // Store the frame blob in OPFS
-    const { opfsService } = await import('@/features/media-library/services/opfs-service');
     const opfsPath = `content/${frameMediaId.slice(0, 2)}/${frameMediaId.slice(2, 4)}/${frameMediaId}/data`;
     await opfsService.saveFile(opfsPath, await frameBlob.arrayBuffer());
     mediaMetadata.opfsPath = opfsPath;
@@ -536,7 +559,7 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
     const oldFrom = item.from;
     const oldEnd = item.from + item.durationInFrames;
 
-    // Apply the trim — skip adjacency clamping since downstream items will be shifted
+    // Apply the trim â€” skip adjacency clamping since downstream items will be shifted
     if (handle === 'start') {
       useItemsStore.getState()._trimItemStart(id, trimDelta, { skipAdjacentClamp: true });
     } else {
@@ -554,7 +577,7 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
       const newEnd = trimmedItem.from + trimmedItem.durationInFrames;
       shiftAmount = newEnd - oldEnd;
     } else {
-      // Start handle: _trimItemStart moved `from` — move it back and compute
+      // Start handle: _trimItemStart moved `from` â€” move it back and compute
       // the shift from the duration change.
       // _trimItemStart: newFrom = oldFrom + clamped, newDuration = oldDuration - clamped
       // We want: from stays at oldFrom, same newDuration, downstream shifts by -clamped
@@ -563,7 +586,7 @@ export function rippleTrimItem(id: string, handle: 'start' | 'end', trimDelta: n
         useItemsStore.getState()._moveItem(id, oldFrom);
       }
       // Duration got shorter by `actualClamped` (positive = shorter), so downstream
-      // should shift left (negative) by the same amount → shift = -actualClamped
+      // should shift left (negative) by the same amount â†’ shift = -actualClamped
       shiftAmount = -actualClamped;
     }
 
@@ -705,7 +728,7 @@ export function slideItem(
       useTimelineSettingsStore.getState().fps,
     );
 
-    // Adjust neighbors (order: shrink first, then extend — same as rolling edit)
+    // Adjust neighbors (order: shrink first, then extend â€” same as rolling edit)
     if (slideDelta > 0) {
       // Sliding right: right neighbor shrinks start (frees space), left neighbor extends end
       if (rightNeighborId) {
@@ -746,3 +769,4 @@ export function slideItem(
     useTimelineSettingsStore.getState().markDirty();
   }, { id, slideDelta, leftNeighborId, rightNeighborId });
 }
+

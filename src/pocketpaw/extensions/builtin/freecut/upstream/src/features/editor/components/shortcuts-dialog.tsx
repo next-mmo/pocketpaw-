@@ -20,7 +20,21 @@ const SHORTCUT_CATEGORIES: { name: string; keys: HotkeyKey[]; extra?: { descript
   },
   {
     name: 'Editing',
-    keys: ['SPLIT_AT_PLAYHEAD', 'JOIN_ITEMS', 'DELETE_SELECTED', 'RIPPLE_DELETE'],
+    keys: [
+      'SPLIT_AT_PLAYHEAD',
+      'JOIN_ITEMS',
+      'DELETE_SELECTED',
+      'RIPPLE_DELETE',
+      'FREEZE_FRAME',
+      'NUDGE_LEFT',
+      'NUDGE_RIGHT',
+      'NUDGE_UP',
+      'NUDGE_DOWN',
+      'NUDGE_LEFT_LARGE',
+      'NUDGE_RIGHT_LARGE',
+      'NUDGE_UP_LARGE',
+      'NUDGE_DOWN_LARGE',
+    ],
   },
   {
     name: 'History',
@@ -54,7 +68,14 @@ const SHORTCUT_CATEGORIES: { name: string; keys: HotkeyKey[]; extra?: { descript
   },
   {
     name: 'Keyframes',
-    keys: ['ADD_KEYFRAME', 'CLEAR_KEYFRAMES', 'TOGGLE_KEYFRAME_EDITOR'],
+    keys: [
+      'ADD_KEYFRAME',
+      'CLEAR_KEYFRAMES',
+      'TOGGLE_KEYFRAME_EDITOR',
+      'KEYFRAME_EDITOR_GRAPH',
+      'KEYFRAME_EDITOR_DOPESHEET',
+      'KEYFRAME_EDITOR_SPLIT',
+    ],
   },
   {
     name: 'Source Monitor',

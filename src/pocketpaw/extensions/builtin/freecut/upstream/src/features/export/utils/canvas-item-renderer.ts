@@ -1,11 +1,11 @@
-/**
+﻿/**
  * Canvas Item Renderer
  *
  * Per-item render helpers that draw individual timeline items (video, image,
  * text, shape) to an OffscreenCanvas context.  Also contains the transition
  * compositing helper and shared geometry utilities.
  *
- * All functions are stateless – mutable renderer state is passed in via the
+ * All functions are stateless â€“ mutable renderer state is passed in via the
  * {@link ItemRenderContext} parameter.
  */
 
@@ -18,7 +18,7 @@ import type {
   CompositionItem,
 } from '@/types/timeline';
 import type { ItemKeyframes } from '@/types/keyframe';
-import { createLogger } from '@/lib/logger';
+import { createLogger } from '@/shared/logging/logger';
 
 // Subsystem imports
 import { getAnimatedTransform } from './canvas-keyframes';
@@ -33,10 +33,12 @@ import {
   type ActiveTransition,
   type TransitionCanvasSettings,
 } from './canvas-transitions';
+import { applyMasks, svgPathToPath2D, type MaskCanvasSettings } from './canvas-masks';
 import { renderShape } from './canvas-shapes';
-import { gifFrameCache, type CachedGifFrames } from '../../timeline/services/gif-frame-cache';
+import { gifFrameCache, type CachedGifFrames } from '@/features/export/deps/timeline';
 import type { CanvasPool, TextMeasurementCache } from './canvas-pool';
 import type { VideoFrameSource } from './shared-video-extractor';
+import { getShapePath, rotatePath } from '@/features/export/deps/composition-runtime';
 
 const log = createLogger('CanvasItemRenderer');
 
@@ -45,7 +47,7 @@ const log = createLogger('CanvasItemRenderer');
 // ---------------------------------------------------------------------------
 
 /**
- * Canvas settings for rendering – width/height/fps of the composition.
+ * Canvas settings for rendering â€“ width/height/fps of the composition.
  */
 export interface CanvasSettings {
   width: number;
@@ -83,7 +85,7 @@ const FONT_WEIGHT_MAP: Record<string, number> = {
 };
 
 // ---------------------------------------------------------------------------
-// ItemRenderContext – closure state passed explicitly
+// ItemRenderContext â€“ closure state passed explicitly
 // ---------------------------------------------------------------------------
 
 /**
@@ -141,7 +143,7 @@ export interface SubCompRenderData {
 /**
  * Render a single timeline item to the given canvas context.
  *
- * @param sourceFrameOffset – optional frame-level offset added to the video
+ * @param sourceFrameOffset â€“ optional frame-level offset added to the video
  *   source timestamp (used by transitions that need to render a clip at an
  *   offset position).
  */
@@ -487,8 +489,10 @@ function renderTextItem(
 
   const fontSize = item.fontSize ?? 60;
   const fontFamily = item.fontFamily ?? 'Inter';
+  const fontStyle = item.fontStyle ?? 'normal';
   const fontWeightName = item.fontWeight ?? 'normal';
   const fontWeight = FONT_WEIGHT_MAP[fontWeightName] ?? 400;
+  const underline = item.underline ?? false;
   const lineHeight = item.lineHeight ?? 1.2;
   const letterSpacing = item.letterSpacing ?? 0;
   const textAlign = item.textAlign ?? 'center';
@@ -499,11 +503,15 @@ function renderTextItem(
   const itemTop = canvasSettings.height / 2 + transform.y - transform.height / 2;
 
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(itemLeft, itemTop, transform.width, transform.height);
-  ctx.clip();
+  // Preview mode should match the live DOM preview behavior where text isn't
+  // hard-clipped to the item box while editing.
+  if (rctx.renderMode !== 'preview') {
+    ctx.beginPath();
+    ctx.rect(itemLeft, itemTop, transform.width, transform.height);
+    ctx.clip();
+  }
 
-  ctx.font = `${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
+  ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px "${fontFamily}", sans-serif`;
   ctx.fillStyle = item.color ?? '#ffffff';
 
   const availableWidth = transform.width - padding * 2;
@@ -576,6 +584,19 @@ function renderTextItem(
     }
 
     drawTextWithLetterSpacing(ctx, line, lineX, lineY, letterSpacing, false, textMeasureCache);
+
+    if (underline) {
+      drawUnderline(
+        ctx,
+        line,
+        lineX,
+        lineY,
+        textAlign,
+        letterSpacing,
+        fontSize,
+        textMeasureCache,
+      );
+    }
   }
 
   ctx.restore();
@@ -710,6 +731,42 @@ function drawTextWithLetterSpacing(
   ctx.textAlign = currentAlign;
 }
 
+function drawUnderline(
+  ctx: OffscreenCanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  textAlign: 'left' | 'center' | 'right',
+  letterSpacing: number,
+  fontSize: number,
+  textMeasureCache: TextMeasurementCache,
+): void {
+  const lineWidth = textMeasureCache.measure(ctx, text, letterSpacing);
+  if (lineWidth <= 0) return;
+
+  let startX = x;
+  if (textAlign === 'center') {
+    startX = x - lineWidth / 2;
+  } else if (textAlign === 'right') {
+    startX = x - lineWidth;
+  }
+
+  const underlineY = y + Math.max(1, fontSize * 0.08);
+  const underlineThickness = Math.max(1, fontSize * 0.05);
+  const previousLineWidth = ctx.lineWidth;
+  const previousStrokeStyle = ctx.strokeStyle;
+
+  ctx.beginPath();
+  ctx.lineWidth = underlineThickness;
+  ctx.strokeStyle = ctx.fillStyle;
+  ctx.moveTo(startX, underlineY);
+  ctx.lineTo(startX + lineWidth, underlineY);
+  ctx.stroke();
+
+  ctx.lineWidth = previousLineWidth;
+  ctx.strokeStyle = previousStrokeStyle;
+}
+
 // ---------------------------------------------------------------------------
 // Composition item (sub-composition / pre-comp)
 // ---------------------------------------------------------------------------
@@ -741,7 +798,7 @@ async function renderCompositionItem(
   }
 
   // Calculate the local frame within the sub-composition.
-  // sourceStart accounts for trim (left-edge drag) and IO marker offsets —
+  // sourceStart accounts for trim (left-edge drag) and IO marker offsets â€”
   // it tells us how many frames into the sub-comp to start playing.
   const sourceOffset = item.sourceStart ?? item.trimStart ?? 0;
   const localFrame = frame - item.from + sourceOffset;
@@ -756,17 +813,24 @@ async function renderCompositionItem(
 
   // Create an offscreen canvas at the sub-comp dimensions
   const { canvas: subCanvas, ctx: subCtx } = rctx.canvasPool.acquire();
+  const { canvas: subContentCanvas, ctx: subContentCtx } = rctx.canvasPool.acquire();
 
   try {
-    // Clear the sub canvas
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-
     // Use the sub-composition's authored dimensions for canvas settings
     // so transforms and positioning inside the sub-composition are correct.
     // The pooled canvas may be at main canvas size, so we resize it to match.
     subCanvas.width = item.compositionWidth;
     subCanvas.height = item.compositionHeight;
+    subContentCanvas.width = item.compositionWidth;
+    subContentCanvas.height = item.compositionHeight;
+    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+    subContentCtx.clearRect(0, 0, subContentCanvas.width, subContentCanvas.height);
     const subCanvasSettings: CanvasSettings = {
+      width: item.compositionWidth,
+      height: item.compositionHeight,
+      fps: subData.fps,
+    };
+    const subMaskSettings: MaskCanvasSettings = {
       width: item.compositionWidth,
       height: item.compositionHeight,
       fps: subData.fps,
@@ -775,9 +839,21 @@ async function renderCompositionItem(
     // Use a scoped render context with sub-canvas settings so that
     // rotation centers, clipping, and draw dimensions are relative to the
     // sub-composition canvas, not the main canvas.
-    const subRctx: ItemRenderContext = { ...rctx, canvasSettings: subCanvasSettings };
+    const subRctx: ItemRenderContext = {
+      ...rctx,
+      fps: subData.fps,
+      canvasSettings: subCanvasSettings,
+    };
 
-    // Render each visible item at the local frame using pre-computed data
+    // Render each visible item at the local frame using pre-computed data.
+    // Collect active mask shapes and apply them as a group, matching
+    // main-composition mask behavior.
+    const activeSubMasks: Array<{
+      path: Path2D;
+      inverted: boolean;
+      feather: number;
+      maskType: 'clip' | 'alpha';
+    }> = [];
     let renderedSubItems = 0;
     for (const track of subData.sortedTracks) {
       if (!track.visible) continue;
@@ -785,6 +861,43 @@ async function renderCompositionItem(
       for (const subItem of track.items) {
         // Check if item is visible at this local frame
         if (localFrame < subItem.from || localFrame >= subItem.from + subItem.durationInFrames) {
+          continue;
+        }
+
+        const subItemKeyframes = subData.keyframesMap.get(subItem.id);
+        const subItemTransform = getAnimatedTransform(subItem, subItemKeyframes, localFrame, subCanvasSettings);
+
+        if (subItem.type === 'shape' && subItem.isMask) {
+          const maskType = subItem.maskType ?? 'clip';
+          const feather = maskType === 'alpha' ? (subItem.maskFeather ?? 0) : 0;
+          let svgPath = getShapePath(
+            subItem,
+            {
+              x: subItemTransform.x,
+              y: subItemTransform.y,
+              width: subItemTransform.width,
+              height: subItemTransform.height,
+              rotation: 0,
+              opacity: subItemTransform.opacity,
+            },
+            {
+              canvasWidth: subCanvasSettings.width,
+              canvasHeight: subCanvasSettings.height,
+            }
+          );
+
+          if (subItemTransform.rotation !== 0) {
+            const centerX = subCanvasSettings.width / 2 + subItemTransform.x;
+            const centerY = subCanvasSettings.height / 2 + subItemTransform.y;
+            svgPath = rotatePath(svgPath, subItemTransform.rotation, centerX, centerY);
+          }
+
+          activeSubMasks.push({
+            path: svgPathToPath2D(svgPath),
+            inverted: subItem.maskInvert ?? false,
+            feather,
+            maskType,
+          });
           continue;
         }
 
@@ -801,11 +914,7 @@ async function renderCompositionItem(
           });
         }
 
-        // Get transform for the sub-item using pre-built keyframes map (O(1))
-        const subItemKeyframes = subData.keyframesMap.get(subItem.id);
-        const subItemTransform = getAnimatedTransform(subItem, subItemKeyframes, localFrame, subCanvasSettings);
-
-        await renderItem(subCtx, subItem, subItemTransform, localFrame, subRctx);
+        await renderItem(subContentCtx, subItem, subItemTransform, localFrame, subRctx);
         renderedSubItems++;
       }
     }
@@ -818,6 +927,8 @@ async function renderCompositionItem(
         trackCount: subData.sortedTracks.length,
       });
     }
+
+    applyMasks(subCtx, subContentCanvas, activeSubMasks, subMaskSettings);
 
     // Draw the sub-composition result onto the main canvas at the CompositionItem's position
     const drawDimensions = calculateMediaDrawDimensions(
@@ -835,6 +946,7 @@ async function renderCompositionItem(
       drawDimensions.height,
     );
   } finally {
+    rctx.canvasPool.release(subContentCanvas);
     rctx.canvasPool.release(subCanvas);
   }
 }
@@ -911,7 +1023,7 @@ export async function renderTransitionToCanvas(
 
 /**
  * Calculate draw dimensions for media items.
- * Uses "contain" mode – fits content within bounds while maintaining aspect ratio.
+ * Uses "contain" mode â€“ fits content within bounds while maintaining aspect ratio.
  */
 export function calculateMediaDrawDimensions(
   sourceWidth: number,

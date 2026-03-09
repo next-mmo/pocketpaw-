@@ -3,21 +3,23 @@ import { Droplet, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { TimelineItem } from '@/types/timeline';
 import type { TransformProperties, CanvasSettings } from '@/types/transform';
-import { useGizmoStore } from '@/features/preview/stores/gizmo-store';
-import { useThrottledFrame } from '@/features/preview/hooks/use-throttled-frame';
-import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
+import { useGizmoStore, useThrottledFrame } from '@/features/editor/deps/preview';
+import { useTimelineStore } from '@/features/editor/deps/timeline-store';
 import {
   resolveTransform,
   getSourceDimensions,
-} from '@/lib/composition-runtime/utils/transform-resolver';
-import { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
-import { autoKeyframeProperty } from '@/features/keyframes/utils/auto-keyframe';
+} from '@/features/editor/deps/composition-runtime';
+import {
+  getAutoKeyframeOperation,
+  type AutoKeyframeOperation,
+  resolveAnimatedTransform,
+  KeyframeToggle,
+} from '@/features/editor/deps/keyframes';
 import {
   PropertySection,
   PropertyRow,
   NumberInput,
 } from '../components';
-import { KeyframeToggle } from '@/features/keyframes/components/keyframe-toggle';
 
 interface FillSectionProps {
   items: TimelineItem[];
@@ -83,32 +85,31 @@ export const FillSection = memo(function FillSection({
 
   const opacity = opacityRaw === 'mixed' ? 'mixed' : Math.round(opacityRaw * 100);
 
-  // Get keyframe actions for auto-keyframing
-  const addKeyframe = useTimelineStore((s) => s.addKeyframe);
-  const updateKeyframe = useTimelineStore((s) => s.updateKeyframe);
+  // Get batched keyframe action for auto-keyframing
+  const applyAutoKeyframeOperations = useTimelineStore((s) => s.applyAutoKeyframeOperations);
 
   // Helper: Check if opacity has keyframes and auto-keyframe on value change
   const autoKeyframeOpacity = useCallback(
-    (itemId: string, value: number): boolean => {
+    (itemId: string, value: number): AutoKeyframeOperation | null => {
       const item = items.find((i) => i.id === itemId);
-      if (!item) return false;
+      if (!item) return null;
 
       const itemKeyframes = allKeyframes.find((k) => k.itemId === itemId);
-      return autoKeyframeProperty(item, itemKeyframes, 'opacity', value, currentFrame, addKeyframe, updateKeyframe);
+      return getAutoKeyframeOperation(item, itemKeyframes, 'opacity', value, currentFrame);
     },
-    [items, allKeyframes, currentFrame, addKeyframe, updateKeyframe]
+    [items, allKeyframes, currentFrame]
   );
 
   // Helper: Check if cornerRadius has keyframes and auto-keyframe on value change
   const autoKeyframeCornerRadius = useCallback(
-    (itemId: string, value: number): boolean => {
+    (itemId: string, value: number): AutoKeyframeOperation | null => {
       const item = items.find((i) => i.id === itemId);
-      if (!item) return false;
+      if (!item) return null;
 
       const itemKeyframes = allKeyframes.find((k) => k.itemId === itemId);
-      return autoKeyframeProperty(item, itemKeyframes, 'cornerRadius', value, currentFrame, addKeyframe, updateKeyframe);
+      return getAutoKeyframeOperation(item, itemKeyframes, 'cornerRadius', value, currentFrame);
     },
-    [items, allKeyframes, currentFrame, addKeyframe, updateKeyframe]
+    [items, allKeyframes, currentFrame]
   );
 
   // Live preview for opacity (during drag)
@@ -129,17 +130,24 @@ export const FillSection = memo(function FillSection({
       const opacityValue = value / 100; // Convert from 0-100 to 0-1
 
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        if (!autoKeyframeOpacity(itemId, opacityValue)) {
+        const operation = autoKeyframeOpacity(itemId, opacityValue);
+        if (operation) {
+          autoOps.push(operation);
+        } else {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         onTransformChange(itemIds, { opacity: opacityValue });
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity]
+    [itemIds, onTransformChange, clearPreview, autoKeyframeOpacity, applyAutoKeyframeOperations]
   );
 
   // Live preview for corner radius (during drag)
@@ -158,17 +166,24 @@ export const FillSection = memo(function FillSection({
   const handleCornerRadiusChange = useCallback(
     (value: number) => {
       let allHandled = true;
+      const autoOps: AutoKeyframeOperation[] = [];
       for (const itemId of itemIds) {
-        if (!autoKeyframeCornerRadius(itemId, value)) {
+        const operation = autoKeyframeCornerRadius(itemId, value);
+        if (operation) {
+          autoOps.push(operation);
+        } else {
           allHandled = false;
         }
+      }
+      if (autoOps.length > 0) {
+        applyAutoKeyframeOperations(autoOps);
       }
       if (!allHandled) {
         onTransformChange(itemIds, { cornerRadius: value });
       }
       queueMicrotask(() => clearPreview());
     },
-    [itemIds, onTransformChange, clearPreview, autoKeyframeCornerRadius]
+    [itemIds, onTransformChange, clearPreview, autoKeyframeCornerRadius, applyAutoKeyframeOperations]
   );
 
   // Reset opacity to 100%
@@ -261,3 +276,4 @@ export const FillSection = memo(function FillSection({
     </PropertySection>
   );
 });
+

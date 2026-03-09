@@ -13,8 +13,7 @@
     "python": "3.11",
     "venv": "env",
     "env": {
-      "API_HOST": "127.0.0.1",
-      "PYTHONPATH": "./upstream/backend/src"
+      "API_HOST": "127.0.0.1"
     }
   },
   "install": {
@@ -24,7 +23,7 @@
     ]
   },
   "start": {
-    "command": "python -m uvicorn freecut_core.server:app --host 127.0.0.1 --port __PORT__",
+    "command": "python -m uvicorn main:app --host 127.0.0.1 --port __PORT__ --app-dir ./upstream/backend",
     "daemon": true,
     "ready_pattern": "Uvicorn running on",
     "port": "auto"

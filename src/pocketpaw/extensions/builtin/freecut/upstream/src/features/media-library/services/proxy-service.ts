@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Proxy Video Service
  *
  * Manages 720p proxy video generation lifecycle:
@@ -14,42 +14,42 @@
  *     meta.json - { width, height, status, createdAt, version, sourceWidth, sourceHeight }
  */
 
-import { createLogger } from '@/lib/logger';
-import { PROXY_DIR, PROXY_SCHEMA_VERSION } from '../proxy-constants';
+import { createLogger } from "@/shared/logging/logger";
+import { PROXY_DIR, PROXY_SCHEMA_VERSION } from "../proxy-constants";
 import type {
   ProxyWorkerRequest,
   ProxyWorkerResponse,
-} from '../workers/proxy-generation-worker';
+} from "../workers/proxy-generation-worker";
 
-const logger = createLogger('ProxyService');
+const logger = createLogger("ProxyService");
 
 const MIN_WIDTH_THRESHOLD = 1920;
 const MIN_HEIGHT_THRESHOLD = 1080;
 const PROXY_PRIORITY_AUDIO_CODECS = new Set([
-  'ac-3',
-  'ac3',
-  'ec-3',
-  'eac3',
-  'e-ac-3',
-  'dts',
-  'pcm-s16be',
-  'pcm-s16le',
-  'pcm-s24be',
-  'pcm-s24le',
-  'pcm-s32be',
-  'pcm-s32le',
-  's16be',
-  's16le',
-  's24be',
-  's24le',
-  's32be',
-  's32le',
-  's16',
-  's24',
-  's32',
-  'twos',
-  'sowt',
-  'lpcm',
+  "ac-3",
+  "ac3",
+  "ec-3",
+  "eac3",
+  "e-ac-3",
+  "dts",
+  "pcm-s16be",
+  "pcm-s16le",
+  "pcm-s24be",
+  "pcm-s24le",
+  "pcm-s32be",
+  "pcm-s32le",
+  "s16be",
+  "s16le",
+  "s24be",
+  "s24le",
+  "s32be",
+  "s32le",
+  "s16",
+  "s24",
+  "s32",
+  "twos",
+  "sowt",
+  "lpcm",
 ]);
 
 interface ProxyMetadata {
@@ -64,8 +64,8 @@ interface ProxyMetadata {
 
 type ProxyStatusListener = (
   mediaId: string,
-  status: 'generating' | 'ready' | 'error',
-  progress?: number
+  status: "generating" | "ready" | "error",
+  progress?: number,
 ) => void;
 
 class ProxyService {
@@ -115,9 +115,13 @@ class ProxyService {
 
     // Immediately synchronize status for newly mapped aliases.
     if (this.proxyBlobUrlByKey.has(proxyKey)) {
-      this.statusListener?.(mediaId, 'ready');
+      this.statusListener?.(mediaId, "ready");
     } else if (this.generatingProxyKeys.has(proxyKey)) {
-      this.statusListener?.(mediaId, 'generating', this.progressByProxyKey.get(proxyKey) ?? 0);
+      this.statusListener?.(
+        mediaId,
+        "generating",
+        this.progressByProxyKey.get(proxyKey) ?? 0,
+      );
     }
   }
 
@@ -147,9 +151,14 @@ class ProxyService {
    * - Always true for heavy/problematic audio codecs (e.g. E-AC3/AC3/DTS)
    * - Otherwise true for sources above 1080p thresholds
    */
-  needsProxy(width: number, height: number, mimeType: string, audioCodec?: string): boolean {
-    if (!mimeType.startsWith('video/')) return false;
-    const normalizedAudioCodec = (audioCodec ?? '').toLowerCase();
+  needsProxy(
+    width: number,
+    height: number,
+    mimeType: string,
+    audioCodec?: string,
+  ): boolean {
+    if (!mimeType.startsWith("video/")) return false;
+    const normalizedAudioCodec = (audioCodec ?? "").toLowerCase();
     if (PROXY_PRIORITY_AUDIO_CODECS.has(normalizedAudioCodec)) {
       return true;
     }
@@ -157,14 +166,15 @@ class ProxyService {
   }
 
   /**
-   * Start proxy generation for a media item
+   * Start proxy generation for a media item.
+   * Tries FFmpeg backend first (GPU-accelerated), falls back to browser Web Worker.
    */
   generateProxy(
     mediaId: string,
     blobUrl: string,
     sourceWidth: number,
     sourceHeight: number,
-    proxyKey?: string
+    proxyKey?: string,
   ): void {
     if (proxyKey) {
       this.setProxyKey(mediaId, proxyKey);
@@ -172,20 +182,21 @@ class ProxyService {
     const resolvedProxyKey = this.resolveProxyKey(mediaId, proxyKey);
 
     if (this.proxyBlobUrlByKey.has(resolvedProxyKey)) {
-      this.emitStatusForProxyKey(resolvedProxyKey, 'ready');
+      this.emitStatusForProxyKey(resolvedProxyKey, "ready");
       return;
     }
 
     if (this.generatingProxyKeys.has(resolvedProxyKey)) {
       this.emitStatusForProxyKey(
         resolvedProxyKey,
-        'generating',
-        this.progressByProxyKey.get(resolvedProxyKey) ?? 0
+        "generating",
+        this.progressByProxyKey.get(resolvedProxyKey) ?? 0,
       );
       return;
     }
 
-    const previousSourceBlobUrl = this.sourceBlobUrlByProxyKey.get(resolvedProxyKey);
+    const previousSourceBlobUrl =
+      this.sourceBlobUrlByProxyKey.get(resolvedProxyKey);
     if (previousSourceBlobUrl && previousSourceBlobUrl !== blobUrl) {
       URL.revokeObjectURL(previousSourceBlobUrl);
     }
@@ -193,12 +204,140 @@ class ProxyService {
 
     this.generatingProxyKeys.add(resolvedProxyKey);
     this.progressByProxyKey.set(resolvedProxyKey, 0);
-    this.emitStatusForProxyKey(resolvedProxyKey, 'generating', 0);
+    this.emitStatusForProxyKey(resolvedProxyKey, "generating", 0);
 
+    // Try backend-first (GPU-accelerated FFmpeg), fall back to browser worker
+    this.tryBackendProxy(
+      mediaId,
+      resolvedProxyKey,
+      blobUrl,
+      sourceWidth,
+      sourceHeight,
+    ).catch(() => {
+      // Backend unavailable or failed — fall back to browser worker
+      logger.debug(
+        `Backend proxy failed for ${resolvedProxyKey}, falling back to worker`,
+      );
+      this.generateProxyViaWorker(
+        resolvedProxyKey,
+        blobUrl,
+        sourceWidth,
+        sourceHeight,
+      );
+    });
+  }
+
+  /**
+   * Try to generate proxy via the FFmpeg backend (GPU-accelerated).
+   * Uploads the source video, triggers proxy generation, downloads the result.
+   */
+  private async tryBackendProxy(
+    mediaId: string,
+    proxyKey: string,
+    blobUrl: string,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): Promise<void> {
+    const {
+      checkFFmpegCapabilities,
+      uploadMediaFile,
+      generateProxy: backendGenerateProxy,
+      downloadProxy,
+    } = await import("../deps/export");
+
+    // Check if backend is available
+    const caps = await checkFFmpegCapabilities();
+    if (!caps.available) {
+      throw new Error("Backend not available");
+    }
+
+    logger.info(`Using backend GPU for proxy generation: ${proxyKey}`);
+    this.progressByProxyKey.set(proxyKey, 10);
+    this.emitStatusForProxyKey(proxyKey, "generating", 10);
+
+    // Upload source video to backend
+    const sourceBlob = await fetch(blobUrl).then((r) => r.blob());
+    await uploadMediaFile(mediaId, sourceBlob, `${mediaId}.mp4`);
+
+    this.progressByProxyKey.set(proxyKey, 30);
+    this.emitStatusForProxyKey(proxyKey, "generating", 30);
+
+    // Generate proxy on backend
+    const proxyResult = await backendGenerateProxy(mediaId);
+
+    this.progressByProxyKey.set(proxyKey, 80);
+    this.emitStatusForProxyKey(proxyKey, "generating", 80);
+
+    // Download proxy blob
+    const proxyBlob = await downloadProxy(proxyResult.jobId);
+
+    // Save to OPFS (same structure as worker-generated proxies)
+    try {
+      const root = await navigator.storage.getDirectory();
+      const proxyRoot = await root.getDirectoryHandle(PROXY_DIR, {
+        create: true,
+      });
+      const mediaDir = await proxyRoot.getDirectoryHandle(proxyKey, {
+        create: true,
+      });
+
+      // Write proxy file
+      const proxyFileHandle = await mediaDir.getFileHandle("proxy.mp4", {
+        create: true,
+      });
+      const writable = await proxyFileHandle.createWritable();
+      await writable.write(proxyBlob);
+      await writable.close();
+
+      // Write metadata
+      const metadata: ProxyMetadata = {
+        version: PROXY_SCHEMA_VERSION,
+        width: proxyResult.width,
+        height: proxyResult.height,
+        sourceWidth,
+        sourceHeight,
+        status: "ready",
+        createdAt: Date.now(),
+      };
+      const metaHandle = await mediaDir.getFileHandle("meta.json", {
+        create: true,
+      });
+      const metaWritable = await metaHandle.createWritable();
+      await metaWritable.write(JSON.stringify(metadata));
+      await metaWritable.close();
+    } catch (opfsError) {
+      logger.warn(
+        "Failed to save proxy to OPFS, using in-memory blob URL",
+        opfsError,
+      );
+    }
+
+    // Cache the blob URL
+    const proxyBlobUrl = URL.createObjectURL(proxyBlob);
+    this.proxyBlobUrlByKey.set(proxyKey, proxyBlobUrl);
+    this.generatingProxyKeys.delete(proxyKey);
+    this.progressByProxyKey.delete(proxyKey);
+    this.revokeTrackedSourceBlobUrl(proxyKey);
+    this.emitStatusForProxyKey(proxyKey, "ready");
+
+    logger.info(
+      `Backend proxy complete for ${proxyKey} in ${proxyResult.elapsed}s (${proxyResult.encoder})`,
+    );
+  }
+
+  /**
+   * Fall back to browser-based proxy generation via Web Worker (mediabunny).
+   */
+  private generateProxyViaWorker(
+    proxyKey: string,
+    blobUrl: string,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): void {
     const worker = this.getWorker();
     worker.postMessage({
-      type: 'generate',
-      mediaId: resolvedProxyKey,
+      type: "generate",
+      mediaId: proxyKey,
       blobUrl,
       sourceWidth,
       sourceHeight,
@@ -216,7 +355,7 @@ class ProxyService {
     this.progressByProxyKey.delete(resolvedProxyKey);
     const worker = this.getWorker();
     worker.postMessage({
-      type: 'cancel',
+      type: "cancel",
       mediaId: resolvedProxyKey,
     } as ProxyWorkerRequest);
   }
@@ -286,7 +425,7 @@ class ProxyService {
       }
 
       for await (const entry of proxyRoot.values()) {
-        if (entry.kind !== 'directory') continue;
+        if (entry.kind !== "directory") continue;
         if (!requestedProxyKeys.has(entry.name)) continue;
 
         const proxyKey = entry.name;
@@ -295,11 +434,11 @@ class ProxyService {
           const mediaDir = await proxyRoot.getDirectoryHandle(proxyKey);
 
           // Check metadata
-          const metaHandle = await mediaDir.getFileHandle('meta.json');
+          const metaHandle = await mediaDir.getFileHandle("meta.json");
           const metaFile = await metaHandle.getFile();
           const metadata: ProxyMetadata = JSON.parse(await metaFile.text());
 
-          if (metadata.status !== 'ready') continue;
+          if (metadata.status !== "ready") continue;
 
           // Invalidate stale proxy formats to avoid aspect distortion from
           // legacy fixed-1280x720 transcodes.
@@ -308,28 +447,35 @@ class ProxyService {
             if (mappedMediaIds && mappedMediaIds.size > 0) {
               staleProxyIds.push(...mappedMediaIds);
             } else {
-              logger.debug(`Stale proxy ${proxyKey} has no mapped media ids; deleting stale file only`);
+              logger.debug(
+                `Stale proxy ${proxyKey} has no mapped media ids; deleting stale file only`,
+              );
             }
 
             try {
               await proxyRoot.removeEntry(proxyKey, { recursive: true });
-              logger.debug(`Removed stale proxy (schema mismatch) for ${proxyKey}`);
+              logger.debug(
+                `Removed stale proxy (schema mismatch) for ${proxyKey}`,
+              );
             } catch (error) {
-              logger.error(`Failed to remove stale proxy for ${proxyKey}:`, error);
+              logger.error(
+                `Failed to remove stale proxy for ${proxyKey}:`,
+                error,
+              );
             }
 
             continue;
           }
 
           // Load proxy file and create blob URL
-          const proxyHandle = await mediaDir.getFileHandle('proxy.mp4');
+          const proxyHandle = await mediaDir.getFileHandle("proxy.mp4");
           const proxyFile = await proxyHandle.getFile();
 
           if (proxyFile.size === 0) continue;
 
           const blobUrl = URL.createObjectURL(proxyFile);
           this.proxyBlobUrlByKey.set(proxyKey, blobUrl);
-          this.emitStatusForProxyKey(proxyKey, 'ready');
+          this.emitStatusForProxyKey(proxyKey, "ready");
 
           logger.debug(`Loaded existing proxy for ${proxyKey}`);
         } catch {
@@ -337,7 +483,7 @@ class ProxyService {
         }
       }
     } catch (error) {
-      logger.warn('Failed to load existing proxies:', error);
+      logger.warn("Failed to load existing proxies:", error);
     }
 
     return staleProxyIds;
@@ -349,8 +495,8 @@ class ProxyService {
   private getWorker(): Worker {
     if (!this.worker) {
       this.worker = new Worker(
-        new URL('../workers/proxy-generation-worker.ts', import.meta.url),
-        { type: 'module' }
+        new URL("../workers/proxy-generation-worker.ts", import.meta.url),
+        { type: "module" },
       );
 
       this.worker.onmessage = (event: MessageEvent<ProxyWorkerResponse>) => {
@@ -358,7 +504,7 @@ class ProxyService {
       };
 
       this.worker.onerror = (error) => {
-        logger.error('Proxy worker error:', error);
+        logger.error("Proxy worker error:", error);
       };
     }
     return this.worker;
@@ -372,13 +518,13 @@ class ProxyService {
     const proxyKey = message.mediaId;
 
     switch (message.type) {
-      case 'progress': {
+      case "progress": {
         this.progressByProxyKey.set(proxyKey, message.progress);
-        this.emitStatusForProxyKey(proxyKey, 'generating', message.progress);
+        this.emitStatusForProxyKey(proxyKey, "generating", message.progress);
         break;
       }
 
-      case 'complete': {
+      case "complete": {
         this.generatingProxyKeys.delete(proxyKey);
         this.progressByProxyKey.delete(proxyKey);
         this.revokeTrackedSourceBlobUrl(proxyKey);
@@ -387,12 +533,12 @@ class ProxyService {
         break;
       }
 
-      case 'error': {
+      case "error": {
         this.generatingProxyKeys.delete(proxyKey);
         this.progressByProxyKey.delete(proxyKey);
         this.revokeTrackedSourceBlobUrl(proxyKey);
         logger.error(`Proxy generation failed for ${proxyKey}:`, message.error);
-        this.emitStatusForProxyKey(proxyKey, 'error');
+        this.emitStatusForProxyKey(proxyKey, "error");
         break;
       }
     }
@@ -406,11 +552,11 @@ class ProxyService {
       const root = await navigator.storage.getDirectory();
       const proxyRoot = await root.getDirectoryHandle(PROXY_DIR);
       const mediaDir = await proxyRoot.getDirectoryHandle(proxyKey);
-      const proxyHandle = await mediaDir.getFileHandle('proxy.mp4');
+      const proxyHandle = await mediaDir.getFileHandle("proxy.mp4");
       const proxyFile = await proxyHandle.getFile();
 
       if (proxyFile.size === 0) {
-        this.emitStatusForProxyKey(proxyKey, 'error');
+        this.emitStatusForProxyKey(proxyKey, "error");
         return;
       }
 
@@ -421,12 +567,12 @@ class ProxyService {
 
       const blobUrl = URL.createObjectURL(proxyFile);
       this.proxyBlobUrlByKey.set(proxyKey, blobUrl);
-      this.emitStatusForProxyKey(proxyKey, 'ready');
+      this.emitStatusForProxyKey(proxyKey, "ready");
 
       logger.debug(`Proxy ready for ${proxyKey}`);
     } catch (error) {
       logger.error(`Failed to load completed proxy for ${proxyKey}:`, error);
-      this.emitStatusForProxyKey(proxyKey, 'error');
+      this.emitStatusForProxyKey(proxyKey, "error");
     }
   }
 
@@ -458,7 +604,7 @@ class ProxyService {
       for (const proxyKey of proxyKeys) {
         try {
           const mediaDir = await proxyRoot.getDirectoryHandle(proxyKey);
-          const proxyHandle = await mediaDir.getFileHandle('proxy.mp4');
+          const proxyHandle = await mediaDir.getFileHandle("proxy.mp4");
           const proxyFile = await proxyHandle.getFile();
 
           if (proxyFile.size === 0) {
@@ -491,7 +637,7 @@ class ProxyService {
         }
       }
     } catch (error) {
-      logger.warn('Failed to refresh proxy blob URLs:', error);
+      logger.warn("Failed to refresh proxy blob URLs:", error);
     } finally {
       this.isRefreshing = false;
     }
@@ -522,8 +668,8 @@ class ProxyService {
 
   private emitStatusForProxyKey(
     proxyKey: string,
-    status: 'generating' | 'ready' | 'error',
-    progress?: number
+    status: "generating" | "ready" | "error",
+    progress?: number,
   ): void {
     const mediaIds = this.mediaIdsByProxyKey.get(proxyKey);
     if (mediaIds && mediaIds.size > 0) {

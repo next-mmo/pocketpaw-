@@ -1,55 +1,73 @@
-/**
+﻿/**
  * Client-side render hook
  *
  * Provides a React hook for video rendering using mediabunny.
  * Uses blob URLs directly, runs entirely in the browser with WebCodecs.
  */
-import { useCallback, useRef, useState } from 'react';
-import { resolveMediaUrls } from '@/features/preview/utils/media-resolver';
-import { useProjectStore } from '@/features/projects/stores/project-store';
-import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
-import { createLogger } from '@/lib/logger';
+
+import { useState, useCallback, useRef } from "react";
 import type {
-  CompositionInputProps,
   ExportSettings,
   ExtendedExportSettings,
-} from '@/types/export';
-import {
-  renderAudioOnly,
-  renderComposition,
-} from '../utils/client-render-engine';
+  CompositionInputProps,
+} from "@/types/export";
 import type {
-  ClientAudioContainer,
+  RenderProgress,
   ClientRenderResult,
   ClientVideoContainer,
-  RenderProgress,
-} from '../utils/client-renderer';
+  ClientAudioContainer,
+} from "../utils/client-renderer";
 import {
-  estimateFileSize,
-  formatBytes,
-  getAudioBitrateForQuality,
-  getDefaultAudioCodec,
-  getSupportedCodecs,
   mapToClientSettings,
   validateSettings,
-} from '../utils/client-renderer';
-import { convertTimelineToComposition } from '../utils/timeline-to-composition';
+  getSupportedCodecs,
+  formatBytes,
+  estimateFileSize,
+  getDefaultAudioCodec,
+  getAudioBitrateForQuality,
+  getMimeType,
+} from "../utils/client-renderer";
+import {
+  renderComposition,
+  renderAudioOnly,
+} from "../utils/client-render-engine";
+import {
+  checkFFmpegCapabilities,
+  downloadExport,
+  uploadMediaFile,
+  exportComposition,
+  type FFmpegCapabilities,
+} from "../utils/ffmpeg-export-client";
+import { convertTimelineToComposition } from "../utils/timeline-to-composition";
+import { useTimelineStore } from "@/features/export/deps/timeline";
+import { useProjectStore } from "@/features/export/deps/projects";
+import { resolveMediaUrls } from "@/features/export/deps/media-library";
+import { createLogger } from "@/shared/logging/logger";
 import type {
   ExportRenderWorkerRequest,
   ExportRenderWorkerResponse,
-} from '../workers/export-render-worker.types';
+} from "../workers/export-render-worker.types";
 
-const log = createLogger('useClientRender');
+const log = createLogger("useClientRender");
+
+// Cache FFmpeg capabilities to avoid repeated checks
+let ffmpegCapabilitiesCache: FFmpegCapabilities | null = null;
+let ffmpegCapabilitiesCacheTime = 0;
+const FFMPEG_CACHE_TTL = 30_000; // 30 seconds
+
+// ---------------------------------------------------------------------------
+// Engine definitions
+// ---------------------------------------------------------------------------
 
 type ClientRenderStatus =
-  | 'idle'
-  | 'preparing'
-  | 'rendering'
-  | 'encoding'
-  | 'finalizing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  | "idle"
+  | "preparing"
+  | "rendering"
+  | "encoding"
+  | "finalizing"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 interface UseClientRenderReturn {
   // State
@@ -82,7 +100,7 @@ export function useClientRender(): UseClientRenderReturn {
   const [progress, setProgress] = useState(0);
   const [renderedFrames, setRenderedFrames] = useState<number>();
   const [totalFrames, setTotalFrames] = useState<number>();
-  const [status, setStatus] = useState<ClientRenderStatus>('idle');
+  const [status, setStatus] = useState<ClientRenderStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ClientRenderResult | null>(null);
 
@@ -109,21 +127,21 @@ export function useClientRender(): UseClientRenderReturn {
 
     // Map phase to status
     switch (progressData.phase) {
-      case 'preparing':
-        setStatus('preparing');
+      case "preparing":
+        setStatus("preparing");
         break;
-      case 'rendering':
-        setStatus('rendering');
+      case "rendering":
+        setStatus("rendering");
         break;
-      case 'encoding':
-        setStatus('encoding');
+      case "encoding":
+        setStatus("encoding");
         break;
-      case 'finalizing':
-        setStatus('finalizing');
+      case "finalizing":
+        setStatus("finalizing");
         break;
     }
 
-    log.debug('Progress:', progressData.message, `${progressData.progress}%`);
+    log.debug("Progress:", progressData.message, `${progressData.progress}%`);
   }, []);
 
   /**
@@ -132,17 +150,17 @@ export function useClientRender(): UseClientRenderReturn {
   const isExtendedSettings = (
     settings: ExportSettings | ExtendedExportSettings,
   ): settings is ExtendedExportSettings => {
-    return 'mode' in settings;
+    return "mode" in settings;
   };
 
   const renderOnMainThread = useCallback(
     async (
-      exportMode: 'video' | 'audio',
+      exportMode: "video" | "audio",
       clientSettings: ReturnType<typeof mapToClientSettings>,
       composition: CompositionInputProps,
       signal: AbortSignal,
     ): Promise<ClientRenderResult> => {
-      if (exportMode === 'audio') {
+      if (exportMode === "audio") {
         return renderAudioOnly({
           settings: clientSettings,
           composition,
@@ -167,39 +185,39 @@ export function useClientRender(): UseClientRenderReturn {
       composition: CompositionInputProps,
       signal: AbortSignal,
     ): Promise<ClientRenderResult> => {
-      if (typeof Worker === 'undefined') {
-        throw new Error('WORKER_UNAVAILABLE');
+      if (typeof Worker === "undefined") {
+        throw new Error("WORKER_UNAVAILABLE");
       }
 
       return new Promise<ClientRenderResult>((resolve, reject) => {
         if (signal.aborted) {
-          reject(new DOMException('Render cancelled', 'AbortError'));
+          reject(new DOMException("Render cancelled", "AbortError"));
           return;
         }
 
         const requestId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const worker = new Worker(
-          new URL('../workers/export-render.worker.ts', import.meta.url),
-          { type: 'module' },
+          new URL("../workers/export-render.worker.ts", import.meta.url),
+          { type: "module" },
         );
 
         exportWorkerRef.current = worker;
         exportWorkerRequestIdRef.current = requestId;
 
         const cleanup = () => {
-          signal.removeEventListener('abort', onAbort);
+          signal.removeEventListener("abort", onAbort);
           terminateExportWorker();
         };
 
         const onAbort = () => {
           const cancelMessage: ExportRenderWorkerRequest = {
-            type: 'cancel',
+            type: "cancel",
             requestId,
           };
           worker.postMessage(cancelMessage);
         };
 
-        signal.addEventListener('abort', onAbort, { once: true });
+        signal.addEventListener("abort", onAbort, { once: true });
 
         worker.onmessage = (
           event: MessageEvent<ExportRenderWorkerResponse>,
@@ -210,18 +228,18 @@ export function useClientRender(): UseClientRenderReturn {
           }
 
           switch (response.type) {
-            case 'progress':
+            case "progress":
               handleProgress(response.progress);
               break;
-            case 'complete':
+            case "complete":
               cleanup();
               resolve(response.result);
               break;
-            case 'cancelled':
+            case "cancelled":
               cleanup();
-              reject(new DOMException('Render cancelled', 'AbortError'));
+              reject(new DOMException("Render cancelled", "AbortError"));
               break;
-            case 'error':
+            case "error":
               cleanup();
               reject(new Error(response.error));
               break;
@@ -232,7 +250,7 @@ export function useClientRender(): UseClientRenderReturn {
           cleanup();
           const location = event.filename
             ? ` @${event.filename}:${event.lineno}:${event.colno}`
-            : '';
+            : "";
           reject(
             new Error(
               `EXPORT_WORKER_RUNTIME_ERROR:${event.message}${location}`,
@@ -241,7 +259,7 @@ export function useClientRender(): UseClientRenderReturn {
         };
 
         const startMessage: ExportRenderWorkerRequest = {
-          type: 'start',
+          type: "start",
           requestId,
           settings: clientSettings,
           composition,
@@ -262,7 +280,7 @@ export function useClientRender(): UseClientRenderReturn {
         setProgress(0);
         setError(null);
         setResult(null);
-        setStatus('preparing');
+        setStatus("preparing");
 
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();
@@ -289,7 +307,7 @@ export function useClientRender(): UseClientRenderReturn {
         // Determine export mode and container from extended settings
         const exportMode = isExtendedSettings(settings)
           ? settings.mode
-          : 'video';
+          : "video";
         const videoContainer = isExtendedSettings(settings)
           ? settings.videoContainer
           : undefined;
@@ -304,7 +322,7 @@ export function useClientRender(): UseClientRenderReturn {
         const effectiveInPoint = renderWholeProject ? null : inPoint;
         const effectiveOutPoint = renderWholeProject ? null : outPoint;
 
-        log.debug('Starting client export', {
+        log.debug("Starting client export", {
           fps,
           tracksCount: tracks.length,
           itemsCount: items.length,
@@ -323,11 +341,11 @@ export function useClientRender(): UseClientRenderReturn {
         const clientSettings = mapToClientSettings(settings, fps);
 
         // Override container if specified in extended settings
-        if (exportMode === 'video' && videoContainer) {
+        if (exportMode === "video" && videoContainer) {
           clientSettings.container = videoContainer as ClientVideoContainer;
-        } else if (exportMode === 'audio' && audioContainer) {
+        } else if (exportMode === "audio" && audioContainer) {
           clientSettings.container = audioContainer as ClientAudioContainer;
-          clientSettings.mode = 'audio';
+          clientSettings.mode = "audio";
           clientSettings.audioCodec = getDefaultAudioCodec(audioContainer);
           clientSettings.audioBitrate = getAudioBitrateForQuality(
             settings.quality,
@@ -338,52 +356,44 @@ export function useClientRender(): UseClientRenderReturn {
         clientSettings.mode = exportMode;
 
         // Validate settings (skip video codec validation for audio-only)
-        if (exportMode === 'video') {
+        if (exportMode === "video") {
           const validation = validateSettings(clientSettings);
           if (!validation.valid) {
             throw new Error(validation.error);
           }
 
-          // Check WebCodecs support (informational only — all encoding is handled by the
-          // Python backend so missing WebCodecs support does NOT block export).
+          // Check codec support
           const supportedCodecs = await getSupportedCodecs(
             clientSettings.resolution.width,
             clientSettings.resolution.height,
           );
 
           if (!supportedCodecs.includes(clientSettings.codec)) {
-            // Try fallback to H.264 if available in the browser
-            if (supportedCodecs.includes('avc')) {
+            // Try fallback to H.264 if available
+            if (supportedCodecs.includes("avc")) {
               log.warn(
-                `WebCodecs: codec ${clientSettings.codec} not supported in browser, noting H.264 available`,
+                `Codec ${clientSettings.codec} not supported, falling back to H.264`,
               );
-              clientSettings.codec = 'avc';
+              clientSettings.codec = "avc";
               if (!videoContainer) {
-                clientSettings.container = 'mp4';
+                clientSettings.container = "mp4";
               }
             } else if (supportedCodecs.length > 0) {
-              // Use first available WebCodecs codec for metadata purposes
+              // Use first available codec
               const fallbackCodec = supportedCodecs[0]!;
               clientSettings.codec = fallbackCodec;
               if (!videoContainer) {
-                clientSettings.container = ['vp8', 'vp9', 'av1'].includes(
+                clientSettings.container = ["vp8", "vp9", "av1"].includes(
                   fallbackCodec,
                 )
-                  ? 'webm'
-                  : 'mp4';
+                  ? "webm"
+                  : "mp4";
               }
-              log.warn(
-                `WebCodecs: using codec ${fallbackCodec} for client settings`,
-              );
+              log.warn(`Using fallback codec: ${fallbackCodec}`);
             } else {
-              // No WebCodecs support — backend will still handle encoding, default to H.264/MP4
-              log.warn(
-                'WebCodecs not available in this browser; backend will encode with H.264 regardless',
+              throw new Error(
+                "No supported video codecs available in this browser",
               );
-              clientSettings.codec = 'avc';
-              if (!videoContainer) {
-                clientSettings.container = 'mp4';
-              }
             }
           }
         }
@@ -414,7 +424,7 @@ export function useClientRender(): UseClientRenderReturn {
         );
         const compositionDuration = composition.durationInFrames ?? 0;
 
-        log.debug('Composition created', {
+        log.debug("Composition created", {
           durationInFrames: compositionDuration,
           durationSeconds: compositionDuration / fps,
           tracksCount: composition.tracks.length,
@@ -442,9 +452,9 @@ export function useClientRender(): UseClientRenderReturn {
         for (const track of resolvedTracks) {
           for (const item of track.items ?? []) {
             totalResolvedItems++;
-            if ('src' in item && item.src) {
+            if ("src" in item && item.src) {
               itemsWithSrc++;
-              log.debug('Item with resolved src', {
+              log.debug("Item with resolved src", {
                 itemId: item.id,
                 type: item.type,
                 from: item.from,
@@ -452,11 +462,11 @@ export function useClientRender(): UseClientRenderReturn {
                 srcPrefix: (item.src as string)?.substring(0, 50),
               });
             } else if (
-              item.type === 'video' ||
-              item.type === 'audio' ||
-              item.type === 'image'
+              item.type === "video" ||
+              item.type === "audio" ||
+              item.type === "image"
             ) {
-              log.warn('Media item missing src', {
+              log.warn("Media item missing src", {
                 itemId: item.id,
                 type: item.type,
                 mediaId: item.mediaId,
@@ -465,73 +475,255 @@ export function useClientRender(): UseClientRenderReturn {
           }
         }
 
-        log.debug('Media URLs resolved', {
+        log.debug("Media URLs resolved", {
           totalItems: totalResolvedItems,
           itemsWithSrc,
         });
 
         // Run the render based on export mode
-        let renderResult: ClientRenderResult;
+        let renderResult: ClientRenderResult | null = null;
         const signal = abortControllerRef.current.signal;
 
-        try {
-          renderResult = await renderInWorker(
-            clientSettings,
-            composition,
-            signal,
-          );
-        } catch (workerError) {
-          if (
-            workerError instanceof DOMException &&
-            workerError.name === 'AbortError'
-          ) {
-            throw workerError;
+        // === FFmpeg GPU-accelerated path (preferred for video exports) ===
+        let usedFFmpeg = false;
+        if (exportMode === "video") {
+          try {
+            // Check FFmpeg availability (cached)
+            const now = Date.now();
+            if (
+              !ffmpegCapabilitiesCache ||
+              now - ffmpegCapabilitiesCacheTime > FFMPEG_CACHE_TTL
+            ) {
+              ffmpegCapabilitiesCache = await checkFFmpegCapabilities();
+              ffmpegCapabilitiesCacheTime = now;
+            }
+
+            if (ffmpegCapabilitiesCache.available) {
+              log.info("FFmpeg available — using backend composition export", {
+                encoder: ffmpegCapabilitiesCache.hwAccel.encoder,
+                hwAccel: ffmpegCapabilitiesCache.hwAccel.available,
+              });
+
+              // Step 1: Upload all media files to the backend
+              handleProgress({
+                phase: "preparing",
+                progress: 5,
+                totalFrames: composition.durationInFrames ?? 0,
+                message: "Uploading media to GPU encoder...",
+              });
+
+              const mediaMap: Record<string, string> = {};
+              const mediaIds = new Set<string>();
+
+              // Collect all unique mediaIds from the composition
+              for (const track of composition.tracks) {
+                for (const item of track.items) {
+                  if (
+                    item.mediaId &&
+                    (item.type === "video" ||
+                      item.type === "audio" ||
+                      item.type === "image")
+                  ) {
+                    mediaIds.add(item.mediaId);
+                  }
+                }
+              }
+
+              // Upload each media file to backend
+              const mediaLibraryService = await (
+                await import("@/features/export/deps/media-library")
+              ).importMediaLibraryService();
+
+              let uploadedCount = 0;
+              const totalMedia = mediaIds.size;
+
+              for (const mediaId of mediaIds) {
+                if (signal?.aborted) {
+                  throw new DOMException("Export cancelled", "AbortError");
+                }
+
+                try {
+                  const media = await mediaLibraryService.getMedia(mediaId);
+                  const blob = await mediaLibraryService.getMediaFile(mediaId);
+
+                  if (!blob || !media) {
+                    log.warn(`Media not found for upload: ${mediaId}`);
+                    continue;
+                  }
+
+                  const result = await uploadMediaFile(
+                    mediaId,
+                    blob,
+                    media.fileName ?? "media.mp4",
+                  );
+                  mediaMap[mediaId] = result.path;
+                  uploadedCount++;
+
+                  handleProgress({
+                    phase: "preparing",
+                    progress: 5 + Math.round((uploadedCount / totalMedia) * 15),
+                    totalFrames: composition.durationInFrames ?? 0,
+                    message: result.cached
+                      ? `Media cached (${uploadedCount}/${totalMedia})`
+                      : `Uploading media (${uploadedCount}/${totalMedia})...`,
+                  });
+
+                  log.info(`Uploaded media ${mediaId}`, {
+                    path: result.path,
+                    cached: result.cached,
+                  });
+                } catch (uploadError) {
+                  log.error(`Failed to upload media ${mediaId}`, uploadError);
+                }
+              }
+
+              if (Object.keys(mediaMap).length === 0) {
+                log.warn(
+                  "No media files uploaded, falling back to browser export",
+                );
+                throw new Error("No media files could be uploaded to backend");
+              }
+
+              // Step 2: Export the composition via backend FFmpeg
+              handleProgress({
+                phase: "encoding",
+                progress: 25,
+                totalFrames: composition.durationInFrames ?? 0,
+                message: "GPU encoding with NVENC...",
+              });
+
+              const compResult = await exportComposition({
+                composition: composition as unknown as Record<string, unknown>,
+                mediaMap,
+                settings: {
+                  codec: clientSettings.codec,
+                  quality: clientSettings.quality,
+                  container: clientSettings.container,
+                  width: clientSettings.resolution.width,
+                  height: clientSettings.resolution.height,
+                  videoBitrate: clientSettings.videoBitrate,
+                  audioBitrate: clientSettings.audioBitrate,
+                },
+                useHardwareAccel: true,
+              });
+
+              handleProgress({
+                phase: "finalizing",
+                progress: 90,
+                totalFrames: composition.durationInFrames ?? 0,
+                message: "Downloading result...",
+              });
+
+              // Step 3: Download the result
+              const downloadBlob = await downloadExport(compResult.jobId);
+
+              renderResult = {
+                blob: downloadBlob,
+                mimeType: getMimeType(
+                  clientSettings.container,
+                  clientSettings.codec,
+                ),
+                duration: (composition.durationInFrames ?? 0) / composition.fps,
+                fileSize: downloadBlob.size,
+              };
+              usedFFmpeg = true;
+
+              log.info(
+                `Composition export completed in ${compResult.elapsed}s`,
+                {
+                  encoder: compResult.encoder,
+                  hwAccel: compResult.hwAccel,
+                  fileSize: compResult.fileSize,
+                },
+              );
+            }
+          } catch (ffmpegError) {
+            if (
+              ffmpegError instanceof DOMException &&
+              ffmpegError.name === "AbortError"
+            ) {
+              throw ffmpegError;
+            }
+
+            // CRITICAL: Log the actual error so we can diagnose GPU pipeline failures
+            console.error(
+              "[GPU Export] FFmpeg composition export failed, falling back to browser export:",
+              ffmpegError instanceof Error ? ffmpegError.message : ffmpegError,
+              ffmpegError instanceof Error ? ffmpegError.stack : "",
+            );
+            log.warn(
+              "FFmpeg composition export failed, falling back to browser export",
+              ffmpegError instanceof Error ? ffmpegError.message : ffmpegError,
+            );
+            // Fall through to browser-based rendering
           }
+        }
 
-          const workerMessage =
-            workerError instanceof Error
-              ? workerError.message
-              : String(workerError);
+        // === Browser-based rendering fallback ===
+        if (!usedFFmpeg) {
+          try {
+            renderResult = await renderInWorker(
+              clientSettings,
+              composition,
+              signal,
+            );
+          } catch (workerError) {
+            if (
+              workerError instanceof DOMException &&
+              workerError.name === "AbortError"
+            ) {
+              throw workerError;
+            }
 
-          const shouldFallbackToMainThread =
-            workerMessage.startsWith('WORKER_REQUIRES_MAIN_THREAD:') ||
-            workerMessage.startsWith('WORKER_UNAVAILABLE') ||
-            workerMessage.startsWith('EXPORT_WORKER_RUNTIME_ERROR:');
+            const workerMessage =
+              workerError instanceof Error
+                ? workerError.message
+                : String(workerError);
 
-          if (!shouldFallbackToMainThread) {
-            throw workerError;
+            const shouldFallbackToMainThread =
+              workerMessage.startsWith("WORKER_REQUIRES_MAIN_THREAD:") ||
+              workerMessage.startsWith("WORKER_UNAVAILABLE") ||
+              workerMessage.startsWith("EXPORT_WORKER_RUNTIME_ERROR:");
+
+            if (!shouldFallbackToMainThread) {
+              throw workerError;
+            }
+
+            log.warn(
+              `Worker export unavailable for this composition, falling back to main thread (${workerMessage})`,
+            );
+
+            renderResult = await renderOnMainThread(
+              exportMode,
+              clientSettings,
+              composition,
+              signal,
+            );
           }
+        }
 
-          log.warn(
-            `Worker export unavailable for this composition, falling back to main thread (${workerMessage})`,
-          );
-
-          renderResult = await renderOnMainThread(
-            exportMode,
-            clientSettings,
-            composition,
-            signal,
-          );
+        if (!renderResult) {
+          throw new Error("No render result produced");
         }
 
         setResult(renderResult);
-        setStatus('completed');
+        setStatus("completed");
         setProgress(100);
 
-        log.debug('Render completed', {
+        log.debug("Render completed", {
           fileSize: formatBytes(renderResult.fileSize),
           duration: renderResult.duration,
         });
       } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          log.debug('Render cancelled');
-          setStatus('cancelled');
+        if (err instanceof DOMException && err.name === "AbortError") {
+          log.debug("Render cancelled");
+          setStatus("cancelled");
         } else {
-          log.error('Export error:', err);
+          log.error("Export error:", err);
           const message =
-            err instanceof Error ? err.message : 'Failed to export';
+            err instanceof Error ? err.message : "Failed to export";
           setError(message);
-          setStatus('failed');
+          setStatus("failed");
         }
       } finally {
         terminateExportWorker();
@@ -548,7 +740,7 @@ export function useClientRender(): UseClientRenderReturn {
   const cancelExport = useCallback(() => {
     if (exportWorkerRef.current && exportWorkerRequestIdRef.current) {
       const cancelMessage: ExportRenderWorkerRequest = {
-        type: 'cancel',
+        type: "cancel",
         requestId: exportWorkerRequestIdRef.current,
       };
       exportWorkerRef.current.postMessage(cancelMessage);
@@ -556,7 +748,7 @@ export function useClientRender(): UseClientRenderReturn {
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      setStatus('cancelled');
+      setStatus("cancelled");
       setIsExporting(false);
     }
     terminateExportWorker();
@@ -565,35 +757,108 @@ export function useClientRender(): UseClientRenderReturn {
   /**
    * Download the rendered video/audio
    */
-  const downloadVideo = useCallback(() => {
+  const downloadVideo = useCallback(async () => {
     if (!result) return;
 
-    const url = URL.createObjectURL(result.blob);
-    const a = document.createElement('a');
-    a.href = url;
-
     // Determine file extension from MIME type
-    let extension = 'mp4';
+    let extension = "mp4";
     const mime = result.mimeType.toLowerCase();
-    if (mime.includes('webm')) extension = 'webm';
-    else if (mime.includes('matroska')) extension = 'mkv';
-    else if (mime.includes('quicktime') || mime.includes('mov'))
-      extension = 'mov';
-    else if (mime.includes('audio/mpeg') || mime.includes('mp3'))
-      extension = 'mp3';
-    else if (mime.includes('audio/wav') || mime.includes('wave'))
-      extension = 'wav';
-    else if (mime.includes('audio/flac') || mime.includes('flac'))
-      extension = 'flac';
-    else if (mime.includes('audio/aac') || mime.includes('adts'))
-      extension = 'aac';
+    if (mime.includes("webm")) extension = "webm";
+    else if (mime.includes("matroska")) extension = "mkv";
+    else if (mime.includes("quicktime") || mime.includes("mov"))
+      extension = "mov";
+    else if (mime.includes("audio/mpeg") || mime.includes("mp3"))
+      extension = "mp3";
+    else if (mime.includes("audio/wav") || mime.includes("wave"))
+      extension = "wav";
+    else if (mime.includes("audio/flac") || mime.includes("flac"))
+      extension = "flac";
+    else if (mime.includes("audio/aac") || mime.includes("adts"))
+      extension = "aac";
 
-    a.download = `export-${Date.now()}.${extension}`;
+    const defaultFileName = `export-${Date.now()}.${extension}`;
+
+    // NATIVE ELECTRON SAVING:
+    // Only use when inside Electron with real IPC-based filesystem.
+    // The imported `opencut` from api.ts is always defined (HTTP fallback),
+    // so we check window.opencut which is only set by Electron's preload.
+    const electronApi = (window as unknown as Record<string, unknown>)
+      .opencut as
+      | {
+          dialog?: {
+            saveFile: (opts: {
+              title: string;
+              defaultPath: string;
+            }) => Promise<string | undefined>;
+          };
+          fs?: {
+            writeFile: (path: string, data: ArrayBuffer) => Promise<void>;
+          };
+        }
+      | undefined;
+    if (electronApi?.dialog?.saveFile && electronApi?.fs?.writeFile) {
+      try {
+        const savePath = await electronApi.dialog.saveFile({
+          title: "Save Export",
+          defaultPath: defaultFileName,
+        });
+
+        if (!savePath) return; // User cancelled the save dialog
+
+        const arrayBuffer = await result.blob.arrayBuffer();
+        await electronApi.fs.writeFile(savePath, arrayBuffer);
+        return; // Early return on successful native save
+      } catch (err) {
+        log.warn(
+          "Failed to save natively, falling back to browser download",
+          err,
+        );
+      }
+    }
+
+    // BROWSER SAVING: Use File System Access API for a native-like save dialog
+    if ("showSaveFilePicker" in window) {
+      try {
+        const handle = await (
+          window as unknown as Record<string, unknown> & {
+            showSaveFilePicker: (
+              opts: unknown,
+            ) => Promise<FileSystemFileHandle>;
+          }
+        ).showSaveFilePicker({
+          suggestedName: defaultFileName,
+          types: [
+            {
+              description: "Video file",
+              accept: {
+                [`video/${extension === "mkv" ? "x-matroska" : extension}`]: [
+                  `.${extension}`,
+                ],
+              },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(result.blob);
+        await writable.close();
+        return;
+      } catch (err) {
+        // User cancelled (AbortError) — just return silently
+        if ((err as DOMException)?.name === "AbortError") return;
+        log.warn("showSaveFilePicker failed, using fallback download", err);
+      }
+    }
+
+    // FALLBACK WEB SAVING:
+    const url = URL.createObjectURL(result.blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = defaultFileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
 
-    // Revoke during idle — download has already started by then
+    // Revoke during idle â€” download has already started by then
     requestIdleCallback(() => URL.revokeObjectURL(url));
   }, [result]);
 
@@ -606,7 +871,7 @@ export function useClientRender(): UseClientRenderReturn {
     setProgress(0);
     setRenderedFrames(undefined);
     setTotalFrames(undefined);
-    setStatus('idle');
+    setStatus("idle");
     setError(null);
     setResult(null);
     abortControllerRef.current = null;

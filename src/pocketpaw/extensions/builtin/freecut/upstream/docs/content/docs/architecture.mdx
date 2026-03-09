@@ -1,0 +1,57 @@
+---
+title: Architecture
+description: Overview of the FreeCut desktop architecture — frontend, backend, and Electron.
+---
+
+## Project Structure
+
+```
+freecut/
+├── backend/               # Python backend (FastAPI)
+│   ├── main.py           # Server + serves production frontend
+│   └── pyproject.toml    # Python config (uv)
+├── electron/              # Electron shell
+│   ├── main.cjs          # Main process
+│   └── wait-and-launch.cjs
+├── src/                   # Frontend (React + TypeScript)
+│   ├── app/              # Bootstrap and providers
+│   ├── domain/           # Framework-agnostic domain logic
+│   ├── infrastructure/   # Browser/storage/worker adapters
+│   ├── features/         # Feature modules
+│   ├── shared/           # Shared utilities
+│   └── routes/           # TanStack Router (file-based)
+└── docs/                  # This documentation site
+```
+
+## Feature Modules
+
+Each feature is self-contained under `src/features/`:
+
+| Feature               | Responsibility                                 |
+| --------------------- | ---------------------------------------------- |
+| `editor`              | Editor shell, toolbar, panels, stores          |
+| `timeline`            | Multi-track timeline, actions, services        |
+| `preview`             | Preview canvas, transform gizmo                |
+| `player`              | Playback engine (Clock, composition)           |
+| `composition-runtime` | Rendering runtime (sequences/items/audio)      |
+| `export`              | WebCodecs export pipeline (Web Worker)         |
+| `effects`             | Visual effects (CSS filters, glitch, halftone) |
+| `keyframes`           | Keyframe animation, Bézier editor              |
+| `media-library`       | Media import, metadata, OPFS proxies           |
+| `project-bundle`      | Project ZIP export/import                      |
+| `projects`            | Project management                             |
+| `settings`            | App settings                                   |
+
+## Tech Stack
+
+- **React 19** + TypeScript — UI layer
+- **Vite** — build tool with HMR
+- **Zustand** + Zundo — state management with undo/redo
+- **TanStack Router** — file-based type-safe routing
+- **Tailwind CSS 4** + shadcn/ui — styling
+- **Mediabunny** — media decoding
+- **Canvas** + WebCodecs — rendering and export
+- **OPFS** + IndexedDB — local persistence
+- **Web Workers** — heavy processing off main thread
+- **FastAPI** (Python) — GPU-accelerated FFmpeg backend
+- **Electron** — desktop window management

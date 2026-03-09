@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 describe('pipelined frame loop', () => {
   it('encodes all frames in order and closes every sample', async () => {
@@ -7,11 +7,11 @@ describe('pipelined frame loop', () => {
     const closedFrames: number[] = [];
 
     const frameRenderer = {
-      renderFrame: vi.fn(async (_frame: number) => {}),
+      renderFrame: vi.fn(async () => {}),
     };
 
     const videoSource = {
-      add: vi.fn(async (sample: { frame: number }, _options?: unknown) => {
+      add: vi.fn(async (sample: { frame: number }) => {
         encodedFrames.push(sample.frame);
       }),
     };
@@ -22,12 +22,7 @@ describe('pipelined frame loop', () => {
     for (let frame = 0; frame < totalFrames; frame++) {
       await frameRenderer.renderFrame(frame);
       if (pendingEncode) await pendingEncode;
-      const sample = {
-        frame,
-        close: () => {
-          closedFrames.push(frame);
-        },
-      };
+      const sample = { frame, close: () => { closedFrames.push(frame); } };
       const isKeyFrame = frame === 0;
       pendingEncode = (async () => {
         try {
@@ -46,8 +41,7 @@ describe('pipelined frame loop', () => {
     expect(encodedFrames).toEqual([0, 1, 2, 3, 4]);
     expect(closedFrames).toEqual([0, 1, 2, 3, 4]);
     expect(videoSource.add).toHaveBeenCalledTimes(5);
-    const firstCallArgs = videoSource.add.mock.calls[0] as unknown[];
-    expect(firstCallArgs[1]).toEqual({ keyFrame: true });
+    expect(videoSource.add.mock.calls[0][1]).toEqual({ keyFrame: true });
   });
 
   it('renderFrame overlaps with previous encode', async () => {
@@ -76,11 +70,8 @@ describe('pipelined frame loop', () => {
       if (pendingEncode) await pendingEncode;
       const sample = { frame, close: () => {} };
       pendingEncode = (async () => {
-        try {
-          await videoSource.add(sample);
-        } finally {
-          sample.close();
-        }
+        try { await videoSource.add(sample); }
+        finally { sample.close(); }
       })();
     }
     if (pendingEncode) await pendingEncode;
@@ -97,6 +88,6 @@ describe('pipelined frame loop', () => {
     expect(render2Start).toBeLessThan(encode1End);
 
     // All frames complete
-    expect(events.filter((e) => e.startsWith('encode-end-')).length).toBe(3);
+    expect(events.filter(e => e.startsWith('encode-end-')).length).toBe(3);
   });
 });

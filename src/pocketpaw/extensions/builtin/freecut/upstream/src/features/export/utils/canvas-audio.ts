@@ -1,21 +1,27 @@
-/**
+﻿/**
  * Canvas Audio Processing System
  *
  * Handles audio extraction, processing, mixing, and encoding for client-side export.
  * Supports audio from video items and standalone audio items.
  */
+
+import type { CompositionInputProps } from '@/types/export';
+import type { VideoItem, AudioItem, CompositionItem } from '@/types/timeline';
+import type { Keyframe as VolumeKeyframe } from '@/types/keyframe';
+import { createLogger } from '@/shared/logging/logger';
+import { resolveTransitionWindows } from '@/domain/timeline/transitions/transition-planner';
+import {
+  timelineToSourceFrames,
+  sourceToTimelineFrames,
+  useCompositionsStore,
+} from '@/features/export/deps/timeline';
 import {
   getPropertyKeyframes,
   interpolatePropertyValue,
-} from '@/features/keyframes/utils/interpolation';
-import { resolveMediaUrl } from '@/features/preview/utils/media-resolver';
-import { blobUrlManager } from '@/lib/blob-url-manager';
-import { createLogger } from '@/lib/logger';
-import { resolveTransitionWindows } from '@/lib/transitions/transition-planner';
-import type { CompositionInputProps } from '@/types/export';
-import type { Keyframe as VolumeKeyframe } from '@/types/keyframe';
-import type { AudioItem, CompositionItem, VideoItem } from '@/types/timeline';
-import { useCompositionsStore } from '../../timeline/stores/compositions-store';
+} from '@/features/export/deps/keyframes';
+import { blobUrlManager } from '@/infrastructure/browser/blob-url-manager';
+import { getMediaAudioCodecById, resolveMediaUrl } from '@/features/export/deps/media-library';
+import { ensureAc3DecoderRegistered, isAc3AudioCodec } from '@/shared/media/ac3-decoder';
 
 const log = createLogger('CanvasAudio');
 
@@ -44,19 +50,20 @@ interface AudioSegment {
   itemId: string;
   trackId: string;
   src: string;
-  startFrame: number; // Timeline position
+  startFrame: number;        // Timeline position
   durationFrames: number;
-  sourceStartFrame: number; // In source media (for trim) — in source-native FPS frames
-  sourceFps: number; // Source media FPS (sourceStartFrame is in these frames)
-  volume: number; // -60 to +12 dB
+  sourceStartFrame: number;  // In source media (for trim) â€” in source-native FPS frames
+  sourceFps: number;         // Source media FPS (sourceStartFrame is in these frames)
+  volume: number;            // -60 to +12 dB
   fadeInFrames: number;
   fadeOutFrames: number;
   useEqualPowerFades: boolean;
-  speed: number; // Playback rate
+  speed: number;             // Playback rate
   muted: boolean;
   type: 'video' | 'audio';
-  volumeKeyframes?: VolumeKeyframe[]; // Animated volume keyframes
-  itemFrom: number; // Item's timeline start frame (for keyframe offset)
+  audioCodec?: string;                  // Audio codec for lazy AC-3 decoder registration
+  volumeKeyframes?: VolumeKeyframe[];  // Animated volume keyframes
+  itemFrom: number;                     // Item's timeline start frame (for keyframe offset)
 }
 
 /**
@@ -66,8 +73,8 @@ interface DecodedAudio {
   itemId: string;
   sampleRate: number;
   channels: number;
-  samples: Float32Array[]; // Per-channel samples
-  duration: number; // Duration in seconds
+  samples: Float32Array[];   // Per-channel samples
+  duration: number;          // Duration in seconds
 }
 
 /**
@@ -86,43 +93,17 @@ interface AudioProcessingConfig {
  * @param composition - The composition with tracks
  * @returns Array of audio segments to process
  */
-function extractAudioSegments(
-  composition: CompositionInputProps,
-  fps: number,
-): AudioSegment[] {
+function extractAudioSegments(composition: CompositionInputProps, fps: number): AudioSegment[] {
   const { tracks = [], transitions = [] } = composition;
   const segments: AudioSegment[] = [];
   const audioOnlySegments: AudioSegment[] = [];
-  const videoById = new Map<
-    string,
-    { item: VideoItem; trackId: string; muted: boolean }
-  >();
-  const extensionByClipId = new Map<
-    string,
-    {
-      before: number;
-      after: number;
-      overlapFadeOut: number;
-      overlapFadeIn: number;
-    }
-  >();
+  const videoById = new Map<string, { item: VideoItem; trackId: string; muted: boolean }>();
+  const extensionByClipId = new Map<string, { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number }>();
 
-  const ensureExtension = (
-    clipId: string,
-  ): {
-    before: number;
-    after: number;
-    overlapFadeOut: number;
-    overlapFadeIn: number;
-  } => {
+  const ensureExtension = (clipId: string): { before: number; after: number; overlapFadeOut: number; overlapFadeIn: number } => {
     const existing = extensionByClipId.get(clipId);
     if (existing) return existing;
-    const created = {
-      before: 0,
-      after: 0,
-      overlapFadeOut: 0,
-      overlapFadeIn: 0,
-    };
+    const created = { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
     extensionByClipId.set(clipId, created);
     return created;
   };
@@ -132,42 +113,37 @@ function extractAudioSegments(
   };
 
   const hasExplicitTrimStart = (item: VideoItem): boolean => {
-    return (
-      item.sourceStart !== undefined ||
-      item.trimStart !== undefined ||
-      item.offset !== undefined
-    );
+    return item.sourceStart !== undefined || item.trimStart !== undefined || item.offset !== undefined;
   };
 
-  const isContinuousAudioTransition = (
-    left: VideoItem,
-    right: VideoItem,
-  ): boolean => {
+  const isContinuousAudioTransition = (left: VideoItem, right: VideoItem): boolean => {
     const leftSpeed = left.speed ?? 1;
     const rightSpeed = right.speed ?? 1;
+    const leftSourceFps = left.sourceFps ?? fps;
     if (Math.abs(leftSpeed - rightSpeed) > 0.0001) return false;
 
-    const sameMedia =
-      (left.mediaId && right.mediaId && left.mediaId === right.mediaId) ||
-      (!!left.src && !!right.src && left.src === right.src);
+    const sameMedia = (left.mediaId && right.mediaId && left.mediaId === right.mediaId)
+      || (!!left.src && !!right.src && left.src === right.src);
     if (!sameMedia) return false;
 
-    if (left.originId && right.originId && left.originId !== right.originId)
-      return false;
+    if (left.originId && right.originId && left.originId !== right.originId) return false;
 
     const expectedRightFrom = left.from + left.durationInFrames;
     if (Math.abs(right.from - expectedRightFrom) > 2) return false;
 
     const leftTrim = getVideoTrimBefore(left);
     const rightTrim = getVideoTrimBefore(right);
-    const computedLeftSourceEnd =
-      leftTrim + Math.round(left.durationInFrames * leftSpeed);
+    const computedLeftSourceEnd = leftTrim + timelineToSourceFrames(
+      left.durationInFrames,
+      leftSpeed,
+      fps,
+      leftSourceFps,
+    );
     const storedLeftSourceEnd = left.sourceEnd;
     const computedContinuous = Math.abs(rightTrim - computedLeftSourceEnd) <= 2;
-    const storedContinuous =
-      storedLeftSourceEnd !== undefined
-        ? Math.abs(rightTrim - storedLeftSourceEnd) <= 2
-        : false;
+    const storedContinuous = storedLeftSourceEnd !== undefined
+      ? Math.abs(rightTrim - storedLeftSourceEnd) <= 2
+      : false;
 
     if (computedContinuous || storedContinuous) return true;
 
@@ -193,13 +169,8 @@ function extractAudioSegments(
 
         // Use sourceStart as primary for consistency with video items
         // This ensures split audio clips and IO markers work correctly
-        const audioItemKeyframes = composition.keyframes?.find(
-          (k) => k.itemId === item.id,
-        );
-        const audioVolumeKfs = getPropertyKeyframes(
-          audioItemKeyframes,
-          'volume',
-        );
+        const audioItemKeyframes = composition.keyframes?.find((k) => k.itemId === item.id);
+        const audioVolumeKfs = getPropertyKeyframes(audioItemKeyframes, 'volume');
         audioOnlySegments.push({
           itemId: item.id,
           trackId: track.id,
@@ -215,8 +186,8 @@ function extractAudioSegments(
           speed: audioItem.speed ?? 1, // Playback speed from BaseTimelineItem
           muted: track.muted ?? false,
           type: 'audio',
-          volumeKeyframes:
-            audioVolumeKfs.length > 0 ? audioVolumeKfs : undefined,
+          audioCodec: getMediaAudioCodecById(item.mediaId),
+          volumeKeyframes: audioVolumeKfs.length > 0 ? audioVolumeKfs : undefined,
           itemFrom: item.from,
         });
       }
@@ -239,10 +210,7 @@ function extractAudioSegments(
     if (isContinuousAudioTransition(left, right)) continue;
 
     const rightPreRoll = Math.max(0, right.from - window.startFrame);
-    const leftPostRoll = Math.max(
-      0,
-      window.endFrame - (left.from + left.durationInFrames),
-    );
+    const leftPostRoll = Math.max(0, window.endFrame - (left.from + left.durationInFrames));
 
     if (rightPreRoll > 0) {
       const rightExt = ensureExtension(right.id);
@@ -258,26 +226,18 @@ function extractAudioSegments(
     const overlapDuration = window.durationInFrames;
     if (overlapDuration > 0) {
       const leftExt = ensureExtension(left.id);
-      leftExt.overlapFadeOut = Math.max(
-        leftExt.overlapFadeOut,
-        overlapDuration,
-      );
+      leftExt.overlapFadeOut = Math.max(leftExt.overlapFadeOut, overlapDuration);
       const rightExt = ensureExtension(right.id);
-      rightExt.overlapFadeIn = Math.max(
-        rightExt.overlapFadeIn,
-        overlapDuration,
-      );
+      rightExt.overlapFadeIn = Math.max(rightExt.overlapFadeIn, overlapDuration);
     }
   }
 
   const resolvedTrimBeforeById = new Map<string, number>();
-  const sortableVideoEntries = Array.from(videoById.entries()).map(
-    ([id, entry]) => ({
-      id,
-      trackId: entry.trackId,
-      item: entry.item,
-    }),
-  );
+  const sortableVideoEntries = Array.from(videoById.entries()).map(([id, entry]) => ({
+    id,
+    trackId: entry.trackId,
+    item: entry.item,
+  }));
   const sortedByTrackAndTime = sortableVideoEntries.toSorted((a, b) => {
     if (a.trackId !== b.trackId) return a.trackId.localeCompare(b.trackId);
     if (a.item.from !== b.item.from) return a.item.from - b.item.from;
@@ -296,26 +256,21 @@ function extractAudioSegments(
         const previousSpeed = previous.speed ?? 1;
         const clipSpeed = clip.speed ?? 1;
         const sameSpeed = Math.abs(previousSpeed - clipSpeed) <= 0.0001;
-        const sameMedia =
-          (previous.mediaId &&
-            clip.mediaId &&
-            previous.mediaId === clip.mediaId) ||
-          (!!previous.src && !!clip.src && previous.src === clip.src);
-        const adjacent =
-          Math.abs(clip.from - (previous.from + previous.durationInFrames)) <=
-          2;
-        const sameOrigin =
-          previous.originId && clip.originId
-            ? previous.originId === clip.originId
-            : true;
+        const sameMedia = (previous.mediaId && clip.mediaId && previous.mediaId === clip.mediaId)
+          || (!!previous.src && !!clip.src && previous.src === clip.src);
+        const adjacent = Math.abs(clip.from - (previous.from + previous.durationInFrames)) <= 2;
+        const sameOrigin = previous.originId && clip.originId
+          ? previous.originId === clip.originId
+          : true;
 
         if (sameSpeed && sameMedia && adjacent && sameOrigin) {
-          const previousTrimBefore =
-            resolvedTrimBeforeById.get(previous.id) ??
-            getVideoTrimBefore(previous);
-          resolvedTrimBefore =
-            previousTrimBefore +
-            Math.round(previous.durationInFrames * previousSpeed);
+          const previousTrimBefore = resolvedTrimBeforeById.get(previous.id) ?? getVideoTrimBefore(previous);
+          resolvedTrimBefore = previousTrimBefore + timelineToSourceFrames(
+            previous.durationInFrames,
+            previousSpeed,
+            fps,
+            previous.sourceFps ?? fps,
+          );
         }
       }
     }
@@ -334,38 +289,25 @@ function extractAudioSegments(
   for (const [, entry] of videoById) {
     const videoItem = entry.item;
     const speed = videoItem.speed ?? 1;
-    const baseTrimBefore =
-      resolvedTrimBeforeById.get(videoItem.id) ?? getVideoTrimBefore(videoItem);
-    const extension = extensionByClipId.get(videoItem.id) ?? {
-      before: 0,
-      after: 0,
-      overlapFadeOut: 0,
-      overlapFadeIn: 0,
-    };
-    const maxBeforeBySource =
-      speed > 0 ? Math.floor(baseTrimBefore / speed) : 0;
+    const sourceFps = videoItem.sourceFps ?? fps;
+    const baseTrimBefore = resolvedTrimBeforeById.get(videoItem.id) ?? getVideoTrimBefore(videoItem);
+    const extension = extensionByClipId.get(videoItem.id) ?? { before: 0, after: 0, overlapFadeOut: 0, overlapFadeIn: 0 };
+    const maxBeforeBySource = speed > 0
+      ? sourceToTimelineFrames(baseTrimBefore, speed, sourceFps, fps)
+      : 0;
     const before = Math.max(0, Math.min(extension.before, maxBeforeBySource));
     const after = Math.max(0, extension.after);
 
     // Overlap model crossfade takes priority over old extension model and user fades
-    const hasOverlapFade =
-      extension.overlapFadeOut > 0 || extension.overlapFadeIn > 0;
-    const fadeIn =
-      extension.overlapFadeIn > 0
-        ? extension.overlapFadeIn
-        : before > 0
-          ? before
-          : (videoItem.audioFadeIn ?? 0) * fps;
-    const fadeOut =
-      extension.overlapFadeOut > 0
-        ? extension.overlapFadeOut
-        : after > 0
-          ? after
-          : (videoItem.audioFadeOut ?? 0) * fps;
+    const hasOverlapFade = extension.overlapFadeOut > 0 || extension.overlapFadeIn > 0;
+    const fadeIn = extension.overlapFadeIn > 0
+      ? extension.overlapFadeIn
+      : (before > 0 ? before : ((videoItem.audioFadeIn ?? 0) * fps));
+    const fadeOut = extension.overlapFadeOut > 0
+      ? extension.overlapFadeOut
+      : (after > 0 ? after : ((videoItem.audioFadeOut ?? 0) * fps));
 
-    const videoItemKeyframes = composition.keyframes?.find(
-      (k) => k.itemId === videoItem.id,
-    );
+    const videoItemKeyframes = composition.keyframes?.find((k) => k.itemId === videoItem.id);
     const videoVolumeKfs = getPropertyKeyframes(videoItemKeyframes, 'volume');
 
     expandedVideoSegments.push({
@@ -375,8 +317,8 @@ function extractAudioSegments(
       src: videoItem.src,
       startFrame: videoItem.from - before,
       durationFrames: videoItem.durationInFrames + before + after,
-      sourceStartFrame: baseTrimBefore - before * speed,
-      sourceFps: videoItem.sourceFps ?? fps,
+      sourceStartFrame: baseTrimBefore - timelineToSourceFrames(before, speed, fps, sourceFps),
+      sourceFps,
       volume: videoItem.volume ?? 0,
       fadeInFrames: fadeIn,
       fadeOutFrames: fadeOut,
@@ -384,6 +326,7 @@ function extractAudioSegments(
       speed,
       muted: entry.muted,
       type: 'video',
+      audioCodec: getMediaAudioCodecById(videoItem.mediaId),
       beforeFrames: before,
       afterFrames: after,
       volumeKeyframes: videoVolumeKfs.length > 0 ? videoVolumeKfs : undefined,
@@ -398,7 +341,7 @@ function extractAudioSegments(
 
   const canMergeContinuousBoundary = (
     left: ExpandedVideoAudioSegment,
-    right: ExpandedVideoAudioSegment,
+    right: ExpandedVideoAudioSegment
   ): boolean => {
     if (!isContinuousAudioTransition(left.clip, right.clip)) return false;
     if (left.src !== right.src) return false;
@@ -413,9 +356,7 @@ function extractAudioSegments(
   const mergedVideoSegments: AudioSegment[] = [];
   let active: ExpandedVideoAudioSegment | null = null;
 
-  const toAudioSegment = (
-    segment: ExpandedVideoAudioSegment,
-  ): AudioSegment => ({
+  const toAudioSegment = (segment: ExpandedVideoAudioSegment): AudioSegment => ({
     itemId: segment.itemId,
     trackId: segment.trackId,
     src: segment.src,
@@ -430,6 +371,7 @@ function extractAudioSegments(
     speed: segment.speed,
     muted: segment.muted,
     type: segment.type,
+    audioCodec: segment.audioCodec,
     volumeKeyframes: segment.volumeKeyframes,
     itemFrom: segment.itemFrom,
   });
@@ -468,9 +410,7 @@ function extractAudioSegments(
     for (const item of track.items) {
       if (item.type !== 'composition') continue;
       const compItem = item as CompositionItem;
-      const subComp = useCompositionsStore
-        .getState()
-        .getComposition(compItem.compositionId);
+      const subComp = useCompositionsStore.getState().getComposition(compItem.compositionId);
       if (!subComp) continue;
 
       const compFrom = compItem.from;
@@ -485,15 +425,11 @@ function extractAudioSegments(
         const subTrackMuted = subTrack?.muted ?? false;
 
         // Prefer fresh blob URL from manager (stored src may be stale/revoked)
-        const src =
-          (subItem.mediaId ? blobUrlManager.get(subItem.mediaId) : null) ??
-          (subItem as VideoItem | AudioItem).src ??
-          '';
+        const src = (subItem.mediaId ? blobUrlManager.get(subItem.mediaId) : null)
+          ?? (subItem as VideoItem | AudioItem).src ?? '';
         if (!src) continue;
 
-        const subItemKeyframes = subComp.keyframes?.find(
-          (k) => k.itemId === subItem.id,
-        );
+        const subItemKeyframes = subComp.keyframes?.find((k) => k.itemId === subItem.id);
         const subVolumeKfs = getPropertyKeyframes(subItemKeyframes, 'volume');
 
         // Map sub-comp timing to main timeline:
@@ -504,10 +440,7 @@ function extractAudioSegments(
         // Clamp to composition item bounds on the main timeline
         const compEnd = compFrom + compItem.durationInFrames;
         const effectiveStart = Math.max(startFrame, compFrom);
-        const effectiveEnd = Math.min(
-          startFrame + subItem.durationInFrames,
-          compEnd,
-        );
+        const effectiveEnd = Math.min(startFrame + subItem.durationInFrames, compEnd);
         const effectiveDuration = effectiveEnd - effectiveStart;
         if (effectiveDuration <= 0) continue;
 
@@ -515,24 +448,21 @@ function extractAudioSegments(
         const subItemClipStart = effectiveStart - startFrame;
         const baseSourceStart = subItem.sourceStart ?? subItem.trimStart ?? 0;
         const speed = subItem.speed ?? 1;
-        const effectiveSourceStart =
-          baseSourceStart + Math.round(subItemClipStart * speed);
+        const effectiveSourceStart = baseSourceStart + timelineToSourceFrames(
+          subItemClipStart,
+          speed,
+          fps,
+          subItem.sourceFps ?? fps,
+        );
 
-        // Adjust fade durations for clipped portions — if the sub-item was
+        // Adjust fade durations for clipped portions â€” if the sub-item was
         // trimmed by composition bounds the fade should be shortened accordingly.
         const rawFadeInFrames = (subItem.audioFadeIn ?? 0) * fps;
         const rawFadeOutFrames = (subItem.audioFadeOut ?? 0) * fps;
         const clippedStartFrames = effectiveStart - startFrame; // frames clipped from start
-        const clippedEndFrames =
-          startFrame + subItem.durationInFrames - effectiveEnd; // frames clipped from end
-        const adjustedFadeInFrames = Math.max(
-          0,
-          rawFadeInFrames - clippedStartFrames,
-        );
-        const adjustedFadeOutFrames = Math.max(
-          0,
-          rawFadeOutFrames - clippedEndFrames,
-        );
+        const clippedEndFrames = (startFrame + subItem.durationInFrames) - effectiveEnd; // frames clipped from end
+        const adjustedFadeInFrames = Math.max(0, rawFadeInFrames - clippedStartFrames);
+        const adjustedFadeOutFrames = Math.max(0, rawFadeOutFrames - clippedEndFrames);
 
         segments.push({
           itemId: subItem.id,
@@ -549,6 +479,7 @@ function extractAudioSegments(
           speed,
           muted: trackMuted || subTrackMuted,
           type: subItem.type as 'video' | 'audio',
+          audioCodec: getMediaAudioCodecById(subItem.mediaId),
           volumeKeyframes: subVolumeKfs.length > 0 ? subVolumeKfs : undefined,
           itemFrom: startFrame,
         });
@@ -580,38 +511,182 @@ async function decodeAudioFromSource(
   itemId: string,
   startTime?: number,
   endTime?: number,
+  audioCodec?: string,
+  ac3RetryAttempted: boolean = false,
 ): Promise<DecodedAudio> {
   // Check cache first (only for full file decodes for backward compatibility)
   if (startTime === undefined && endTime === undefined) {
     const cached = audioDecodeCache.get(src);
     if (cached) {
-      log.debug('Using cached decoded audio', {
-        itemId,
-        src: src.substring(0, 50),
-      });
+      log.debug('Using cached decoded audio', { itemId, src: src.substring(0, 50) });
       return { ...cached, itemId };
     }
   }
 
-  log.debug('Decoding audio via Web Audio API', {
+  log.debug('Decoding audio with mediabunny', {
     itemId,
     src: src.substring(0, 50),
     startTime,
     endTime,
+    audioCodec,
   });
 
-  // All audio decoding goes through the Web Audio API.
-  // mediabunny is intentionally not used here.
-  return decodeAudioFallback(src, itemId);
+  try {
+    if (isAc3AudioCodec(audioCodec)) {
+      await ensureAc3DecoderRegistered();
+    }
+
+    // Try mediabunny first for efficient range extraction
+    const mb = await import('mediabunny');
+
+    const input = new mb.Input({
+      formats: mb.ALL_FORMATS,
+      source: new mb.UrlSource(src),
+    });
+    try {
+      const audioTrack = await input.getPrimaryAudioTrack();
+      if (!audioTrack) {
+        throw new Error('No audio track found');
+      }
+
+      const duration = await input.computeDuration();
+      const actualStartTime = startTime ?? 0;
+      const actualEndTime = endTime ?? duration;
+
+      log.debug('Extracting audio range', {
+        itemId,
+        startTime: actualStartTime,
+        endTime: actualEndTime,
+        totalDuration: duration,
+      });
+
+      // Create audio sample sink and extract only needed range
+      const sink = new mb.AudioSampleSink(audioTrack);
+
+      // Collect planar sample chunks per output channel.
+      const channelChunks: Float32Array[][] = [];
+      let totalFrames = 0;
+      let sampleRate = 48000;
+      let channels = 0;
+
+      for await (const sample of sink.samples(actualStartTime, actualEndTime)) {
+        try {
+          const sampleData = sample as {
+            numberOfFrames?: number;
+            numberOfChannels?: number;
+            sampleRate?: number;
+            copyTo: (destination: Float32Array, options: { planeIndex: number; format: 'f32-planar' }) => void;
+          };
+          const frameCount = Math.max(0, sampleData.numberOfFrames ?? 0);
+          const sampleChannels = Math.max(1, sampleData.numberOfChannels ?? 1);
+          if (frameCount === 0) {
+            continue;
+          }
+
+          if (channels === 0) {
+            channels = sampleChannels;
+            for (let c = 0; c < channels; c++) {
+              channelChunks.push([]);
+            }
+          } else if (sampleChannels > channels) {
+            // Rare container edge case: if channel count increases mid-stream,
+            // backfill earlier timeline with silence for newly seen channels.
+            for (let c = channels; c < sampleChannels; c++) {
+              const chunks: Float32Array[] = [];
+              if (totalFrames > 0) {
+                chunks.push(new Float32Array(totalFrames));
+              }
+              channelChunks.push(chunks);
+            }
+            channels = sampleChannels;
+          } else if (sampleChannels < channels) {
+            log.warn('Inconsistent channel count during mediabunny audio decode', {
+              itemId,
+              expectedChannels: channels,
+              actualChannels: sampleChannels,
+            });
+          }
+
+          const outputChannels = channels || sampleChannels;
+          for (let c = 0; c < outputChannels; c++) {
+            const planeIndex = Math.min(c, sampleChannels - 1);
+            const channelData = new Float32Array(frameCount);
+            sampleData.copyTo(channelData, { planeIndex, format: 'f32-planar' });
+            channelChunks[c]!.push(channelData);
+          }
+
+          totalFrames += frameCount;
+          if (sampleData.sampleRate && sampleData.sampleRate > 0) {
+            sampleRate = sampleData.sampleRate;
+          }
+        } finally {
+          sample.close();
+        }
+      }
+
+      if (channels === 0 || totalFrames === 0) {
+        throw new Error('Audio decode produced no output');
+      }
+
+      // Combine chunks into contiguous per-channel arrays.
+      const samples: Float32Array[] = [];
+      for (let c = 0; c < channels; c++) {
+        const merged = new Float32Array(totalFrames);
+        let offset = 0;
+        for (const chunk of channelChunks[c] ?? []) {
+          merged.set(chunk, offset);
+          offset += chunk.length;
+        }
+        samples.push(merged);
+      }
+
+      const result: DecodedAudio = {
+        itemId,
+        sampleRate,
+        channels,
+        samples,
+        duration: actualEndTime - actualStartTime,
+      };
+
+      log.debug('Decoded audio with mediabunny', {
+        itemId,
+        sampleRate,
+        channels,
+        duration: result.duration,
+        samples: samples[0]?.length,
+      });
+
+      // Cache if full file decode
+      if (startTime === undefined && endTime === undefined) {
+        audioDecodeCache.set(src, result);
+      }
+
+      return result;
+    } finally {
+      input.dispose();
+    }
+  } catch (error) {
+    // Metadata can be missing/stale for some legacy items. If decode fails and
+    // codec did not look like AC-3, retry once after registering the decoder.
+    if (!ac3RetryAttempted && !isAc3AudioCodec(audioCodec)) {
+      try {
+        await ensureAc3DecoderRegistered();
+        return await decodeAudioFromSource(src, itemId, startTime, endTime, audioCodec, true);
+      } catch {
+        // Ignore and continue to Web Audio fallback below.
+      }
+    }
+
+    // Fall back to Web Audio API for full decode
+    log.warn('Mediabunny audio decode failed, using fallback', { itemId, error });
+    return decodeAudioFallback(src, itemId);
+  }
 }
 
 /**
  * Fallback audio decoder using Web Audio API (decodes entire file)
  */
-async function decodeAudioFallback(
-  src: string,
-  itemId: string,
-): Promise<DecodedAudio> {
+async function decodeAudioFallback(src: string, itemId: string): Promise<DecodedAudio> {
   // Check cache
   const cached = audioDecodeCache.get(src);
   if (cached) {
@@ -619,10 +694,7 @@ async function decodeAudioFallback(
     return { ...cached, itemId };
   }
 
-  log.debug('Decoding audio with Web Audio API fallback', {
-    itemId,
-    src: src.substring(0, 50),
-  });
+  log.debug('Decoding audio with Web Audio API fallback', { itemId, src: src.substring(0, 50) });
 
   const response = await fetch(src);
   if (!response.ok) {
@@ -671,7 +743,10 @@ function dbToGain(db: number): number {
 /**
  * Apply volume (in dB) to audio samples.
  */
-function applyVolume(samples: Float32Array, volumeDb: number): Float32Array {
+function applyVolume(
+  samples: Float32Array,
+  volumeDb: number
+): Float32Array {
   const gain = dbToGain(volumeDb);
   const output = new Float32Array(samples.length);
 
@@ -701,7 +776,7 @@ function applyAnimatedVolume(
   segmentStartFrame: number,
   itemFrom: number,
   fps: number,
-  sampleRate: number,
+  sampleRate: number
 ): Float32Array {
   const output = new Float32Array(samples.length);
 
@@ -710,11 +785,7 @@ function applyAnimatedVolume(
     const timelineFrame = segmentStartFrame + (i / sampleRate) * fps;
     // Convert to item-relative frame for keyframe interpolation
     const relativeFrame = timelineFrame - itemFrom;
-    const db = interpolatePropertyValue(
-      volumeKeyframes,
-      relativeFrame,
-      staticVolumeDb,
-    );
+    const db = interpolatePropertyValue(volumeKeyframes, relativeFrame, staticVolumeDb);
     const gain = dbToGain(db);
     output[i] = samples[i]! * gain;
   }
@@ -734,7 +805,7 @@ function applyFades(
   samples: Float32Array,
   fadeInSamples: number,
   fadeOutSamples: number,
-  useEqualPower: boolean = false,
+  useEqualPower: boolean = false
 ): Float32Array {
   const output = new Float32Array(samples.length);
   output.set(samples);
@@ -744,7 +815,7 @@ function applyFades(
     for (let i = 0; i < fadeInSamples && i < output.length; i++) {
       const progress = i / fadeInSamples;
       const gain = useEqualPower
-        ? Math.sin((progress * Math.PI) / 2)
+        ? Math.sin(progress * Math.PI / 2)
         : progress;
       output[i] = output[i]! * gain;
     }
@@ -759,7 +830,7 @@ function applyFades(
 
       const progress = i / fadeOutSamples;
       const gain = useEqualPower
-        ? Math.cos((progress * Math.PI) / 2)
+        ? Math.cos(progress * Math.PI / 2)
         : 1 - progress;
       output[sampleIndex] = output[sampleIndex]! * gain;
     }
@@ -782,7 +853,7 @@ function applyFades(
 async function applySpeed(
   channels: Float32Array[],
   speed: number,
-  sampleRate: number,
+  sampleRate: number
 ): Promise<Float32Array[]> {
   if (speed === 1.0) return channels;
   if (channels.length === 0 || channels[0]!.length === 0) return channels;
@@ -790,11 +861,7 @@ async function applySpeed(
   const numChannels = channels.length;
   const samplesPerChannel = channels[0]!.length;
 
-  log.debug('Applying pitch-preserved speed change (SoundTouch)', {
-    speed,
-    sampleRate,
-    numChannels,
-  });
+  log.debug('Applying pitch-preserved speed change (SoundTouch)', { speed, sampleRate, numChannels });
 
   try {
     const soundtouch = await import('soundtouchjs');
@@ -817,10 +884,7 @@ async function applySpeed(
     let inputOffset = 0;
     const source = {
       extract: (target: Float32Array, numFrames: number): number => {
-        const samplesToRead = Math.min(
-          numFrames * 2,
-          stereoInput.length - inputOffset,
-        );
+        const samplesToRead = Math.min(numFrames * 2, stereoInput.length - inputOffset);
         if (samplesToRead <= 0) return 0;
 
         for (let i = 0; i < samplesToRead; i++) {
@@ -828,7 +892,7 @@ async function applySpeed(
         }
         inputOffset += samplesToRead;
         return samplesToRead / 2;
-      },
+      }
     };
 
     const filter = new soundtouch.SimpleFilter(source, st);
@@ -844,10 +908,7 @@ async function applySpeed(
       const framesExtracted = filter.extract(chunk, chunkSize);
       if (framesExtracted === 0) break;
 
-      const samplesToWrite = Math.min(
-        framesExtracted * 2,
-        stereoOutput.length - outputOffset,
-      );
+      const samplesToWrite = Math.min(framesExtracted * 2, stereoOutput.length - outputOffset);
       for (let i = 0; i < samplesToWrite; i++) {
         stereoOutput[outputOffset + i] = chunk[i]!;
       }
@@ -898,8 +959,7 @@ async function applySpeed(
         const index0 = Math.floor(sourceIndex);
         const index1 = Math.min(index0 + 1, samples.length - 1);
         const fraction = sourceIndex - index0;
-        output[i] =
-          samples[index0]! * (1 - fraction) + samples[index1]! * fraction;
+        output[i] = samples[index0]! * (1 - fraction) + samples[index1]! * fraction;
       }
       return output;
     });
@@ -913,7 +973,7 @@ async function applySpeed(
 async function resample(
   samples: Float32Array,
   sourceSampleRate: number,
-  targetSampleRate: number,
+  targetSampleRate: number
 ): Promise<Float32Array> {
   if (sourceSampleRate === targetSampleRate) return samples;
 
@@ -921,7 +981,7 @@ async function resample(
   const offlineCtx = new OfflineAudioContext(
     1,
     Math.ceil(duration * targetSampleRate),
-    targetSampleRate,
+    targetSampleRate
   );
 
   const buffer = offlineCtx.createBuffer(1, samples.length, sourceSampleRate);
@@ -949,7 +1009,7 @@ function mixAudioTracks(
     startSample: number;
     muted: boolean;
   }>,
-  config: AudioProcessingConfig,
+  config: AudioProcessingConfig
 ): Float32Array[] {
   const { sampleRate, channels, fps, totalFrames } = config;
   const totalSamples = Math.ceil((totalFrames / fps) * sampleRate);
@@ -1010,18 +1070,14 @@ function mixAudioTracks(
  * blobUrlManager.get() is synchronous but may not have URLs for sub-comp items
  * until they're acquired via resolveMediaUrl (async OPFS read).
  */
-async function resolveSubCompMediaUrls(
-  composition: CompositionInputProps,
-): Promise<void> {
+async function resolveSubCompMediaUrls(composition: CompositionInputProps): Promise<void> {
   const tracks = composition.tracks ?? [];
   const urlResolutions: Promise<void>[] = [];
   for (const track of tracks) {
     for (const item of track.items) {
       if (item.type !== 'composition') continue;
       const compItem = item as CompositionItem;
-      const subComp = useCompositionsStore
-        .getState()
-        .getComposition(compItem.compositionId);
+      const subComp = useCompositionsStore.getState().getComposition(compItem.compositionId);
       if (!subComp) continue;
       for (const subItem of subComp.items) {
         if (subItem.type !== 'video' && subItem.type !== 'audio') continue;
@@ -1032,9 +1088,7 @@ async function resolveSubCompMediaUrls(
     }
   }
   if (urlResolutions.length > 0) {
-    log.debug('Pre-resolving sub-comp audio URLs', {
-      count: urlResolutions.length,
-    });
+    log.debug('Pre-resolving sub-comp audio URLs', { count: urlResolutions.length });
     await Promise.all(urlResolutions);
   }
 }
@@ -1048,7 +1102,7 @@ async function resolveSubCompMediaUrls(
  */
 export async function processAudio(
   composition: CompositionInputProps,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<{
   samples: Float32Array[];
   sampleRate: number;
@@ -1067,6 +1121,12 @@ export async function processAudio(
   if (activeSegments.length === 0) {
     log.info('No audio segments to process');
     return null;
+  }
+
+  const requiresAc3Decoder = activeSegments.some((segment) => isAc3AudioCodec(segment.audioCodec));
+  if (requiresAc3Decoder) {
+    await ensureAc3DecoderRegistered();
+    log.debug('AC-3 decoder pre-registered for export audio decode');
   }
 
   // Configuration
@@ -1101,16 +1161,16 @@ export async function processAudio(
       // sourceStartFrame is in source-native FPS frames, so divide by sourceFps (not project fps)
       const sourceStartTime = segment.sourceStartFrame / segment.sourceFps;
       // Account for speed: at 2x speed, we need twice as much source audio
-      const sourceDurationNeeded =
-        (segment.durationFrames / fps) * segment.speed;
+      const sourceDurationNeeded = (segment.durationFrames / fps) * segment.speed;
       const sourceEndTime = sourceStartTime + sourceDurationNeeded;
 
-      // Decode audio using Web Audio API
+      // Decode ONLY the needed range using mediabunny (huge performance improvement!)
       const decoded = await decodeAudioFromSource(
         segment.src,
         segment.itemId,
         sourceStartTime,
         sourceEndTime,
+        segment.audioCodec,
       );
 
       // Process audio channels.
@@ -1120,19 +1180,15 @@ export async function processAudio(
       // between L/R (SoundTouch WSOLA finds shared overlap windows).
       let processedChannels = decoded.samples;
       if (segment.speed !== 1.0) {
-        processedChannels = await applySpeed(
-          processedChannels,
-          segment.speed,
-          decoded.sampleRate,
-        );
+        processedChannels = await applySpeed(processedChannels, segment.speed, decoded.sampleRate);
       }
 
       // Apply per-channel volume, fades, and resampling
       const fadeInSamples = Math.floor(
-        (segment.fadeInFrames / fps) * decoded.sampleRate,
+        (segment.fadeInFrames / fps) * decoded.sampleRate
       );
       const fadeOutSamples = Math.floor(
-        (segment.fadeOutFrames / fps) * decoded.sampleRate,
+        (segment.fadeOutFrames / fps) * decoded.sampleRate
       );
 
       for (let c = 0; c < processedChannels.length; c++) {
@@ -1147,7 +1203,7 @@ export async function processAudio(
             segment.startFrame,
             segment.itemFrom,
             fps,
-            decoded.sampleRate,
+            decoded.sampleRate
           );
         } else if (segment.volume !== 0) {
           channelSamples = applyVolume(channelSamples, segment.volume);
@@ -1159,26 +1215,20 @@ export async function processAudio(
             channelSamples,
             fadeInSamples,
             fadeOutSamples,
-            segment.useEqualPowerFades,
+            segment.useEqualPowerFades
           );
         }
 
         // Resample to target sample rate
         if (decoded.sampleRate !== config.sampleRate) {
-          channelSamples = await resample(
-            channelSamples,
-            decoded.sampleRate,
-            config.sampleRate,
-          );
+          channelSamples = await resample(channelSamples, decoded.sampleRate, config.sampleRate);
         }
 
         processedChannels[c] = channelSamples;
       }
 
       // Calculate start position in output
-      const startSample = Math.floor(
-        (segment.startFrame / fps) * config.sampleRate,
-      );
+      const startSample = Math.floor((segment.startFrame / fps) * config.sampleRate);
 
       processedSegments.push({
         samples: processedChannels,
@@ -1229,22 +1279,20 @@ export async function processAudio(
  * @param audioData - Processed audio samples
  * @returns AudioBuffer ready for encoding
  */
-export function createAudioBuffer(audioData: {
-  samples: Float32Array[];
-  sampleRate: number;
-  channels: number;
-}): AudioBuffer {
+export function createAudioBuffer(
+  audioData: { samples: Float32Array[]; sampleRate: number; channels: number }
+): AudioBuffer {
   // Create AudioBuffer from Float32Arrays
   const audioContext = new OfflineAudioContext(
     audioData.channels,
     audioData.samples[0]?.length ?? 0,
-    audioData.sampleRate,
+    audioData.sampleRate
   );
 
   const audioBuffer = audioContext.createBuffer(
     audioData.channels,
     audioData.samples[0]?.length ?? 0,
-    audioData.sampleRate,
+    audioData.sampleRate
   );
 
   // Copy samples to AudioBuffer
@@ -1264,9 +1312,7 @@ export function createAudioBuffer(audioData: {
  * Async because sub-composition media URLs may need to be resolved from OPFS
  * before extractAudioSegments can see valid src values.
  */
-export async function hasAudioContent(
-  composition: CompositionInputProps,
-): Promise<boolean> {
+export async function hasAudioContent(composition: CompositionInputProps): Promise<boolean> {
   await resolveSubCompMediaUrls(composition);
   const segments = extractAudioSegments(composition, composition.fps);
   return segments.some((s) => !s.muted);

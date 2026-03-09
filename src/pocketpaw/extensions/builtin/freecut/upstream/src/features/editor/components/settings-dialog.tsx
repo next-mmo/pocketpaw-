@@ -1,11 +1,11 @@
-import { useState, useCallback } from 'react';
-import type { MediaMetadata } from '@/types/storage';
+﻿import { useState, useCallback, useEffect } from "react";
+import type { MediaMetadata } from "@/types/storage";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,19 +15,44 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { RotateCcw, Trash2, Loader2, Check, ImagePlus, Film } from 'lucide-react';
-import { useSettingsStore } from '@/features/settings/stores/settings-store';
-import { useMediaLibraryStore } from '@/features/media-library/stores/media-library-store';
-import { getSharedProxyKey } from '@/features/media-library/utils/proxy-key';
-import { createLogger } from '@/lib/logger';
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  RotateCcw,
+  Trash2,
+  Loader2,
+  Check,
+  ImagePlus,
+  Film,
+  Download,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+} from "lucide-react";
+import { useSettingsStore } from "@/features/editor/deps/settings";
+import {
+  useMediaLibraryStore,
+  getSharedProxyKey,
+  importProxyService,
+  importMediaLibraryService,
+  importThumbnailGenerator,
+} from "@/features/editor/deps/media-library";
+import {
+  importGifFrameCache,
+  importFilmstripCache,
+  importWaveformCache,
+} from "@/features/editor/deps/timeline-cache";
+import { clearPreviewAudioCache } from "@/features/editor/deps/composition-runtime";
+import { isElectronApp } from "@/types/electron-updater";
+import type { UpdateEvent } from "@/types/electron-updater";
+import { Progress } from "@/components/ui/progress";
+import { createLogger } from "@/shared/logging/logger";
 
-const log = createLogger('SettingsDialog');
+const log = createLogger("SettingsDialog");
 
 interface SettingsDialogProps {
   open: boolean;
@@ -52,18 +77,15 @@ async function clearProjectCaches(mediaIds: string[]): Promise<void> {
     { filmstripCache },
     { waveformCache },
   ] = await Promise.all([
-    import('@/lib/storage/indexeddb/waveforms'),
-    import('@/lib/storage/indexeddb/gif-frames'),
-    import('@/lib/storage/indexeddb/decoded-preview-audio'),
-    import('@/features/timeline/services/gif-frame-cache'),
-    import('@/features/timeline/services/filmstrip-cache'),
-    import('@/features/timeline/services/waveform-cache'),
+    import("@/infrastructure/storage/indexeddb/waveforms"),
+    import("@/infrastructure/storage/indexeddb/gif-frames"),
+    import("@/infrastructure/storage/indexeddb/decoded-preview-audio"),
+    importGifFrameCache(),
+    importFilmstripCache(),
+    importWaveformCache(),
   ]);
 
   // Clear in-memory preview audio cache (not keyed per-media, so clear all)
-  const { clearPreviewAudioCache } = await import(
-    '@/lib/composition-runtime/utils/audio-decode-cache'
-  );
   clearPreviewAudioCache();
 
   await Promise.all(
@@ -74,27 +96,29 @@ async function clearProjectCaches(mediaIds: string[]): Promise<void> {
       gifFrameCache.clearMedia(id).catch(() => {}),
       filmstripCache.clearMedia(id).catch(() => {}),
       waveformCache.clearMedia(id).catch(() => {}),
-    ])
+    ]),
   );
 
   log.info(`Cleared caches for ${mediaIds.length} media items`);
 }
 
 /** Delete all proxy videos for the given media items and clear their store status. */
-async function clearProjectProxies(
-  mediaItems: MediaMetadata[]
-): Promise<void> {
+async function clearProjectProxies(mediaItems: MediaMetadata[]): Promise<void> {
   if (mediaItems.length === 0) return;
 
-  const { proxyService } = await import('@/features/media-library/services/proxy-service');
+  const { proxyService } = await importProxyService();
 
-  await Promise.all(mediaItems.map(async (media) => {
-    try {
-      await proxyService.deleteProxy(media.id, getSharedProxyKey(media));
-    } catch { /* already absent */ }
-    useMediaLibraryStore.getState().clearProxyStatus(media.id);
-    proxyService.clearProxyKey(media.id);
-  }));
+  await Promise.all(
+    mediaItems.map(async (media) => {
+      try {
+        await proxyService.deleteProxy(media.id, getSharedProxyKey(media));
+      } catch {
+        /* already absent */
+      }
+      useMediaLibraryStore.getState().clearProxyStatus(media.id);
+      proxyService.clearProxyKey(media.id);
+    }),
+  );
 
   log.info(`Cleared proxies for ${mediaItems.length} media items`);
 }
@@ -115,10 +139,10 @@ async function regenerateProjectThumbnails(
     { saveThumbnail },
     { updateMedia },
   ] = await Promise.all([
-    import('@/features/media-library/services/media-library-service'),
-    import('@/features/media-library/utils/thumbnail-generator'),
-    import('@/lib/storage/indexeddb/thumbnails'),
-    import('@/lib/storage/indexeddb/media'),
+    importMediaLibraryService(),
+    importThumbnailGenerator(),
+    import("@/infrastructure/storage/indexeddb/thumbnails"),
+    import("@/infrastructure/storage/indexeddb/media"),
   ]);
 
   let regenerated = 0;
@@ -171,54 +195,151 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const mediaItems = useMediaLibraryStore((s) => s.mediaItems);
 
-  const [clearState, setClearState] = useState<'idle' | 'clearing' | 'done'>('idle');
+  const [clearState, setClearState] = useState<"idle" | "clearing" | "done">(
+    "idle",
+  );
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [regenState, setRegenState] = useState<'idle' | 'working' | 'done'>('idle');
-  const [regenProgress, setRegenProgress] = useState('');
-  const [proxyState, setProxyState] = useState<'idle' | 'clearing' | 'done'>('idle');
+  const [regenState, setRegenState] = useState<"idle" | "working" | "done">(
+    "idle",
+  );
+  const [regenProgress, setRegenProgress] = useState("");
+  const [proxyState, setProxyState] = useState<"idle" | "clearing" | "done">(
+    "idle",
+  );
+
+  // ── Auto-update state (Electron only) ────────────────────────
+  const autoUpdate = useSettingsStore((s) => s.autoUpdate);
+  const isElectron = isElectronApp();
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateStatus, setUpdateStatus] = useState<
+    | "idle"
+    | "checking"
+    | "available"
+    | "not-available"
+    | "downloading"
+    | "downloaded"
+    | "error"
+  >("idle");
+  const [updateVersion, setUpdateVersion] = useState<string>("");
+  const [downloadPercent, setDownloadPercent] = useState(0);
+  const [updateError, setUpdateError] = useState<string>("");
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const updater = window.electronUpdater!;
+
+    updater.getVersion().then(setAppVersion);
+    updater.getAutoUpdate().then((enabled) => {
+      if (enabled !== autoUpdate) {
+        setSetting("autoUpdate", enabled);
+      }
+    });
+
+    const cleanup = updater.onUpdateEvent((event: UpdateEvent) => {
+      switch (event.type) {
+        case "checking":
+          setUpdateStatus("checking");
+          break;
+        case "available":
+          setUpdateStatus("available");
+          setUpdateVersion(event.version ?? "");
+          break;
+        case "not-available":
+          setUpdateStatus("not-available");
+          setUpdateVersion(event.version ?? "");
+          break;
+        case "download-progress":
+          setUpdateStatus("downloading");
+          setDownloadPercent(event.percent ?? 0);
+          break;
+        case "downloaded":
+          setUpdateStatus("downloaded");
+          setUpdateVersion(event.version ?? "");
+          break;
+        case "error":
+          setUpdateStatus("error");
+          setUpdateError(event.message ?? "Unknown error");
+          break;
+      }
+    });
+
+    return cleanup;
+  }, [isElectron, autoUpdate, setSetting]);
+
+  const handleCheckForUpdates = useCallback(async () => {
+    if (!isElectron) return;
+    setUpdateStatus("checking");
+    setUpdateError("");
+    await window.electronUpdater!.checkForUpdates();
+  }, [isElectron]);
+
+  const handleDownloadUpdate = useCallback(async () => {
+    if (!isElectron) return;
+    setDownloadPercent(0);
+    await window.electronUpdater!.downloadUpdate();
+  }, [isElectron]);
+
+  const handleInstallUpdate = useCallback(() => {
+    if (!isElectron) return;
+    window.electronUpdater!.quitAndInstall();
+  }, [isElectron]);
+
+  const handleToggleAutoUpdate = useCallback(
+    async (enabled: boolean) => {
+      setSetting("autoUpdate", enabled);
+      if (isElectron) {
+        await window.electronUpdater!.setAutoUpdate(enabled);
+      }
+    },
+    [isElectron, setSetting],
+  );
 
   const handleClearCache = useCallback(async () => {
-    setClearState('clearing');
+    setClearState("clearing");
     try {
       const ids = mediaItems.map((m) => m.id);
       await clearProjectCaches(ids);
-      setClearState('done');
-      setTimeout(() => setClearState('idle'), 2000);
+      setClearState("done");
+      setTimeout(() => setClearState("idle"), 2000);
     } catch (err) {
-      log.error('Failed to clear caches', err);
-      setClearState('idle');
+      log.error("Failed to clear caches", err);
+      setClearState("idle");
     }
   }, [mediaItems]);
 
   const handleRegenThumbnails = useCallback(async () => {
-    setRegenState('working');
-    setRegenProgress('0/' + mediaItems.length);
+    setRegenState("working");
+    setRegenProgress("0/" + mediaItems.length);
     try {
-      const items = mediaItems.map((m) => ({ id: m.id, fileName: m.fileName, mimeType: m.mimeType }));
+      const items = mediaItems.map((m) => ({
+        id: m.id,
+        fileName: m.fileName,
+        mimeType: m.mimeType,
+      }));
       await regenerateProjectThumbnails(items, (done, total) => {
         setRegenProgress(`${done}/${total}`);
       });
-      setRegenState('done');
+      setRegenState("done");
       setTimeout(() => {
-        setRegenState('idle');
-        setRegenProgress('');
+        setRegenState("idle");
+        setRegenProgress("");
       }, 2000);
     } catch (err) {
-      log.error('Failed to regenerate thumbnails', err);
-      setRegenState('idle');
-      setRegenProgress('');
+      log.error("Failed to regenerate thumbnails", err);
+      setRegenState("idle");
+      setRegenProgress("");
     }
   }, [mediaItems]);
 
   const handleClearProxies = useCallback(async () => {
-    setProxyState('clearing');
+    setProxyState("clearing");
     try {
       await clearProjectProxies(mediaItems);
-      setProxyState('done');
-      setTimeout(() => setProxyState('idle'), 2000);
+      setProxyState("done");
+      setTimeout(() => setProxyState("idle"), 2000);
     } catch (err) {
-      log.error('Failed to clear proxies', err);
-      setProxyState('idle');
+      log.error("Failed to clear proxies", err);
+      setProxyState("idle");
     }
   }, [mediaItems]);
 
@@ -227,7 +348,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       <DialogContent className="max-w-lg">
         <DialogHeader className="flex flex-row items-center justify-between">
           <DialogTitle>Editor Settings</DialogTitle>
-          <Button variant="ghost" size="sm" onClick={resetToDefaults} className="h-8 gap-1.5 mr-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={resetToDefaults}
+            className="h-8 gap-1.5 mr-6"
+          >
             <RotateCcw className="w-3.5 h-3.5" />
             Reset
           </Button>
@@ -236,27 +362,37 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="space-y-6">
             {/* General */}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground">General</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">
+                General
+              </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Auto-save</Label>
                   <Switch
                     checked={autoSaveInterval > 0}
-                    onCheckedChange={(v) => setSetting('autoSaveInterval', v ? 5 : 0)}
+                    onCheckedChange={(v) =>
+                      setSetting("autoSaveInterval", v ? 5 : 0)
+                    }
                   />
                 </div>
                 {autoSaveInterval > 0 && (
                   <div className="flex items-center justify-between">
-                    <Label className="text-sm text-muted-foreground">Interval</Label>
+                    <Label className="text-sm text-muted-foreground">
+                      Interval
+                    </Label>
                     <div className="w-32 flex items-center gap-2">
                       <Slider
                         value={[autoSaveInterval]}
-                        onValueChange={([v]) => setSetting('autoSaveInterval', v || 5)}
+                        onValueChange={([v]) =>
+                          setSetting("autoSaveInterval", v || 5)
+                        }
                         min={5}
                         max={30}
                         step={5}
                       />
-                      <span className="text-xs text-muted-foreground w-6">{autoSaveInterval}m</span>
+                      <span className="text-xs text-muted-foreground w-6">
+                        {autoSaveInterval}m
+                      </span>
                     </div>
                   </div>
                 )}
@@ -265,34 +401,48 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             {/* Timeline */}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground">Timeline</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">
+                Timeline
+              </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Show Waveforms</Label>
-                  <Switch checked={showWaveforms} onCheckedChange={(v) => setSetting('showWaveforms', v)} />
+                  <Switch
+                    checked={showWaveforms}
+                    onCheckedChange={(v) => setSetting("showWaveforms", v)}
+                  />
                 </div>
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Show Filmstrips</Label>
-                  <Switch checked={showFilmstrips} onCheckedChange={(v) => setSetting('showFilmstrips', v)} />
+                  <Switch
+                    checked={showFilmstrips}
+                    onCheckedChange={(v) => setSetting("showFilmstrips", v)}
+                  />
                 </div>
               </div>
             </section>
 
             {/* Performance */}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground">Performance</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">
+                Performance
+              </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm">Undo History Depth</Label>
                   <div className="w-32 flex items-center gap-2">
                     <Slider
                       value={[maxUndoHistory]}
-                      onValueChange={([v]) => setSetting('maxUndoHistory', v || 10)}
+                      onValueChange={([v]) =>
+                        setSetting("maxUndoHistory", v || 10)
+                      }
                       min={10}
                       max={200}
                       step={10}
                     />
-                    <span className="text-xs text-muted-foreground w-6">{maxUndoHistory}</span>
+                    <span className="text-xs text-muted-foreground w-6">
+                      {maxUndoHistory}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -300,7 +450,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             {/* Storage */}
             <section className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground">Storage</h3>
+              <h3 className="text-sm font-medium text-muted-foreground">
+                Storage
+              </h3>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
@@ -314,12 +466,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     size="sm"
                     className="h-8 w-28 gap-1.5"
                     onClick={() => setShowClearConfirm(true)}
-                    disabled={clearState !== 'idle'}
+                    disabled={clearState !== "idle"}
                   >
-                    {clearState === 'clearing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    {clearState === 'done' && <Check className="w-3.5 h-3.5" />}
-                    {clearState === 'idle' && <Trash2 className="w-3.5 h-3.5" />}
-                    {clearState === 'clearing' ? 'Clearing...' : clearState === 'done' ? 'Cleared' : 'Clear'}
+                    {clearState === "clearing" && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    )}
+                    {clearState === "done" && <Check className="w-3.5 h-3.5" />}
+                    {clearState === "idle" && (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                    {clearState === "clearing"
+                      ? "Clearing..."
+                      : clearState === "done"
+                        ? "Cleared"
+                        : "Clear"}
                   </Button>
                 </div>
                 <div className="flex items-center justify-between">
@@ -334,12 +494,20 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     size="sm"
                     className="h-8 w-28 gap-1.5"
                     onClick={handleRegenThumbnails}
-                    disabled={regenState !== 'idle'}
+                    disabled={regenState !== "idle"}
                   >
-                    {regenState === 'working' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    {regenState === 'done' && <Check className="w-3.5 h-3.5" />}
-                    {regenState === 'idle' && <ImagePlus className="w-3.5 h-3.5" />}
-                    {regenState === 'working' ? regenProgress : regenState === 'done' ? 'Done' : 'Regenerate'}
+                    {regenState === "working" && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    )}
+                    {regenState === "done" && <Check className="w-3.5 h-3.5" />}
+                    {regenState === "idle" && (
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    )}
+                    {regenState === "working"
+                      ? regenProgress
+                      : regenState === "done"
+                        ? "Done"
+                        : "Regenerate"}
                   </Button>
                 </div>
                 <div className="flex items-center justify-between">
@@ -354,17 +522,163 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                     size="sm"
                     className="h-8 w-28 gap-1.5"
                     onClick={handleClearProxies}
-                    disabled={proxyState !== 'idle'}
+                    disabled={proxyState !== "idle"}
                   >
-                    {proxyState === 'clearing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                    {proxyState === 'done' && <Check className="w-3.5 h-3.5" />}
-                    {proxyState === 'idle' && <Film className="w-3.5 h-3.5" />}
-                    {proxyState === 'clearing' ? 'Deleting...' : proxyState === 'done' ? 'Deleted' : 'Delete'}
+                    {proxyState === "clearing" && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    )}
+                    {proxyState === "done" && <Check className="w-3.5 h-3.5" />}
+                    {proxyState === "idle" && <Film className="w-3.5 h-3.5" />}
+                    {proxyState === "clearing"
+                      ? "Deleting..."
+                      : proxyState === "done"
+                        ? "Deleted"
+                        : "Delete"}
                   </Button>
                 </div>
               </div>
             </section>
 
+            {/* Auto Update — Electron only */}
+            {isElectron && (
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  Updates
+                </h3>
+                <div className="space-y-3">
+                  {/* Current version */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">Current Version</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        FreeCut Desktop {appVersion || "..."}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Auto-update toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="text-sm">Auto-update</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Automatically download and install new versions
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoUpdate}
+                      onCheckedChange={handleToggleAutoUpdate}
+                    />
+                  </div>
+
+                  {/* Update status & actions */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 mr-4">
+                      <Label className="text-sm">Check for Updates</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {updateStatus === "idle" &&
+                          "Click to check for new versions"}
+                        {updateStatus === "checking" && "Checking..."}
+                        {updateStatus === "available" &&
+                          `Version ${updateVersion} available!`}
+                        {updateStatus === "not-available" &&
+                          "You are up to date"}
+                        {updateStatus === "downloading" &&
+                          `Downloading ${updateVersion}...`}
+                        {updateStatus === "downloaded" &&
+                          `Version ${updateVersion} ready to install`}
+                        {updateStatus === "error" && `Error: ${updateError}`}
+                      </p>
+                      {updateStatus === "downloading" && (
+                        <div className="mt-2">
+                          <Progress value={downloadPercent} className="h-1.5" />
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            {downloadPercent}%
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {updateStatus === "idle" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        onClick={handleCheckForUpdates}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Check
+                      </Button>
+                    )}
+                    {updateStatus === "checking" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        disabled
+                      >
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Checking
+                      </Button>
+                    )}
+                    {updateStatus === "available" && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        onClick={handleDownloadUpdate}
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download
+                      </Button>
+                    )}
+                    {updateStatus === "downloading" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        disabled
+                      >
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        {downloadPercent}%
+                      </Button>
+                    )}
+                    {updateStatus === "not-available" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        onClick={handleCheckForUpdates}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Up to date
+                      </Button>
+                    )}
+                    {updateStatus === "downloaded" && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="h-8 w-32 gap-1.5"
+                        onClick={handleInstallUpdate}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        Restart & Update
+                      </Button>
+                    )}
+                    {updateStatus === "error" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 w-28 gap-1.5"
+                        onClick={handleCheckForUpdates}
+                      >
+                        <RotateCw className="w-3.5 h-3.5" />
+                        Retry
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         </ScrollArea>
       </DialogContent>
@@ -374,10 +688,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Clear project cache?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will delete cached waveforms, filmstrips, GIF frames, and decoded audio
-              for the current project ({mediaItems.length} media items).
-              These will be regenerated automatically when needed. Your project data,
-              media files, thumbnails, and proxies will not be affected.
+              This will delete cached waveforms, filmstrips, GIF frames, and
+              decoded audio for the current project ({mediaItems.length} media
+              items). These will be regenerated automatically when needed. Your
+              project data, media files, thumbnails, and proxies will not be
+              affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

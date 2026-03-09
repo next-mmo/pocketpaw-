@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import { Columns2 } from 'lucide-react';
-import { VideoPreview } from '@/features/preview/components/video-preview';
-import { PlaybackControls } from '@/features/preview/components/playback-controls';
-import { TimecodeDisplay } from '@/features/preview/components/timecode-display';
-import { PreviewZoomControls } from '@/features/preview/components/preview-zoom-controls';
-import { SourceMonitor } from '@/features/preview/components/source-monitor';
-import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
-import { useProjectStore } from '@/features/projects/stores/project-store';
-import { useEditorStore } from '../stores/editor-store';
+import {
+  VideoPreview,
+  PlaybackControls,
+  TimecodeDisplay,
+  PreviewZoomControls,
+  SourceMonitor,
+} from '@/features/editor/deps/preview';
+import { useTimelineStore } from '@/features/editor/deps/timeline-store';
+import { useProjectStore } from '@/features/editor/deps/projects';
+import { useEditorStore } from '@/shared/state/editor';
 
 interface PreviewAreaProps {
   project: {
@@ -278,7 +280,7 @@ export const PreviewArea = memo(function PreviewArea({ project }: PreviewAreaPro
             <div className="flex-1 min-w-0" />
             <PlaybackControls totalFrames={totalFrames} />
             <div className="flex-1 min-w-0" />
-            <div className="flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <PreviewZoomControls />
             </div>
           </div>

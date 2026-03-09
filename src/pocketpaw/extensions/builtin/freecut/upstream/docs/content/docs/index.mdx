@@ -1,0 +1,40 @@
+---
+title: Introduction
+description: Welcome to FreeCut — a fast, local multi-track desktop video editor.
+---
+
+## What is FreeCut?
+
+FreeCut is a **fast, local multi-track video editor** that pairs a fluid browser-based UI with a powerful Python backend for hardware-accelerated FFmpeg processing. No internet uploads required — everything runs locally on your machine.
+
+### Desktop Architecture
+
+The desktop version uses **Electron** to wrap the web UI and launch the Python backend automatically:
+
+- **Frontend**: React 19 + TypeScript, served via Vite dev server or bundled for production
+- **Backend**: Python + FastAPI, handling GPU-accelerated FFmpeg export
+- **Shell**: Electron manages the window, auto-updates, and process lifecycle
+
+### Key Features
+
+- Multi-track timeline with video, audio, text, image, and shape tracks
+- Real-time canvas preview with transform gizmo
+- GPU-accelerated export via FFmpeg (NVENC, etc.)
+- Keyframe animation with Bézier curve editor
+- Transitions — fade, wipe, slide, 3D flip, clock wipe, iris
+- Visual effects — CSS filters, glitch, halftone, vignette
+- Project bundles — export/import as ZIP
+- Auto-save with IndexedDB persistence
+
+## Quick Start
+
+```
+npm install
+npm run electron:dev
+```
+
+This starts three services concurrently:
+
+1. Python backend (`npm run dev:python`)
+2. Vite frontend (`npm run dev`)
+3. Electron window (waits for frontend, then launches)

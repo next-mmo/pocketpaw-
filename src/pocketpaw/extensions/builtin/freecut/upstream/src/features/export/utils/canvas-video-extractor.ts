@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Video frame extractor using mediabunny for precise frame access.
  *
  * This replaces HTML5 video element seeking which is slow and imprecise.
@@ -7,16 +7,14 @@
  * - Pre-decoded frames for instant access
  * - No 500ms timeout fallbacks needed
  */
-import { createLogger } from '@/lib/logger';
+
+import { createLogger } from '@/shared/logging/logger';
 
 const log = createLogger('VideoFrameExtractor');
 
 /** Types for dynamically imported mediabunny module */
 interface MediabunnySink {
-  samples(
-    startTimestamp?: number,
-    endTimestamp?: number,
-  ): AsyncGenerator<MediabunnySample, void, unknown>;
+  samples(startTimestamp?: number, endTimestamp?: number): AsyncGenerator<MediabunnySample, void, unknown>;
 }
 
 interface MediabunnySample {
@@ -26,7 +24,7 @@ interface MediabunnySample {
     x: number,
     y: number,
     width: number,
-    height: number,
+    height: number
   ) => void;
   toVideoFrame(): VideoFrame | null;
   close(): void;
@@ -56,11 +54,7 @@ export class VideoFrameExtractor {
   private duration: number = 0;
   private ready: boolean = false;
   private drawFailureCount = 0;
-  private sampleIterator: AsyncGenerator<
-    MediabunnySample,
-    void,
-    unknown
-  > | null = null;
+  private sampleIterator: AsyncGenerator<MediabunnySample, void, unknown> | null = null;
   private currentSample: MediabunnySample | null = null;
   private nextSample: MediabunnySample | null = null;
   private iteratorDone = false;
@@ -77,24 +71,61 @@ export class VideoFrameExtractor {
   private cachedVideoFrameSample: MediabunnySample | null = null;
 
   constructor(
-    _src: string,
-    private itemId: string,
-  ) {
-    // _src is intentionally unused: VideoFrameExtractor is disabled in backend-only mode.
-    // All video preview uses the HTML video element fallback path.
-    void _src;
-  }
+    private src: string,
+    private itemId: string
+  ) {}
 
   /**
    * Initialize the extractor - must be called before drawFrame()
    */
   async init(): Promise<boolean> {
-    // mediabunny is intentionally disabled — all video preview uses the
-    // HTML video element fallback path in canvas-item-renderer.ts.
-    log.debug('VideoFrameExtractor disabled (backend-only mode)', {
-      itemId: this.itemId,
-    });
-    return false;
+    try {
+      const mb = await import('mediabunny');
+
+      // Create input directly from source URL/blob URL.
+      this.input = new mb.Input({
+        formats: mb.ALL_FORMATS,
+        source: new mb.UrlSource(this.src),
+      }) as unknown as MediabunnyInput;
+
+      // Get video track
+      this.videoTrack = await this.input!.getPrimaryVideoTrack();
+      if (!this.videoTrack) {
+        log.warn('No video track found', { itemId: this.itemId });
+        return false;
+      }
+
+      if (typeof this.videoTrack.canDecode === 'function') {
+        const decodable = await this.videoTrack.canDecode();
+        if (!decodable) {
+          log.warn('Video track is not decodable via mediabunny/WebCodecs', {
+            itemId: this.itemId,
+          });
+          return false;
+        }
+      }
+
+      // Get duration
+      this.duration = await this.input!.computeDuration();
+
+      // Create video sample sink for frame extraction
+      this.sink = new mb.VideoSampleSink(
+        this.videoTrack as unknown as ConstructorParameters<typeof mb.VideoSampleSink>[0]
+      );
+
+      this.ready = true;
+      log.debug('Initialized', {
+        itemId: this.itemId,
+        duration: this.duration,
+        width: this.videoTrack.displayWidth,
+        height: this.videoTrack.displayHeight,
+      });
+
+      return true;
+    } catch (error) {
+      log.error('Failed to initialize', { itemId: this.itemId, error });
+      return false;
+    }
   }
 
   /**
@@ -107,7 +138,7 @@ export class VideoFrameExtractor {
     x: number,
     y: number,
     width: number,
-    height: number,
+    height: number
   ): Promise<boolean> {
     if (!this.ready || !this.sink) {
       return false;
@@ -143,8 +174,7 @@ export class VideoFrameExtractor {
         lastError = this.sampleLoopError;
       }
 
-      this.lastFailureKind =
-        this.lastFailureKind === 'no-sample' ? 'no-sample' : 'decode-error';
+      this.lastFailureKind = this.lastFailureKind === 'no-sample' ? 'no-sample' : 'decode-error';
       return this.reportDrawFailure(timestamp, clampedTime, lastError);
     }
   }
@@ -158,9 +188,8 @@ export class VideoFrameExtractor {
     if (!this.sampleIterator) {
       this.resetSampleIterator(timestamp, 'init');
     } else if (
-      this.lastRequestedTimestamp !== null &&
-      timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON <
-        this.lastRequestedTimestamp
+      this.lastRequestedTimestamp !== null
+      && timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON < this.lastRequestedTimestamp
     ) {
       // Timeline time moved backward for this clip (rare during export). Restart stream.
       this.resetSampleIterator(timestamp, 'backward');
@@ -171,11 +200,8 @@ export class VideoFrameExtractor {
     while (true) {
       const candidate = await this.peekNextSample();
       if (!candidate) break;
-      if (
-        candidate.timestamp <=
-        timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON
-      ) {
-        // Moving to a new sample — release the cached VideoFrame first
+      if (candidate.timestamp <= timestamp + VideoFrameExtractor.TIMESTAMP_EPSILON) {
+        // Moving to a new sample â€” release the cached VideoFrame first
         // so it's closed before the old sample is closed.
         this.closeCachedVideoFrame();
         this.closeSample(this.currentSample);
@@ -188,9 +214,8 @@ export class VideoFrameExtractor {
       // slightly ahead of the requested timestamp, use it to avoid false misses
       // caused by timestamp quantization/drift.
       if (
-        !this.currentSample &&
-        candidate.timestamp - timestamp <=
-          VideoFrameExtractor.LOOKAHEAD_TOLERANCE_SECONDS
+        !this.currentSample
+        && candidate.timestamp - timestamp <= VideoFrameExtractor.LOOKAHEAD_TOLERANCE_SECONDS
       ) {
         this.currentSample = candidate;
         this.nextSample = null;
@@ -217,17 +242,11 @@ export class VideoFrameExtractor {
     return this.nextSample;
   }
 
-  private resetSampleIterator(
-    startTimestamp: number,
-    reason: 'init' | 'backward' | 'recover',
-  ): void {
+  private resetSampleIterator(startTimestamp: number, reason: 'init' | 'backward' | 'recover'): void {
     this.closeStreamState();
     if (!this.sink) return;
 
-    const streamStart = Math.max(
-      0,
-      startTimestamp - VideoFrameExtractor.STREAM_BACKTRACK_SECONDS,
-    );
+    const streamStart = Math.max(0, startTimestamp - VideoFrameExtractor.STREAM_BACKTRACK_SECONDS);
     if (reason !== 'init') {
       log.debug('Restarting mediabunny sample stream', {
         itemId: this.itemId,
@@ -247,7 +266,7 @@ export class VideoFrameExtractor {
     x: number,
     y: number,
     width: number,
-    height: number,
+    height: number
   ): boolean {
     const sample = this.currentSample;
     if (!sample) {
@@ -269,13 +288,11 @@ export class VideoFrameExtractor {
       // empty/invalidated frame because the decoded buffer was released.
       let videoFrame = this.cachedVideoFrame;
       if (!videoFrame || this.cachedVideoFrameSample !== sample) {
-        // Different sample — release old cached frame and create new one
+        // Different sample â€” release old cached frame and create new one
         this.closeCachedVideoFrame();
         videoFrame = sample.toVideoFrame();
         if (!videoFrame) {
-          this.sampleLoopError = new Error(
-            'Decoded sample could not be converted to VideoFrame',
-          );
+          this.sampleLoopError = new Error('Decoded sample could not be converted to VideoFrame');
           this.lastFailureKind = 'decode-error';
           return false;
         }
@@ -286,7 +303,7 @@ export class VideoFrameExtractor {
       ctx.drawImage(videoFrame, x, y, width, height);
       return true;
     } catch (error) {
-      // Draw failed — discard the cached frame so next attempt gets a fresh one
+      // Draw failed â€” discard the cached frame so next attempt gets a fresh one
       this.closeCachedVideoFrame();
       this.sampleLoopError = error;
       this.lastFailureKind = 'decode-error';
@@ -306,15 +323,9 @@ export class VideoFrameExtractor {
     }
   }
 
-  private async recoverAndPrime(
-    timestamp: number,
-    error: unknown,
-  ): Promise<boolean> {
+  private async recoverAndPrime(timestamp: number, error: unknown): Promise<boolean> {
     const message = error instanceof Error ? error.message : String(error);
-    const looksRecoverable =
-      /key frame|configure\(\)|flush\(\)|InvalidStateError|decode/i.test(
-        message,
-      );
+    const looksRecoverable = /key frame|configure\(\)|flush\(\)|InvalidStateError|decode/i.test(message);
     if (!looksRecoverable) {
       return false;
     }
@@ -355,14 +366,9 @@ export class VideoFrameExtractor {
     }
   }
 
-  private reportDrawFailure(
-    timestamp: number,
-    clampedTime: number,
-    error: unknown,
-  ): boolean {
+  private reportDrawFailure(timestamp: number, clampedTime: number, error: unknown): boolean {
     this.drawFailureCount += 1;
-    const shouldWarn =
-      this.drawFailureCount <= 3 || this.drawFailureCount % 20 === 0;
+    const shouldWarn = this.drawFailureCount <= 3 || this.drawFailureCount % 20 === 0;
     const logData = {
       itemId: this.itemId,
       timestamp,
@@ -425,3 +431,4 @@ export class VideoFrameExtractor {
     this.lastFailureKind = 'none';
   }
 }
+

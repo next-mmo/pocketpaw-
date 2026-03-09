@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 /**
  * App-wide settings stored in localStorage
@@ -12,20 +12,25 @@ interface AppSettings {
   showFilmstrips: boolean;
 
   // Preview
-  previewQuality: 'low' | 'medium' | 'high';
+  previewQuality: "low" | "medium" | "high";
 
   // Export defaults
-  defaultExportFormat: 'mp4' | 'webm';
-  defaultExportQuality: 'low' | 'medium' | 'high' | 'ultra';
+  defaultExportFormat: "mp4" | "webm";
+  defaultExportQuality: "low" | "medium" | "high" | "ultra";
 
   // Performance
   maxUndoHistory: number;
   autoSaveInterval: number; // minutes (0 = disabled)
 
+  // Updates (Electron desktop only)
+  autoUpdate: boolean;
 }
 
 interface SettingsActions {
-  setSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+  setSetting: <K extends keyof AppSettings>(
+    key: K,
+    value: AppSettings[K],
+  ) => void;
   resetToDefaults: () => void;
 }
 
@@ -39,15 +44,18 @@ const DEFAULT_SETTINGS: AppSettings = {
   showFilmstrips: true,
 
   // Preview
-  previewQuality: 'high',
+  previewQuality: "high",
 
   // Export defaults
-  defaultExportFormat: 'mp4',
-  defaultExportQuality: 'high',
+  defaultExportFormat: "mp4",
+  defaultExportQuality: "high",
 
   // Performance
   maxUndoHistory: 50,
   autoSaveInterval: 0, // Auto-save disabled by default
+
+  // Updates
+  autoUpdate: true, // Auto-update enabled by default
 };
 
 /**
@@ -68,7 +76,7 @@ export const useSettingsStore = create<SettingsStore>()(
       resetToDefaults: () => set(DEFAULT_SETTINGS),
     }),
     {
-      name: 'freecut-settings',
-    }
-  )
+      name: "freecut-settings",
+    },
+  ),
 );

@@ -2,16 +2,17 @@ import { useMemo, useCallback } from 'react';
 import type { TimelineItem } from '@/types/timeline';
 import type { GizmoHandle, Transform, CoordinateParams } from '../types/gizmo';
 import { useGizmoStore } from '../stores/gizmo-store';
-import { useAnimatedTransform } from '@/features/keyframes/hooks/use-animated-transform';
+import { useAnimatedTransform } from '@/features/preview/deps/keyframes';
 import { useEscapeCancel } from '../hooks/use-drag-interaction';
 import { GizmoHandles } from './gizmo-handles';
 import { transformToScreenBounds, screenToCanvas, getScaleCursor } from '../utils/coordinate-transform';
+import { expandTextTransformForPreview } from '../utils/text-layout';
 
 interface TransformGizmoProps {
   item: TimelineItem;
   coordParams: CoordinateParams;
   onTransformStart: () => void;
-  onTransformEnd: (transform: Transform) => void;
+  onTransformEnd: (transform: Transform, operation: 'move' | 'resize' | 'rotate') => void;
   /** Whether video is currently playing - gizmo shows at lower opacity during playback */
   isPlaying?: boolean;
 }
@@ -53,7 +54,7 @@ export function TransformGizmo({
       return previewTransform;
     }
 
-    const baseTransform: Transform = {
+    let baseTransform: Transform = {
       x: animatedTransform.x,
       y: animatedTransform.y,
       width: animatedTransform.width,
@@ -63,6 +64,14 @@ export function TransformGizmo({
       cornerRadius: animatedTransform.cornerRadius,
     };
 
+    if (item.type === 'text') {
+      baseTransform = expandTextTransformForPreview(
+        item,
+        baseTransform,
+        itemPreview?.properties
+      );
+    }
+
     // If properties panel is previewing this item's transform, merge its values
     const transformPreview = itemPreview?.transform;
     if (transformPreview) {
@@ -70,7 +79,7 @@ export function TransformGizmo({
     }
 
     return baseTransform;
-  }, [animatedTransform, isInteracting, previewTransform, itemPreview, item.id]);
+  }, [animatedTransform, isInteracting, previewTransform, item, itemPreview]);
 
   // Convert to screen bounds, expanding for stroke width on shapes
   const screenBounds = useMemo(() => {
@@ -134,7 +143,7 @@ export function TransformGizmo({
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const movePoint = toCanvasPoint(moveEvent);
-        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey);
+        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey, moveEvent.altKey);
       };
 
       const handleMouseUp = () => {
@@ -145,7 +154,7 @@ export function TransformGizmo({
         const finalTransform = endInteraction();
         // Only update timeline if transform actually changed
         if (finalTransform && transformChanged(startTransformSnapshot, finalTransform)) {
-          onTransformEnd(finalTransform);
+          onTransformEnd(finalTransform, 'move');
         }
         // Wait 2 animation frames before clearing preview to ensure React has
         // processed the timeline store update and re-rendered with new item values.
@@ -175,7 +184,7 @@ export function TransformGizmo({
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const movePoint = toCanvasPoint(moveEvent);
-        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey);
+        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey, moveEvent.altKey);
       };
 
       const handleMouseUp = () => {
@@ -185,7 +194,7 @@ export function TransformGizmo({
 
         const finalTransform = endInteraction();
         if (finalTransform && transformChanged(startTransformSnapshot, finalTransform)) {
-          onTransformEnd(finalTransform);
+          onTransformEnd(finalTransform, 'resize');
         }
         // Wait 2 animation frames before clearing preview to ensure React has
         // processed the timeline store update and re-rendered with new item values.
@@ -214,7 +223,7 @@ export function TransformGizmo({
 
       const handleMouseMove = (moveEvent: MouseEvent) => {
         const movePoint = toCanvasPoint(moveEvent);
-        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey);
+        updateInteraction(movePoint, moveEvent.shiftKey, moveEvent.ctrlKey, moveEvent.altKey);
       };
 
       const handleMouseUp = () => {
@@ -224,7 +233,7 @@ export function TransformGizmo({
 
         const finalTransform = endInteraction();
         if (finalTransform && transformChanged(startTransformSnapshot, finalTransform)) {
-          onTransformEnd(finalTransform);
+          onTransformEnd(finalTransform, 'rotate');
         }
         // Wait 2 animation frames before clearing preview to ensure React has
         // processed the timeline store update and re-rendered with new item values.

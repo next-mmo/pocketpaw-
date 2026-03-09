@@ -2,19 +2,27 @@
  * Editing shortcuts: Delete, Ripple Delete, Join, Split, Keyframes.
  */
 
+import { useCallback } from 'react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { toast } from 'sonner';
-import { usePlaybackStore } from '@/features/preview/stores/playback-store';
+import { usePlaybackStore } from '@/shared/state/playback';
 import { useTimelineStore } from '../../stores/timeline-store';
-import { useSelectionStore } from '@/features/editor/stores/selection-store';
-import { useProjectStore } from '@/features/projects/stores/project-store';
+import { useSelectionStore } from '@/shared/state/selection';
+import { useProjectStore } from '@/features/timeline/deps/projects';
 import { HOTKEYS, HOTKEY_OPTIONS } from '@/config/hotkeys';
 import { canJoinMultipleItems } from '@/features/timeline/utils/clip-utils';
-import { resolveTransform, getSourceDimensions } from '@/lib/composition-runtime/utils/transform-resolver';
-import { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
-import { isFrameInTransitionRegion } from '@/features/keyframes/utils/transition-region';
+import { insertFreezeFrame } from '../../stores/actions/item-actions';
+import {
+  resolveTransform,
+  getSourceDimensions,
+} from '@/features/timeline/deps/composition-runtime';
+import {
+  resolveAnimatedTransform,
+  isFrameInTransitionRegion,
+} from '@/features/timeline/deps/keyframes';
+import type { TransformProperties } from '@/types/transform';
 import type { TimelineShortcutCallbacks } from '../use-timeline-shortcuts';
-import { useClearKeyframesDialogStore } from '@/features/editor/components/clear-keyframes-dialog-store';
+import { useClearKeyframesDialogStore } from '@/shared/state/clear-keyframes-dialog';
 
 export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const selectedItemIds = useSelectionStore((s) => s.selectedItemIds);
@@ -25,9 +33,33 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
   const removeMarker = useTimelineStore((s) => s.removeMarker);
   const removeTransition = useTimelineStore((s) => s.removeTransition);
   const rippleDeleteItems = useTimelineStore((s) => s.rippleDeleteItems);
+  const updateItemsTransformMap = useTimelineStore((s) => s.updateItemsTransformMap);
   const joinItems = useTimelineStore((s) => s.joinItems);
   const splitItem = useTimelineStore((s) => s.splitItem);
   const items = useTimelineStore((s) => s.items);
+
+  const nudgeSelectedVisualItems = useCallback((deltaX: number, deltaY: number) => {
+    if (selectedItemIds.length === 0) return;
+    if (deltaX === 0 && deltaY === 0) return;
+
+    const transforms = new Map<string, Partial<TransformProperties>>();
+    for (const itemId of selectedItemIds) {
+      const item = items.find((entry) => entry.id === itemId);
+      if (!item || item.type === 'audio') continue;
+      const defaultTransform: Partial<TransformProperties> = item.transform ?? { x: 0, y: 0 };
+      const nextX = Math.round((defaultTransform.x ?? 0) + deltaX);
+      const nextY = Math.round((defaultTransform.y ?? 0) + deltaY);
+
+      transforms.set(itemId, {
+        ...defaultTransform,
+        x: nextX,
+        y: nextY,
+      });
+    }
+
+    if (transforms.size === 0) return;
+    updateItemsTransformMap(transforms, { operation: 'move' });
+  }, [selectedItemIds, items, updateItemsTransformMap]);
 
   // Editing: Delete - Delete selected items, marker, or transition
   useHotkeys(
@@ -119,6 +151,88 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
     [selectedItemIds, rippleDeleteItems, clearSelection, callbacks]
   );
 
+  // Editing: Alt+Arrow keys - nudge selected visual items by 1px
+  useHotkeys(
+    HOTKEYS.NUDGE_LEFT,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(-1, 0);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_RIGHT,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(1, 0);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_UP,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(0, -1);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_DOWN,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(0, 1);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  // Editing: Alt+Shift+Arrow keys - nudge selected visual items by 10px
+  useHotkeys(
+    HOTKEYS.NUDGE_LEFT_LARGE,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(-10, 0);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_RIGHT_LARGE,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(10, 0);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_UP_LARGE,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(0, -10);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
+  useHotkeys(
+    HOTKEYS.NUDGE_DOWN_LARGE,
+    (event) => {
+      event.preventDefault();
+      nudgeSelectedVisualItems(0, 10);
+    },
+    HOTKEY_OPTIONS,
+    [nudgeSelectedVisualItems]
+  );
+
   // Editing: J - Join selected clips
   useHotkeys(
     HOTKEYS.JOIN_ITEMS,
@@ -176,9 +290,7 @@ export function useEditingShortcuts(callbacks: TimelineShortcutCallbacks) {
       if (currentFrame <= selectedItem.from || currentFrame >= selectedItem.from + selectedItem.durationInFrames) return;
 
       event.preventDefault();
-      void import('../../stores/actions/item-actions').then(({ insertFreezeFrame }) => {
-        void insertFreezeFrame(selectedItem.id, currentFrame);
-      });
+      void insertFreezeFrame(selectedItem.id, currentFrame);
     },
     HOTKEY_OPTIONS,
     [selectedItemIds, items]

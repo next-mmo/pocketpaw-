@@ -20,12 +20,14 @@ import {
   Flag,
   FlagOff,
   LineChart,
+  Activity,
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useTimelineZoom } from '../hooks/use-timeline-zoom';
 import { useTimelineStore } from '../stores/timeline-store';
-import { usePlaybackStore } from '@/features/preview/stores/playback-store';
-import { useSelectionStore } from '@/features/editor/stores/selection-store';
+import { useTimelineCommandStore } from '../stores/timeline-command-store';
+import { usePlaybackStore } from '@/shared/state/playback';
+import { useSelectionStore } from '@/shared/state/selection';
 import {
   ZOOM_FRICTION,
   ZOOM_MIN_VELOCITY,
@@ -38,10 +40,14 @@ interface TimelineHeaderProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomToFit?: () => void;
-  /** Whether the keyframe graph panel is open */
-  isGraphPanelOpen?: boolean;
-  /** Callback to toggle the graph panel */
-  onToggleGraphPanel?: () => void;
+  /** Whether the keyframe editor tab is active in the bottom editor panel */
+  isKeyframePanelOpen?: boolean;
+  /** Callback to toggle/open the keyframe editor tab */
+  onToggleKeyframePanel?: () => void;
+  /** Whether the color scopes tab is active in the bottom editor panel */
+  isScopesPanelOpen?: boolean;
+  /** Callback to toggle/open the color scopes tab */
+  onToggleScopesPanel?: () => void;
 }
 
 /**
@@ -58,8 +64,10 @@ export const TimelineHeader = memo(function TimelineHeader({
   onZoomIn,
   onZoomOut,
   onZoomToFit,
-  isGraphPanelOpen,
-  onToggleGraphPanel,
+  isKeyframePanelOpen,
+  onToggleKeyframePanel,
+  isScopesPanelOpen,
+  onToggleScopesPanel,
 }: TimelineHeaderProps) {
   const { zoomLevel, zoomIn, zoomOut, setZoom } = useTimelineZoom();
   const snapEnabled = useTimelineStore((s) => s.snapEnabled);
@@ -80,6 +88,10 @@ export const TimelineHeader = memo(function TimelineHeader({
   const setActiveTool = useSelectionStore((s) => s.setActiveTool);
   const selectedMarkerId = useSelectionStore((s) => s.selectedMarkerId);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
+  const canUndo = useTimelineCommandStore((s) => s.canUndo);
+  const canRedo = useTimelineCommandStore((s) => s.canRedo);
+  const undoLabel = useTimelineCommandStore((s) => s.getUndoLabel());
+  const redoLabel = useTimelineCommandStore((s) => s.getRedoLabel());
 
 
   // Momentum state for zoom slider
@@ -320,7 +332,8 @@ export const TimelineHeader = memo(function TimelineHeader({
             size="icon"
             className="h-7 w-7"
             onClick={handleUndo}
-            data-tooltip="Undo (Ctrl+Z)"
+            disabled={!canUndo}
+            data-tooltip={undoLabel ? `Undo ${undoLabel} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
           >
             <Undo2 className="w-3.5 h-3.5" />
           </Button>
@@ -330,7 +343,8 @@ export const TimelineHeader = memo(function TimelineHeader({
             size="icon"
             className="h-7 w-7"
             onClick={handleRedo}
-            data-tooltip="Redo (Ctrl+Shift+Z)"
+            disabled={!canRedo}
+            data-tooltip={redoLabel ? `Redo ${redoLabel} (Ctrl+Shift+Z)` : 'Redo (Ctrl+Shift+Z)'}
           >
             <Redo2 className="w-3.5 h-3.5" />
           </Button>
@@ -431,17 +445,29 @@ export const TimelineHeader = memo(function TimelineHeader({
 
         <Separator orientation="vertical" className="h-6 mx-2" />
 
-        {/* Keyframe Graph Panel Toggle */}
+        {/* Editor Panel Toggles */}
         <Button
           variant="ghost"
           size="icon"
           className={`h-7 w-7 ${
-            isGraphPanelOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
+            isKeyframePanelOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
           }`}
-          onClick={onToggleGraphPanel}
-          data-tooltip={isGraphPanelOpen ? 'Hide Keyframe Graph' : 'Show Keyframe Graph'}
+          onClick={onToggleKeyframePanel}
+          data-tooltip={isKeyframePanelOpen ? 'Hide Keyframe Editor' : 'Show Keyframe Editor'}
         >
           <LineChart className="w-3.5 h-3.5" />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className={`h-7 w-7 ${
+            isScopesPanelOpen ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''
+          }`}
+          onClick={onToggleScopesPanel}
+          data-tooltip={isScopesPanelOpen ? 'Hide Color Scopes' : 'Show Color Scopes'}
+        >
+          <Activity className="w-3.5 h-3.5" />
         </Button>
       </div>
 

@@ -1,196 +1,87 @@
-# FreeCut Core - Python Backend
+# FreeCut Python Backend
 
-This directory contains the Python backend for FreeCut video editor, providing media processing capabilities using bundled ffmpeg.
+This directory contains the Python backend for the FreeCut video editor. The backend handles:
 
-## Architecture
+- FFmpeg operations (probe, thumbnail generation, video export)
+- Hardware acceleration detection and usage
+- File system operations
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    FreeCut Application                       │
-├─────────────────────────────────────────────────────────────┤
-│  React Frontend (TypeScript + Vite)                         │
-│  - UI Components                                            │
-│  - Canvas Rendering (effects, transitions, keyframes)     │
-│  - Timeline & Media Library                                │
-└───────────────────────┬─────────────────────────────────────┘
-                        │ HTTP API (localhost:7890)
-┌───────────────────────▼─────────────────────────────────────┐
-│  Python Backend (FastAPI)                                   │
-│  - Video Metadata Extraction                               │
-│  - Thumbnail Generation                                    │
-│  - Proxy Video Creation                                    │
-│  - Waveform Generation                                     │
-│  - Audio Decoding                                           │
-└───────────────────────┬─────────────────────────────────────┘
-                        │ imageio-ffmpeg (bundled)
-┌───────────────────────▼─────────────────────────────────────┐
-│  FFmpeg (bundled, no system install needed)               │
-└─────────────────────────────────────────────────────────────┘
-```
+## Requirements
 
-## Features
+- Python 3.11+
+- FFmpeg (must be installed on the system)
 
-- **Video Processing**: Metadata extraction, frame extraction, proxy generation
-- **Audio Processing**: Waveform generation, audio decoding for any codec
-- **Image Processing**: Thumbnail generation, metadata extraction
-- **No System Dependencies**: Uses bundled ffmpeg via imageio-ffmpeg
+## Setup with uv
 
-## Quick Start
+1. Install uv if not already installed:
 
-### 1. Install Dependencies
+   ```bash
+   pip install uv
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   uv sync
+   ```
+
+   Or using requirements.txt:
+
+   ```bash
+   uv pip install -r requirements.txt
+   ```
+
+## Running the Backend
+
+### Development
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install dependencies
-cd backend
-uv sync
+uv run python main.py
 ```
 
-### 2. Run Development Server
+The backend will start on `http://127.0.0.1:4848` by default.
 
-```bash
-# Start the API server
-cd backend
-uv run python src/freecut_core/server.py
-```
+### Environment Variables
 
-The server will start on `http://127.0.0.1:7890`
+Create a `.env` file (copy from `.env.example`) to customize:
 
-### 3. Run with Frontend
-
-```bash
-# Terminal 1: Start Python backend
-cd backend && uv run python src/freecut_core/server.py
-
-# Terminal 2: Start frontend
-npm run dev
-```
-
-Or use the combined command:
-
-```bash
-npm run dev:all
-```
+- `PYTHON_HOST` - Server host (default: 127.0.0.1)
+- `PYTHON_PORT` - Server port (default: 4848)
 
 ## API Endpoints
 
-### Health Check
+| Endpoint                     | Method | Description                                         |
+| ---------------------------- | ------ | --------------------------------------------------- |
+| `/`                          | GET    | Health check                                        |
+| `/ffmpeg/check`              | POST   | Check FFmpeg availability and hardware acceleration |
+| `/ffmpeg/probe`              | POST   | Probe media file for properties                     |
+| `/ffmpeg/thumbnail`          | POST   | Generate thumbnail from video                       |
+| `/ffmpeg/export`             | POST   | Export video with options                           |
+| `/ffmpeg/cancel-export`      | POST   | Cancel active export                                |
+| `/ffmpeg/progress`           | GET    | Get export progress                                 |
+| `/dialog/open-file`          | POST   | Open file dialog (handled by Electron)              |
+| `/dialog/save-file`          | POST   | Save file dialog (handled by Electron)              |
+| `/shell/open-external`       | POST   | Open URL in browser                                 |
+| `/shell/show-item-in-folder` | POST   | Show file in explorer                               |
+| `/fs/write-file`             | POST   | Write file to disk                                  |
 
-```
-GET /health
-```
+## FFmpeg Requirements
 
-### Metadata Extraction
+The backend requires FFmpeg to be installed on the system:
 
-```
-POST /api/metadata
-Body: multipart/form-data (file)
-Response: { "metadata": {...} }
-```
+- **Windows**: Download from https://ffmpeg.org/download.html or use package managers
+- **macOS**: `brew install ffmpeg`
+- **Linux**: `sudo apt install ffmpeg` or equivalent
 
-### Thumbnail Generation
+The backend will automatically detect FFmpeg in:
 
-```
-POST /api/thumbnail
-Body: multipart/form-data (file, timestamp, max_size, quality)
-Response: { "thumbnail": "base64..." }
-```
+1. Local `bin/` directory (for bundled FFmpeg)
+2. System PATH
 
-### Frame Extraction
+## Hardware Acceleration
 
-```
-POST /api/frame
-Body: multipart/form-data (file, timestamp, width, height)
-Response: JPEG image
-```
+The backend automatically detects and uses hardware acceleration when available:
 
-### Proxy Generation
-
-```
-POST /api/proxy
-Body: multipart/form-data (file, width, height, fps)
-Response: MP4 video
-```
-
-### Waveform Generation
-
-```
-POST /api/waveform
-Body: multipart/form-data (file, sample_rate, num_peaks, channels)
-Response: { "waveform": {...} }
-```
-
-### Audio Decode
-
-```
-POST /api/audio/decode
-Body: multipart/form-data (file, start_time, end_time, sample_rate)
-Response: WAV audio
-```
-
-## Environment Variables
-
-- `API_PORT`: Port to run server on (default: 7890)
-- `API_HOST`: Host to bind to (default: 127.0.0.1)
-- `MAX_UPLOAD_SIZE`: Max file size in bytes (default: 10GB)
-
-## Development
-
-### Running Tests
-
-```bash
-cd backend
-uv run pytest
-```
-
-### Code Formatting
-
-```bash
-cd backend
-uv run ruff check .
-uv run ruff format .
-```
-
-### Type Checking
-
-```bash
-cd backend
-uv run mypy src/
-```
-
-## Dependencies
-
-- **FastAPI**: Web framework
-- **imageio**: Image/video reading
-- **imageio-ffmpeg**: Bundled ffmpeg (no system install needed)
-- **numpy**: Numerical operations
-- **Pillow**: Image processing
-- **soundfile**: Audio file handling
-
-## Troubleshooting
-
-### "ffmpeg not found"
-
-This is handled automatically by imageio-ffmpeg which bundles ffmpeg. No manual installation needed.
-
-### Port already in use
-
-Change the port:
-
-```bash
-API_PORT=7891 uv run python src/freecut_core/server.py
-```
-
-### Memory issues with large files
-
-The backend processes files in chunks. For very large files, consider:
-
-1. Using proxy generation for videos > 1080p
-2. Processing in smaller time ranges
-3. Increasing system RAM
-
-## License
-
-MIT License - see parent project
+- **Windows**: NVIDIA NVENC, AMD AMF, Intel QuickSync
+- **macOS**: VideoToolbox
+- **Linux**: NVIDIA NVENC, VAAPI

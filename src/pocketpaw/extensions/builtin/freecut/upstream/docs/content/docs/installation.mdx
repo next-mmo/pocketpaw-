@@ -1,0 +1,71 @@
+---
+title: Installation
+description: How to install and run FreeCut Desktop on your machine.
+---
+
+## Prerequisites
+
+- **Node.js** 18+
+- **Python** 3.11+
+- **uv** — Python package manager (`pip install uv`)
+- **FFmpeg** — must be installed on the system
+
+### Installing FFmpeg
+
+| Platform | Command                                                      |
+| -------- | ------------------------------------------------------------ |
+| Windows  | Download from [ffmpeg.org](https://ffmpeg.org/download.html) |
+| macOS    | `brew install ffmpeg`                                        |
+| Linux    | `sudo apt install ffmpeg`                                    |
+
+## Setup
+
+### 1. Clone and install
+
+```
+git clone https://github.com/nicepkg/freecut.git
+cd freecut
+npm install
+```
+
+### 2. Set up Python backend
+
+```
+npm run setup:python
+```
+
+Or manually:
+
+```
+cd backend
+uv venv
+uv pip install fastapi uvicorn python-multipart psutil
+```
+
+## Running
+
+### Development mode
+
+```
+npm run electron:dev
+```
+
+This starts:
+
+- Python backend on `http://localhost:8000`
+- Vite frontend on `http://localhost:5173`
+- Electron window pointing to the frontend
+
+### Web-only mode (no Electron)
+
+```
+npm start
+```
+
+### Build for production
+
+```
+npm run electron:build
+```
+
+This produces a distributable package via `electron-builder`.

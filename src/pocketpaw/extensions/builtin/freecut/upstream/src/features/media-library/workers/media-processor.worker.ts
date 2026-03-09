@@ -1,56 +1,58 @@
 /**
  * Media Processor Web Worker
  *
- * Backend-only media processing:
- * - Metadata extraction via Python backend
- * - Thumbnail/waveform generation via Python backend
- * - No mediabunny/local-browser fallback
+ * Handles heavy media processing off the main thread:
+ * - Metadata extraction using mediabunny
+ * - Thumbnail generation using mediabunny
+ * - Audio codec support checking
+ *
+ * This prevents UI blocking when importing media files.
  */
 
-const API_BASE_URL = 'http://127.0.0.1:7890';
+// Type definitions for mediabunny module
+interface MediabunnyVideoTrack {
+  displayWidth: number;
+  displayHeight: number;
+  codec: string;
+  computePacketStats(count: number): Promise<{ averagePacketRate: number } | null>;
+}
 
-interface BackendMetadata {
-  type: 'video' | 'audio' | 'image';
-  duration?: number;
-  width?: number;
-  height?: number;
-  fps?: number;
-  codec?: string;
-  bitrate?: number;
-  videoCodec?: string;
-  video_codec?: string;
-  audioCodec?: string;
-  audio_codec?: string;
-  sampleRate?: number;
-  sample_rate?: number;
+interface MediabunnyAudioTrack {
   channels?: number;
-  hasAudio?: boolean;
-  has_audio?: boolean;
-  hasVideo?: boolean;
-  has_video?: boolean;
+  sampleRate?: number;
+  codec?: string;
+  canDecode?: () => Promise<boolean>;
 }
 
-interface BackendThumbnailResponse {
-  thumbnail: string;
+interface MediabunnyInput {
+  computeDuration(): Promise<number>;
+  getPrimaryVideoTrack(): Promise<MediabunnyVideoTrack | null>;
+  getPrimaryAudioTrack(): Promise<MediabunnyAudioTrack | null>;
+  dispose(): void;
 }
 
-interface BackendWaveformResponse {
-  waveform?: {
-    peaks?: number[];
-  };
-  peaks?: number[];
+interface CanvasWrapper {
+  canvas: OffscreenCanvas | HTMLCanvasElement;
 }
 
-interface BackendInfo {
-  ffmpeg_gpu: string | null;
-  version: string;
+interface MediabunnyCanvasSink {
+  getCanvas(timestamp: number): Promise<CanvasWrapper | null>;
+  dispose?(): void;
 }
 
+interface MediabunnyModule {
+  Input: new (config: { formats: unknown; source: unknown }) => MediabunnyInput;
+  ALL_FORMATS: unknown;
+  BlobSource: new (blob: Blob) => unknown;
+  CanvasSink: new (track: MediabunnyVideoTrack, options: { width: number; height: number; fit: string }) => MediabunnyCanvasSink;
+}
+
+// Message types
 export interface ProcessMediaRequest {
-  type: 'process' | 'check-backend';
+  type: 'process';
   requestId: string;
-  file?: File;
-  mimeType?: string;
+  file: File;
+  mimeType: string;
   options?: {
     thumbnailMaxSize?: number;
     thumbnailQuality?: number;
@@ -59,13 +61,11 @@ export interface ProcessMediaRequest {
 }
 
 export interface ProcessMediaResponse {
-  type: 'complete' | 'error' | 'backend-status';
+  type: 'complete' | 'error';
   requestId: string;
   metadata?: VideoMetadata | AudioMetadata | ImageMetadata;
   thumbnail?: Blob;
   error?: string;
-  backendAvailable?: boolean;
-  backendGpu?: string | null;
 }
 
 export interface VideoMetadata {
@@ -95,314 +95,326 @@ export interface ImageMetadata {
   height: number;
 }
 
+// Audio codecs that cannot be decoded in browser
+// Note: AC-3 and E-AC-3 are supported via @mediabunny/ac3 WASM decoder
 const UNSUPPORTED_AUDIO_CODECS = [
-  'dts',
-  'dtsc',
-  'dtse',
-  'dtsh',
-  'dtsl',
-  'truehd',
-  'mlpa',
+  'dts',    // DTS
+  'dtsc',   // DTS Coherent Acoustics
+  'dtse',   // DTS Express
+  'dtsh',   // DTS-HD High Resolution
+  'dtsl',   // DTS-HD Master Audio
+  'truehd', // Dolby TrueHD
+  'mlpa',   // Dolby TrueHD (MLP)
 ];
 
 function isAudioCodecSupported(codec: string | undefined): boolean {
   if (!codec) return true;
-  const normalized = codec.toLowerCase().trim();
-  return !UNSUPPORTED_AUDIO_CODECS.some((unsupported) =>
-    normalized.includes(unsupported),
+  const normalizedCodec = codec.toLowerCase().trim();
+  return !UNSUPPORTED_AUDIO_CODECS.some(unsupported =>
+    normalizedCodec.includes(unsupported)
   );
 }
 
-let backendAvailable: boolean | null = null;
-let backendInfo: BackendInfo | null = null;
-
-async function checkBackend(): Promise<{
-  available: boolean;
-  info: BackendInfo | null;
-}> {
-  if (backendAvailable !== null) {
-    return { available: backendAvailable, info: backendInfo };
+// Lazy load mediabunny only.
+// Metadata extraction and video thumbnails do not require AC-3 decoder registration.
+let mediabunnyModule: MediabunnyModule | null = null;
+async function getMediabunny(): Promise<MediabunnyModule> {
+  if (!mediabunnyModule) {
+    mediabunnyModule = await import('mediabunny') as unknown as MediabunnyModule;
   }
+  return mediabunnyModule;
+}
+
+/**
+ * Extract video metadata using mediabunny
+ */
+async function extractVideoMetadata(file: File): Promise<VideoMetadata> {
+  const mb = await getMediabunny();
+
+  const input = new mb.Input({
+    formats: mb.ALL_FORMATS,
+    source: new mb.BlobSource(file),
+  });
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${API_BASE_URL}/info`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    // Get all metadata in one pass (no duplicate parsing!)
+    const [duration, videoTrack, audioTrack] = await Promise.all([
+      input.computeDuration(),
+      input.getPrimaryVideoTrack(),
+      input.getPrimaryAudioTrack(),
+    ]);
 
-    if (!response.ok) {
-      backendAvailable = false;
-      backendInfo = null;
-      return { available: false, info: null };
+    if (!videoTrack) {
+      throw new Error('No video track found in file');
     }
 
-    backendInfo = await response.json();
-    backendAvailable = true;
-    return { available: true, info: backendInfo };
-  } catch {
-    backendAvailable = false;
-    backendInfo = null;
-    return { available: false, info: null };
-  }
-}
+    // Get FPS from packet stats
+    const packetStats = await videoTrack.computePacketStats(50);
 
-function decodeBase64(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
+    const audioCodec = audioTrack?.codec;
+    const audioCodecSupported = isAudioCodecSupported(audioCodec);
 
-function dataUriToBlob(value: string): Blob {
-  if (value.startsWith('data:')) {
-    const comma = value.indexOf(',');
-    const header = value.slice(0, comma);
-    const b64 = value.slice(comma + 1);
-    const mimeMatch = header.match(/^data:([^;]+);base64$/);
-    const mime = mimeMatch?.[1] ?? 'image/jpeg';
-    return new Blob([decodeBase64(b64).buffer as ArrayBuffer], { type: mime });
-  }
-  return new Blob([decodeBase64(value).buffer as ArrayBuffer], {
-    type: 'image/jpeg',
-  });
-}
-
-function normalizeBackendMetadata(
-  meta: BackendMetadata,
-): VideoMetadata | AudioMetadata | ImageMetadata {
-  if (meta.type === 'video') {
-    const videoCodec =
-      meta.videoCodec ?? meta.video_codec ?? meta.codec ?? 'unknown';
-    const audioCodec = meta.audioCodec ?? meta.audio_codec;
     return {
       type: 'video',
-      duration: meta.duration ?? 0,
-      width: meta.width ?? 1920,
-      height: meta.height ?? 1080,
-      fps: meta.fps ?? 30,
-      codec: videoCodec,
-      bitrate: meta.bitrate ?? 0,
+      duration: duration || 0,
+      width: videoTrack.displayWidth || 1920,
+      height: videoTrack.displayHeight || 1080,
+      fps: packetStats?.averagePacketRate || 30,
+      codec: videoTrack.codec || 'unknown',
+      bitrate: 0,
       audioCodec,
-      audioCodecSupported: isAudioCodecSupported(audioCodec),
+      audioCodecSupported,
     };
+  } finally {
+    input.dispose();
   }
+}
 
-  if (meta.type === 'audio') {
+/**
+ * Extract audio metadata using mediabunny
+ */
+async function extractAudioMetadata(file: File): Promise<AudioMetadata> {
+  const mb = await getMediabunny();
+
+  const input = new mb.Input({
+    formats: mb.ALL_FORMATS,
+    source: new mb.BlobSource(file),
+  });
+
+  try {
+    const [duration, audioTrack] = await Promise.all([
+      input.computeDuration(),
+      input.getPrimaryAudioTrack(),
+    ]);
+
     return {
       type: 'audio',
-      duration: meta.duration ?? 0,
-      codec: meta.codec,
-      channels: meta.channels,
-      sampleRate: meta.sampleRate ?? meta.sample_rate,
-      bitrate: meta.bitrate,
+      duration: duration || 0,
+      codec: audioTrack?.codec,
+      channels: audioTrack?.channels,
+      sampleRate: audioTrack?.sampleRate,
+      bitrate: 0,
     };
+  } finally {
+    input.dispose();
   }
+}
 
-  return {
+/**
+ * Extract image metadata using createImageBitmap
+ */
+async function extractImageMetadata(file: File): Promise<ImageMetadata> {
+  const bitmap = await createImageBitmap(file);
+  const metadata: ImageMetadata = {
     type: 'image',
-    width: meta.width ?? 1920,
-    height: meta.height ?? 1080,
+    width: bitmap.width,
+    height: bitmap.height,
   };
+  bitmap.close();
+  return metadata;
 }
 
-async function extractMetadataBackend(
+/**
+ * Generate video thumbnail using mediabunny
+ */
+async function generateVideoThumbnail(
   file: File,
-): Promise<VideoMetadata | AudioMetadata | ImageMetadata> {
-  const formData = new FormData();
-  formData.append('file', file);
+  maxSize: number,
+  quality: number,
+  timestamp: number
+): Promise<Blob> {
+  const mb = await getMediabunny();
 
-  const response = await fetch(`${API_BASE_URL}/api/metadata`, {
-    method: 'POST',
-    body: formData,
+  const input = new mb.Input({
+    source: new mb.BlobSource(file),
+    formats: mb.ALL_FORMATS,
   });
+  let sink: MediabunnyCanvasSink | null = null;
 
-  if (!response.ok) {
-    let body = '';
-    try {
-      body = await response.text();
-    } catch {
-      // ignore – body read failure shouldn't hide the original error
+  try {
+    const videoTrack = await input.getPrimaryVideoTrack();
+    if (!videoTrack) {
+      throw new Error('No video track found');
     }
-    throw new Error(
-      `Metadata extraction failed (${response.status})${body ? ': ' + body : ''}`,
-    );
-  }
 
-  const result = await response.json();
-  const metadata: BackendMetadata = result.metadata ?? result;
-  return normalizeBackendMetadata(metadata);
+    // Calculate dimensions preserving aspect ratio
+    const dw = videoTrack.displayWidth || 1;
+    const dh = videoTrack.displayHeight || 1;
+    const width = dw > dh
+      ? maxSize
+      : Math.floor(maxSize * dw / dh);
+    const height = dh > dw
+      ? maxSize
+      : Math.floor(maxSize * dh / dw);
+
+    sink = new mb.CanvasSink(videoTrack, {
+      width,
+      height,
+      fit: 'fill',
+    });
+
+    // Clamp timestamp to valid range
+    const duration = await input.computeDuration();
+    const clampedTimestamp = Math.min(timestamp, Math.max(0, duration - 0.1));
+
+    const wrapped = await sink.getCanvas(clampedTimestamp);
+    if (!wrapped) {
+      throw new Error('Failed to extract frame from video');
+    }
+
+    const canvas = wrapped.canvas as OffscreenCanvas;
+    return canvas.convertToBlob({ type: 'image/webp', quality });
+  } finally {
+    sink?.dispose?.();
+    input.dispose();
+  }
 }
 
-async function generateThumbnailBackend(
+/**
+ * Generate image thumbnail using OffscreenCanvas
+ */
+async function generateImageThumbnail(
   file: File,
   maxSize: number,
-  quality: number,
-  timestamp: number,
-): Promise<Blob | undefined> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('timestamp', String(timestamp));
-  formData.append('max_size', String(maxSize));
-  formData.append(
-    'quality',
-    String(Math.max(1, Math.min(100, Math.round(quality * 100)))),
-  );
+  quality: number
+): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
 
-  const response = await fetch(`${API_BASE_URL}/api/thumbnail`, {
-    method: 'POST',
-    body: formData,
-  });
+  // Calculate dimensions preserving aspect ratio
+  const width = bitmap.width > bitmap.height
+    ? maxSize
+    : Math.floor(maxSize * bitmap.width / bitmap.height);
+  const height = bitmap.height > bitmap.width
+    ? maxSize
+    : Math.floor(maxSize * bitmap.height / bitmap.width);
 
-  if (!response.ok) {
-    return undefined;
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close();
+    throw new Error('Failed to get canvas context');
   }
 
-  const result: BackendThumbnailResponse = await response.json();
-  if (!result.thumbnail) {
-    return undefined;
-  }
-  return dataUriToBlob(result.thumbnail);
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  return canvas.convertToBlob({ type: 'image/webp', quality });
 }
 
-async function generateAudioThumbnailBackend(
+/**
+ * Generate audio thumbnail (waveform placeholder)
+ */
+async function generateAudioThumbnail(
   file: File,
   maxSize: number,
-  quality: number,
-): Promise<Blob | undefined> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('num_peaks', '100');
-
-  const response = await fetch(`${API_BASE_URL}/api/waveform`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    return undefined;
-  }
-
-  const result: BackendWaveformResponse = await response.json();
-  const peaks = result.waveform?.peaks ?? result.peaks ?? [];
-
+  quality: number
+): Promise<Blob> {
   const width = maxSize;
   const height = Math.round(maxSize * (9 / 16));
 
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d');
-  if (!ctx) return undefined;
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
 
+  // Gradient background
   const gradient = ctx.createLinearGradient(0, 0, width, height);
   gradient.addColorStop(0, '#1a1a1a');
   gradient.addColorStop(1, '#0a0a0a');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
-  if (peaks.length > 0) {
-    ctx.strokeStyle = '#00ff88';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    const amplitude = height * 0.3;
-    const centerY = height / 2;
-    const step = width / peaks.length;
-
-    for (let i = 0; i < peaks.length; i++) {
-      const x = i * step;
-      const y = centerY - peaks[i]! * amplitude;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+  // Waveform visualization
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const amplitude = height * 0.3;
+  const centerY = height / 2;
+  for (let x = 0; x < width; x++) {
+    const y = centerY + Math.sin(x * 0.02) * amplitude;
+    if (x === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
     }
-    ctx.stroke();
   }
+  ctx.stroke();
 
+  // Filename
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 14px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const displayName =
-    file.name.length > 30 ? `${file.name.slice(0, 27)}...` : file.name;
+  const displayName = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
   ctx.fillText(displayName, width / 2, height - 20);
 
   return canvas.convertToBlob({ type: 'image/webp', quality });
 }
 
+/**
+ * Process a media file - extract metadata and generate thumbnail
+ */
 async function processMedia(
   file: File,
   mimeType: string,
-  options: ProcessMediaRequest['options'] = {},
-): Promise<{
-  metadata: VideoMetadata | AudioMetadata | ImageMetadata;
-  thumbnail?: Blob;
-  usedBackend: boolean;
-  gpu: string | null;
-}> {
+  options: ProcessMediaRequest['options'] = {}
+): Promise<{ metadata: VideoMetadata | AudioMetadata | ImageMetadata; thumbnail?: Blob }> {
   const {
     thumbnailMaxSize = 320,
     thumbnailQuality = 0.6,
     thumbnailTimestamp = 1,
   } = options;
 
-  const { available, info } = await checkBackend();
-  if (!available || !info) {
-    throw new Error(
-      'Backend service is required. Start backend with: npm run dev:backend (or npm run dev:all).',
-    );
-  }
-
-  const metadata = await extractMetadataBackend(file);
+  let metadata: VideoMetadata | AudioMetadata | ImageMetadata;
   let thumbnail: Blob | undefined;
 
-  if (mimeType.startsWith('audio/')) {
-    thumbnail = await generateAudioThumbnailBackend(
-      file,
-      thumbnailMaxSize,
-      thumbnailQuality,
-    );
+  if (mimeType.startsWith('video/')) {
+    // Video: extract metadata and generate thumbnail in parallel after metadata
+    metadata = await extractVideoMetadata(file);
+    try {
+      thumbnail = await generateVideoThumbnail(file, thumbnailMaxSize, thumbnailQuality, thumbnailTimestamp);
+    } catch (err) {
+      console.warn('[MediaProcessorWorker] Failed to generate video thumbnail:', err);
+    }
+  } else if (mimeType.startsWith('audio/')) {
+    // Audio: metadata and thumbnail are independent
+    const [audioMeta, audioThumb] = await Promise.all([
+      extractAudioMetadata(file),
+      generateAudioThumbnail(file, thumbnailMaxSize, thumbnailQuality).catch(() => undefined),
+    ]);
+    metadata = audioMeta;
+    thumbnail = audioThumb;
+  } else if (mimeType.startsWith('image/')) {
+    // Image: metadata and thumbnail can run in parallel
+    const [imageMeta, imageThumb] = await Promise.all([
+      extractImageMetadata(file),
+      generateImageThumbnail(file, thumbnailMaxSize, thumbnailQuality).catch(() => undefined),
+    ]);
+    metadata = imageMeta;
+    thumbnail = imageThumb;
   } else {
-    thumbnail = await generateThumbnailBackend(
-      file,
-      thumbnailMaxSize,
-      thumbnailQuality,
-      thumbnailTimestamp,
-    );
+    throw new Error(`Unsupported media type: ${mimeType}`);
   }
 
-  return {
-    metadata,
-    thumbnail,
-    usedBackend: true,
-    gpu: info.ffmpeg_gpu ?? null,
-  };
+  return { metadata, thumbnail };
 }
 
-self.onmessage = async (event: MessageEvent<ProcessMediaRequest>) => {
-  const msg = event.data;
+// Message handler
+self.onmessage = async (e: MessageEvent<ProcessMediaRequest>) => {
+  const msg = e.data;
 
-  if (msg.type === 'check-backend') {
-    const { available, info } = await checkBackend();
-    const response: ProcessMediaResponse = {
-      type: 'backend-status',
-      requestId: msg.requestId,
-      backendAvailable: available,
-      backendGpu: info?.ffmpeg_gpu ?? null,
-    };
-    self.postMessage(response);
-    return;
-  }
-
-  if (msg.type === 'process' && msg.file && msg.mimeType) {
+  if (msg.type === 'process') {
     try {
       const result = await processMedia(msg.file, msg.mimeType, msg.options);
+
       const response: ProcessMediaResponse = {
         type: 'complete',
         requestId: msg.requestId,
         metadata: result.metadata,
         thumbnail: result.thumbnail,
       };
+
       self.postMessage(response);
     } catch (error) {
       const response: ProcessMediaResponse = {
