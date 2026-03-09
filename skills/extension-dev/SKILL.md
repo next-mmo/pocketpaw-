@@ -123,17 +123,38 @@ Every extension folder needs an `extension.json`:
 
 ---
 
-## Sandbox System (uv-based)
+## Sandbox System — Managed Runtimes
 
-PocketPaw uses **`uv`** (from Astral) to create isolated Python virtual environments for each plugin. This avoids conda/Node.js dependencies and provides fast, reproducible installs.
+> **Core principle: NEVER rely on OS-level installations.** All runtimes (Python, Node.js, CUDA/PyTorch) are managed by PocketPaw within the sandbox. End users should not need to pre-install Python, Node.js, or any other runtime. PocketPaw handles everything.
+
+### Managed Runtime Architecture
+
+PocketPaw manages three runtime categories, each with its own installer:
+
+| Runtime     | Manager     | Managed Location        | Version Config           | Install Step        |
+| ----------- | ----------- | ----------------------- | ------------------------ | ------------------- |
+| **Python**  | `uv`        | `<plugin>/env/`         | `sandbox.python: "3.11"` | (automatic)         |
+| **Node.js** | `nodejs.py` | `~/.pocketpaw/node/`    | LTS (auto-selected)      | `{ "node": true }`  |
+| **PyTorch** | `uv pip`    | inside venv             | `sandbox.torch.version`  | `{ "torch": true }` |
+| **CUDA**    | `cuda.py`   | system (detection only) | auto-detect via nvidia   | (detection only)    |
+
+**Key rules:**
+
+- `sandbox.python` specifies the **exact** Python version — `uv` downloads and manages it (never uses system Python)
+- `{ "node": true }` install step auto-installs Node.js LTS + pnpm to `~/.pocketpaw/node/`
+- `{ "torch": true }` installs PyTorch with the correct CUDA wheel tag (pinned version)
+- CUDA drivers are the **only** OS-level dependency (detected via `nvidia-smi`)
+- All managed runtimes are added to the sandbox PATH automatically
+- Build scripts (`build.py`) should use `shutil.which()` — the sandbox PATH already includes everything
 
 ### How It Works
 
-1. **`uv venv`** creates a venv with the configured Python version
+1. **`uv venv`** creates an isolated venv with the pinned Python version (e.g. `3.11`)
 2. **`uv pip install`** installs packages from requirements.txt
-3. **PyTorch** is installed from the correct CUDA wheel index
-4. **Custom commands** from install steps run inside the venv
-5. All plugins share `~/.pocketpaw/uv-cache/` to cache Python interpreters and pip wheels
+3. **`{ "node": true }`** downloads Node.js LTS binary → `~/.pocketpaw/node/`, enables pnpm via corepack
+4. **`{ "torch": true }`** installs PyTorch from the correct CUDA wheel index
+5. **`{ "run": "python build.py" }`** runs custom commands inside the sandbox (PATH includes venv + managed Node.js)
+6. All plugins share caches: `~/.pocketpaw/uv-cache/` (Python) and `~/.pocketpaw/node/` (Node.js)
 
 ### Sandbox Config (`sandbox` field)
 
@@ -158,11 +179,11 @@ PocketPaw uses **`uv`** (from Astral) to create isolated Python virtual environm
 
 | Sandbox Field  | Type             | Default  | Description                                                                           |
 | -------------- | ---------------- | -------- | ------------------------------------------------------------------------------------- |
-| `python`       | `string`         | `"3.11"` | Python version for the venv (uv-managed)                                              |
+| `python`       | `string`         | `"3.11"` | Exact Python version — `uv` downloads and manages it (never uses system Python)       |
 | `venv`         | `string`         | `"env"`  | Venv directory name relative to plugin root                                           |
-| `cuda`         | `string \| null` | `null`   | Required CUDA version (informational)                                                 |
+| `cuda`         | `string \| null` | `null`   | Required CUDA version (informational — actual detection via `nvidia-smi`)             |
 | `requirements` | `string \| null` | `null`   | Path to requirements.txt (alternative to install steps)                               |
-| `torch`        | `object \| null` | `null`   | PyTorch installation config                                                           |
+| `torch`        | `object \| null` | `null`   | PyTorch installation config with specific version + CUDA tag                          |
 | `env`          | `object`         | `{}`     | Environment variables (paths starting with `./` are resolved relative to plugin root) |
 
 ### PyTorch Config (`sandbox.torch` field)
@@ -179,9 +200,9 @@ PocketPaw uses **`uv`** (from Astral) to create isolated Python virtual environm
 
 | Torch Field | Type       | Default   | Description                                    |
 | ----------- | ---------- | --------- | ---------------------------------------------- |
-| `version`   | `string`   | `"2.7.1"` | PyTorch version                                |
+| `version`   | `string`   | `"2.7.1"` | Exact PyTorch version (pinned, not floating)   |
 | `cuda`      | `string`   | `"cu128"` | CUDA wheel tag for `download.pytorch.org/whl/` |
-| `extras`    | `string[]` | `[]`      | Additional torch packages to install           |
+| `extras`    | `string[]` | `[]`      | Extra torch packages with pinned versions      |
 
 #### Supported CUDA Tags
 
@@ -197,33 +218,36 @@ PocketPaw auto-detects CUDA via `nvidia-smi` and maps to the closest tag:
 
 ### Install Steps (`install.steps` field)
 
-Install steps run sequentially during the install process:
+Install steps run **inside the sandbox** where all managed runtimes are on PATH:
 
 ```json
 {
   "install": {
     "steps": [
-      { "pip": "requirements.txt" },
-      { "pip": "requirements-gpu.txt", "path": "accelerator" },
+      { "node": true },
       { "torch": true },
-      { "run": "python setup_data.py", "path": "scripts" }
+      { "pip": "requirements.txt" },
+      { "run": "python build.py" }
     ]
   }
 }
 ```
 
-| Step Field | Type     | Description                                                      |
-| ---------- | -------- | ---------------------------------------------------------------- |
-| `pip`      | `string` | Install requirements from a file (`uv pip install -r`)           |
-| `torch`    | `bool`   | If `true`, install PyTorch with CUDA from `sandbox.torch` config |
-| `run`      | `string` | Shell command to run inside the venv                             |
-| `path`     | `string` | Working directory relative to plugin root (for `pip` and `run`)  |
+| Step Field | Type     | Description                                                                      |
+| ---------- | -------- | -------------------------------------------------------------------------------- |
+| `node`     | `bool`   | Ensure Node.js LTS + pnpm — auto-installs to `~/.pocketpaw/node/` if not present |
+| `torch`    | `bool`   | Install PyTorch with pinned version + CUDA tag from `sandbox.torch`              |
+| `pip`      | `string` | Install requirements via `uv pip install -r` inside the managed venv             |
+| `run`      | `string` | Command to run inside the sandbox (use `python script.py`, not shell scripts)    |
+| `path`     | `string` | Working directory relative to plugin root (for `pip` and `run`)                  |
+
+> **Important:** The `run` step executes inside the sandbox where `python` → managed venv Python, `pnpm`/`npx`/`node` → managed Node.js, and `git` + system tools are on PATH. Use `shutil.which()` in build scripts — never hardcode paths or rely on OS-level installs.
 
 ### Install Progress
 
 The install sequence reports progress:
 
-- `0.1` — Creating venv
+- `0.1` — Creating venv (downloading Python if needed)
 - `0.3` — Venv created, installing requirements
 - `0.6` — Requirements installed, installing PyTorch
 - `0.9` — PyTorch installed, running custom steps
@@ -241,22 +265,23 @@ huggingface-hub>=0.20.0
 
 ### Environment Isolation
 
-Each sandbox gets these environment variables:
+Each sandbox gets a fully isolated environment — **nothing from the host OS leaks in:**
 
-- `VIRTUAL_ENV` — Path to the venv
-- `PATH` — Venv `Scripts/` (Windows) or `bin/` (Linux) prepended
+- `VIRTUAL_ENV` — Path to the managed venv
+- `PATH` — Managed Python + managed Node.js + system tools (in that order)
 - `PYTHONNOUSERSITE=1` — Isolates from user site-packages
-- `UV_PYTHON_PREFERENCE=only-managed` — Only use uv-managed Python
+- `UV_PYTHON_PREFERENCE=only-managed` — Only use uv-managed Python (never system Python)
 - `UV_CACHE_DIR` — Shared cache at `~/.pocketpaw/uv-cache/`
+- Managed Node.js path (if installed): `~/.pocketpaw/node/` added to PATH
 - Any custom vars from `sandbox.env`
 
-### Shared Cache
+### Shared Managed Locations
 
-All plugins share `~/.pocketpaw/uv-cache/` so:
-
-- Python interpreters are downloaded once and reused
-- Pip wheel downloads are cached across plugins
-- Reinstalling/resetting a plugin's venv is fast
+| Location                 | Contents                                 | Shared across |
+| ------------------------ | ---------------------------------------- | ------------- |
+| `~/.pocketpaw/uv-cache/` | Python interpreters + pip wheel cache    | All plugins   |
+| `~/.pocketpaw/node/`     | Node.js LTS binary + pnpm (via corepack) | All plugins   |
+| `<plugin>/env/`          | Plugin-specific Python venv              | Single plugin |
 
 ---
 
@@ -611,14 +636,16 @@ cd my-extension && zip -r ../my-extension.zip .
 
 ### Plugin Lifecycle
 
-| Method   | Endpoint                       | Description                              |
-| -------- | ------------------------------ | ---------------------------------------- |
-| `POST`   | `/api/v1/plugins/{id}/install` | Install: create venv, pip install, torch |
-| `POST`   | `/api/v1/plugins/{id}/start`   | Start daemon process                     |
-| `POST`   | `/api/v1/plugins/{id}/stop`    | Stop daemon process                      |
-| `GET`    | `/api/v1/plugins/{id}/status`  | Poll current status                      |
-| `GET`    | `/api/v1/plugins/{id}/logs`    | Get recent log lines                     |
-| `DELETE` | `/api/v1/plugins/{id}/env`     | Delete venv (reset)                      |
+| Method   | Endpoint                         | Description                                         |
+| -------- | -------------------------------- | --------------------------------------------------- |
+| `POST`   | `/api/v1/plugins/{id}/install`   | Install: create venv, pip install, torch, node, run |
+| `POST`   | `/api/v1/plugins/{id}/start`     | Start daemon process                                |
+| `POST`   | `/api/v1/plugins/{id}/stop`      | Stop daemon process                                 |
+| `GET`    | `/api/v1/plugins/{id}/status`    | Poll current status                                 |
+| `GET`    | `/api/v1/plugins/{id}/logs`      | Get recent log lines                                |
+| `DELETE` | `/api/v1/plugins/{id}/env`       | Delete venv only (light reset)                      |
+| `POST`   | `/api/v1/plugins/{id}/uninstall` | Full cleanup: stop + delete venv, upstream, assets  |
+| `POST`   | `/api/v1/plugins/{id}/update`    | Clean upstream + assets, re-run all install steps   |
 
 ### Model Management (for LLM plugins)
 
@@ -628,11 +655,12 @@ cd my-extension && zip -r ../my-extension.zip .
 | `POST` | `/api/v1/plugins/{id}/upload-model`   | Upload model file                        |
 | `POST` | `/api/v1/plugins/{id}/download-model` | Download from HuggingFace (SSE progress) |
 
-### CUDA / GPU
+### CUDA / GPU / Node.js
 
-| Method | Endpoint               | Description            |
-| ------ | ---------------------- | ---------------------- |
-| `GET`  | `/api/v1/plugins/cuda` | Detect CUDA / GPU info |
+| Method | Endpoint               | Description                        |
+| ------ | ---------------------- | ---------------------------------- |
+| `GET`  | `/api/v1/plugins/cuda` | Detect CUDA / GPU info             |
+| `GET`  | `/api/v1/plugins/node` | Detect Node.js / pnpm availability |
 
 ### Reverse Proxy
 
@@ -765,9 +793,10 @@ When the user asks to create a new extension, **always scaffold a React + Vite p
 
 ### uv Requirement
 
-- `uv` must be installed system-wide (not in a venv)
+- `uv` must be available in PATH (the only required system tool besides git)
 - PocketPaw looks for `uv` in PATH via `shutil.which("uv")`
-- Install: `pip install uv` or see https://docs.astral.sh/uv/
+- Install: `pip install uv` or see [docs.astral.sh/uv](https://docs.astral.sh/uv/)
+- **Everything else** (Python, Node.js, pnpm, PyTorch) is managed by the sandbox — NOT installed at OS level
 
 ### Model Files
 
@@ -810,11 +839,16 @@ When the user asks to create a new extension, **always scaffold a React + Vite p
 - **Port conflict**: Use `"port": "auto"` to let PocketPaw find a free port
 - **Daemon won't start**: Check `ready_pattern` matches the stdout of your server
 - **CORS blocked**: Use the proxy endpoint (`/api/v1/plugins/{id}/proxy/...`) instead of direct `127.0.0.1:{port}` access
-- **Venv corrupted**: Reset with `DELETE /api/v1/plugins/{id}/env`, then reinstall
+- **Venv corrupted**: Full reset with `POST /api/v1/plugins/{id}/uninstall`, then reinstall
 - **Model download fails**: Check network access to `huggingface.co`, ensure `models/` directory exists
+- **Node.js not found in build script**: Ensure `{ "node": true }` is in install steps BEFORE `{ "run": "python build.py" }`
+- **pnpm not found**: Check `GET /api/v1/plugins/node` — if not detected, the `{ "node": true }` step auto-installs it
+- **blob: CSP error**: PocketPaw adds `blob:` to `connect-src` for extension iframes — check CSP headers
 
 ### Build Issues (React + Vite Plugins)
 
 - **Blank page**: Check `base: "./"` in `vite.config.ts` and asset paths in `index.html`
 - **Assets not loading**: Ensure `assetFileNames` / `entryFileNames` include `assets/` prefix
 - **outDir warning**: The `build.outDir` pointing to parent is expected (Vite warns but works)
+- **Build script hangs on Windows**: Don't use `CREATE_NO_WINDOW` in build.py subprocess calls — the sandbox handles it
+- **pnpm/npx not found in build.py**: Use `shutil.which("pnpm")` — sandbox PATH includes managed Node.js
