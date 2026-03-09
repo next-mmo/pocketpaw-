@@ -1,19 +1,13 @@
 # Python sandbox
 env/
 
-# Node modules
-node_modules/
-upstream/node_modules/
-upstream/package-lock.json
+# Upstream source (cloned separately, not tracked in pocketpaw repo)
+upstream/
 
 # Vite build output (rebuilt via build.sh)
 index.html
 assets/
 favicon.svg
-
-# Upstream build/dev artifacts
-upstream/backend/uv.lock
-upstream/backend/.venv/
 
 # OS
 .DS_Store
@@ -24,4 +18,3 @@ Thumbs.db
 
 # Env (local config)
 .env
-upstream/.env
