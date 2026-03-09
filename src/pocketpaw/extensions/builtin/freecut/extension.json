@@ -19,7 +19,7 @@
   "install": {
     "steps": [
       { "node": true },
-      { "run": "bash build.sh" },
+      { "run": "python build.py" },
       { "pip": "requirements.txt" }
     ]
   },

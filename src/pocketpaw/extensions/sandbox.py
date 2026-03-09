@@ -344,32 +344,72 @@ class SandboxManager:
         env: dict[str, str] | None = None,
         on_output: asyncio.Queue[str] | None = None,
     ) -> int:
-        """Run a subprocess, streaming output to the queue if provided."""
+        """Run a subprocess, streaming output to the queue if provided.
+
+        On Windows, uses subprocess.Popen + thread since
+        asyncio.create_subprocess_exec is not supported on SelectorEventLoop
+        (used by uvicorn).
+        """
         logger.debug("Running: %s (cwd=%s)", " ".join(cmd), cwd)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=cwd,
-            env=env,
-        )
+        if sys.platform == "win32":
+            import subprocess as _sp
+            import threading
 
-        assert proc.stdout is not None
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            decoded = line.decode("utf-8", errors="replace")
-            logger.debug("  | %s", decoded.rstrip())
+            loop = asyncio.get_event_loop()
+
+            def _run_sync():
+                try:
+                    popen = _sp.Popen(
+                        cmd,
+                        stdout=_sp.PIPE,
+                        stderr=_sp.STDOUT,
+                        cwd=str(cwd) if cwd else None,
+                        env=env,
+                        creationflags=_sp.CREATE_NO_WINDOW,
+                    )
+                    assert popen.stdout is not None
+                    for raw_line in iter(popen.stdout.readline, b""):
+                        decoded = raw_line.decode("utf-8", errors="replace")
+                        logger.debug("  | %s", decoded.rstrip())
+                        if on_output:
+                            loop.call_soon_threadsafe(on_output.put_nowait, decoded)
+                    popen.wait()
+                    return popen.returncode
+                except Exception as exc:
+                    logger.exception("_run_cmd failed: %s", exc)
+                    if on_output:
+                        loop.call_soon_threadsafe(
+                            on_output.put_nowait, f"❌ Command failed: {exc}\n"
+                        )
+                    return 1
+
+            returncode = await loop.run_in_executor(None, _run_sync)
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+                env=env,
+            )
+
+            assert proc.stdout is not None
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace")
+                logger.debug("  | %s", decoded.rstrip())
+                if on_output:
+                    await on_output.put(decoded)
+
+            await proc.wait()
+            returncode = proc.returncode
+
+        if returncode != 0:
+            logger.warning("Command exited with code %d: %s", returncode, " ".join(cmd))
             if on_output:
-                await on_output.put(decoded)
+                await on_output.put(f"⚠ Process exited with code {returncode}\n")
 
-        await proc.wait()
-
-        if proc.returncode != 0:
-            logger.warning("Command exited with code %d: %s", proc.returncode, " ".join(cmd))
-            if on_output:
-                await on_output.put(f"⚠ Process exited with code {proc.returncode}\n")
-
-        return proc.returncode
+        return returncode
