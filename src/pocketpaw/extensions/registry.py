@@ -332,7 +332,12 @@ class ExtensionRegistry:
             )
             return
 
-        if not entry_path.exists() or not entry_path.is_file():
+        # For SPA extensions, the entry file MUST exist.
+        # For plugins, the entry file may not exist yet (built during install).
+        entry_exists = entry_path.exists() and entry_path.is_file()
+        is_plugin = raw.get("type") == "plugin"
+
+        if not entry_exists and not is_plugin:
             self.errors.append(
                 ExtensionLoadError(
                     str(manifest_path), f"entry file does not exist: {manifest.entry}"

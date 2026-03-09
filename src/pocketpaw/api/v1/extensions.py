@@ -1075,6 +1075,144 @@ async def reset_plugin_env(plugin_id: str, request: Request):
     return {"status": "ok", "plugin_id": plugin_id, "message": "Environment reset"}
 
 
+@router.post("/plugins/{plugin_id}/uninstall")
+async def uninstall_plugin(plugin_id: str, request: Request):
+    """Full uninstall: stop daemon, delete venv, upstream/, and built assets.
+
+    Resets the plugin to the state it was in right after cloning the repo
+    (only config files like extension.json, build.py, requirements.txt remain).
+    """
+    import shutil
+
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry(force_reload=True)
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    root = record.root_dir
+    removed: list[str] = []
+
+    # 1. Stop daemon if running
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+    if proc and proc.is_alive:
+        await mgr.stop(plugin_id)
+        removed.append("daemon")
+
+    # 2. Delete venv
+    sandbox = record.get_sandbox_manager()
+    if sandbox and sandbox.venv_path.exists():
+        await sandbox.delete_venv()
+        removed.append("venv")
+
+    # 3. Delete upstream/ (cloned source)
+    upstream_dir = root / "upstream"
+    if upstream_dir.exists():
+        shutil.rmtree(upstream_dir, ignore_errors=True)
+        removed.append("upstream")
+
+    # 4. Delete built assets (index.html + assets/)
+    index_html = root / "index.html"
+    if index_html.exists():
+        index_html.unlink()
+        removed.append("index.html")
+
+    assets_dir = root / "assets"
+    if assets_dir.exists():
+        shutil.rmtree(assets_dir, ignore_errors=True)
+        removed.append("assets")
+
+    # 5. Delete models/ (optional, only if exists)
+    models_dir = root / "models"
+    if models_dir.exists():
+        shutil.rmtree(models_dir, ignore_errors=True)
+        removed.append("models")
+
+    logger.info("Uninstalled plugin '%s': removed %s", plugin_id, ", ".join(removed))
+
+    return {
+        "status": "ok",
+        "plugin_id": plugin_id,
+        "removed": removed,
+        "message": f"Uninstalled: {', '.join(removed)}" if removed else "Nothing to uninstall",
+    }
+
+
+@router.post("/plugins/{plugin_id}/update")
+async def update_plugin(plugin_id: str, request: Request):
+    """Update a plugin: stop, clean upstream + assets, then re-run install.
+
+    This is equivalent to uninstall (without deleting venv/models) + reinstall.
+    The venv is kept to avoid re-downloading Python; only upstream source
+    and built frontend are refreshed.
+
+    Returns immediately with status="installing". Poll the status endpoint.
+    """
+    import shutil
+
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry(force_reload=True)
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    root = record.root_dir
+
+    # 1. Stop daemon if running
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+    if proc and proc.is_alive:
+        await mgr.stop(plugin_id)
+
+    # 2. Delete upstream/ (will be re-cloned by build.py)
+    upstream_dir = root / "upstream"
+    if upstream_dir.exists():
+        shutil.rmtree(upstream_dir, ignore_errors=True)
+
+    # 3. Delete built assets (will be rebuilt)
+    index_html = root / "index.html"
+    if index_html.exists():
+        index_html.unlink()
+    assets_dir = root / "assets"
+    if assets_dir.exists():
+        shutil.rmtree(assets_dir, ignore_errors=True)
+
+    # 4. Re-run install steps in background
+    sandbox = record.get_sandbox_manager()
+    if sandbox is None:
+        raise HTTPException(status_code=400, detail="Plugin has no sandbox configuration")
+
+    install_steps = record.manifest.install.steps if record.manifest.install else None
+
+    async def _do_update():
+        try:
+            await mgr.install(plugin_id, sandbox, install_steps=install_steps)
+        except Exception:
+            logger.exception("Plugin %s update background task failed", plugin_id)
+
+    asyncio.create_task(_do_update())
+    await asyncio.sleep(0.1)
+
+    proc = mgr.get_or_create(plugin_id)
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        install_progress=proc.install_progress,
+        is_installed=record.is_installed,
+    )
+
+
 _MAX_MODEL_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB
 
 
