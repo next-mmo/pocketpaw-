@@ -1,0 +1,32 @@
+{
+  "id": "freecut",
+  "name": "FreeCut",
+  "version": "0.1.0",
+  "description": "GPU-accelerated video editor with multi-track timeline, effects, and native export.",
+  "icon": "clapperboard",
+  "route": "freecut",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env",
+    "env": {
+      "API_HOST": "127.0.0.1",
+      "PYTHONPATH": "./upstream/backend/src"
+    }
+  },
+  "install": {
+    "steps": [
+      { "pip": "requirements.txt" },
+      { "run": "npm install", "path": "upstream" }
+    ]
+  },
+  "start": {
+    "command": "python -m uvicorn freecut_core.server:app --host 127.0.0.1 --port __PORT__",
+    "daemon": true,
+    "ready_pattern": "Uvicorn running on",
+    "port": "auto"
+  }
+}

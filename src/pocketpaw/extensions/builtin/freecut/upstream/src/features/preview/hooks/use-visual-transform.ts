@@ -1,0 +1,91 @@
+import { useMemo } from 'react';
+import type { TimelineItem } from '@/types/timeline';
+import type { ResolvedTransform } from '@/types/transform';
+import type { ItemKeyframes } from '@/types/keyframe';
+import type { TimelineState } from '@/features/timeline/types';
+import { useTimelineStore } from '@/features/timeline/stores/timeline-store';
+import { usePlaybackStore } from '@/features/preview/stores/playback-store';
+import { useGizmoStore, isFullTransform } from '@/features/preview/stores/gizmo-store';
+import {
+  resolveTransform,
+  getSourceDimensions,
+} from '@/lib/composition-runtime/utils/transform-resolver';
+import { resolveAnimatedTransform } from '@/features/keyframes/utils/animated-transform-resolver';
+
+interface ProjectSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Resolve visual transforms for multiple items (base -> keyframes -> preview).
+ */
+export function useVisualTransforms(
+  items: TimelineItem[],
+  projectSize: ProjectSize
+): Map<string, ResolvedTransform> {
+  const allKeyframes = useTimelineStore((s: TimelineState) => s.keyframes);
+  const currentFrame = usePlaybackStore((s) => s.currentFrame);
+  const activeGizmo = useGizmoStore((s) => s.activeGizmo);
+  const gizmoPreviewTransform = useGizmoStore((s) => s.previewTransform);
+  const preview = useGizmoStore((s) => s.preview);
+
+  return useMemo(() => {
+    const transforms = new Map<string, ResolvedTransform>();
+
+    for (const item of items) {
+      const sourceDimensions = getSourceDimensions(item);
+      const baseResolved = resolveTransform(
+        item,
+        { width: projectSize.width, height: projectSize.height, fps: 30 },
+        sourceDimensions
+      );
+
+      const itemKeyframes = allKeyframes.find((k: ItemKeyframes) => k.itemId === item.id);
+      const relativeFrame = currentFrame - item.from;
+      let animatedTransform = baseResolved;
+      if (itemKeyframes) {
+        animatedTransform = resolveAnimatedTransform(baseResolved, itemKeyframes, relativeFrame);
+      }
+
+      if (activeGizmo?.itemId === item.id && gizmoPreviewTransform) {
+        transforms.set(item.id, {
+          x: gizmoPreviewTransform.x,
+          y: gizmoPreviewTransform.y,
+          width: gizmoPreviewTransform.width,
+          height: gizmoPreviewTransform.height,
+          rotation: gizmoPreviewTransform.rotation,
+          opacity: gizmoPreviewTransform.opacity,
+          cornerRadius: gizmoPreviewTransform.cornerRadius ?? 0,
+        });
+        continue;
+      }
+
+      const previewTransform = preview?.[item.id]?.transform;
+      if (previewTransform) {
+        if (isFullTransform(previewTransform)) {
+          transforms.set(item.id, {
+            x: previewTransform.x,
+            y: previewTransform.y,
+            width: previewTransform.width,
+            height: previewTransform.height,
+            rotation: previewTransform.rotation,
+            opacity: previewTransform.opacity ?? animatedTransform.opacity,
+            cornerRadius: previewTransform.cornerRadius ?? animatedTransform.cornerRadius,
+          });
+        } else {
+          transforms.set(item.id, {
+            ...animatedTransform,
+            ...previewTransform,
+            cornerRadius: previewTransform.cornerRadius ?? animatedTransform.cornerRadius,
+          });
+        }
+        continue;
+      }
+
+      transforms.set(item.id, animatedTransform);
+    }
+
+    return transforms;
+  }, [items, projectSize, allKeyframes, currentFrame, activeGizmo?.itemId, gizmoPreviewTransform, preview]);
+}
