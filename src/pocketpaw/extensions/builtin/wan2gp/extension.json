@@ -1,0 +1,39 @@
+{
+  "id": "wan2gp",
+  "name": "WanGP",
+  "version": "1.0.0",
+  "description": "AI video generator for the GPU Poor. Supports Wan 2.1/2.2, Hunyuan Video, LTX Video, Flux, and more.",
+  "icon": "video",
+  "route": "wan2gp",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env",
+    "torch": {
+      "version": "2.7.1",
+      "cuda": "cu128",
+      "extras": ["torchvision==0.22.1", "torchaudio==2.7.1"]
+    },
+    "env": {
+      "GRADIO_SERVER_NAME": "127.0.0.1"
+    }
+  },
+  "install": {
+    "steps": [
+      { "node": true },
+      { "run": "python build.py" },
+      { "torch": true },
+      { "pip": "requirements.txt", "path": "upstream" }
+    ]
+  },
+  "start": {
+    "command": "python wgp.py --server-port __PORT__ --server-name 127.0.0.1",
+    "daemon": true,
+    "ready_pattern": "Running on local URL",
+    "port": "auto",
+    "path": "upstream"
+  }
+}

@@ -150,21 +150,32 @@ async def security_headers_middleware(request: Request, call_next):
 
     response = await call_next(request)
     is_extension_asset = request.url.path.startswith("/extensions/")
-    response.headers["X-Frame-Options"] = "SAMEORIGIN" if is_extension_asset else "DENY"
+    # Plugin proxy paths serve upstream UIs (e.g. Gradio) inside PocketPaw's
+    # dashboard iframe, so they also need permissive framing headers.
+    is_plugin_proxy = "/plugins/" in request.url.path and "/proxy/" in request.url.path
+    allow_framing = is_extension_asset or is_plugin_proxy
+    response.headers["X-Frame-Options"] = "SAMEORIGIN" if allow_framing else "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-        "https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self' blob: ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
-        + ("frame-ancestors 'self'" if is_extension_asset else "frame-ancestors 'none'")
-    )
+    # For plugin proxies, use a permissive CSP that won't break Gradio et al.
+    if is_plugin_proxy:
+        # Don't set CSP at all for proxied content — the upstream app has its
+        # own security model and PocketPaw's CSP would break Gradio's inline
+        # scripts, eval(), and dynamically-loaded modules.
+        pass
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "https://cdn.jsdelivr.net https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' blob: ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
+            + ("frame-ancestors 'self'" if is_extension_asset else "frame-ancestors 'none'")
+        )
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

@@ -86,7 +86,8 @@ Every extension folder needs an `extension.json`:
     "command": "python -m my_server --host 127.0.0.1 --port __PORT__",
     "daemon": true,
     "ready_pattern": "Uvicorn running on",
-    "port": "auto"
+    "port": "auto",
+    "path": "upstream"
   }
 }
 ```
@@ -272,6 +273,8 @@ Each sandbox gets a fully isolated environment — **nothing from the host OS le
 - `PYTHONNOUSERSITE=1` — Isolates from user site-packages
 - `UV_PYTHON_PREFERENCE=only-managed` — Only use uv-managed Python (never system Python)
 - `UV_CACHE_DIR` — Shared cache at `~/.pocketpaw/uv-cache/`
+- `PYTHONUNBUFFERED=1` — **Critical for daemon plugins.** Forces unbuffered stdout/stderr so `ready_pattern` detection works. Without this, Python buffers output when piped and the daemon stays stuck in "starting" forever.
+- `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1` (Windows) — Prevents cp1252 encoding crashes
 - Managed Node.js path (if installed): `~/.pocketpaw/node/` added to PATH
 - Any custom vars from `sandbox.env`
 
@@ -302,12 +305,13 @@ Plugins with `"start"` config can run as background daemon processes.
 }
 ```
 
-| Start Field     | Type                    | Default      | Description                                            |
-| --------------- | ----------------------- | ------------ | ------------------------------------------------------ |
-| `command`       | `string`                | **required** | Command to run inside the venv                         |
-| `daemon`        | `bool`                  | `false`      | Whether to keep running as a background process        |
-| `ready_pattern` | `string \| null`        | `null`       | Regex pattern in stdout indicating the daemon is ready |
-| `port`          | `string \| int \| null` | `null`       | Port (`"auto"` for auto-detection, or a fixed number)  |
+| Start Field     | Type                    | Default      | Description                                                                               |
+| --------------- | ----------------------- | ------------ | ----------------------------------------------------------------------------------------- |
+| `command`       | `string`                | **required** | Command to run inside the venv                                                            |
+| `daemon`        | `bool`                  | `false`      | Whether to keep running as a background process                                           |
+| `ready_pattern` | `string \| null`        | `null`       | Regex pattern in stdout indicating the daemon is ready                                    |
+| `port`          | `string \| int \| null` | `null`       | Port (`"auto"` for auto-detection, or a fixed number)                                     |
+| `path`          | `string \| null`        | `null`       | Working directory relative to plugin root (e.g. `"upstream"` for self-bootstrapped repos) |
 
 ### Magic Placeholders in `command`
 
@@ -318,7 +322,7 @@ Plugins with `"start"` config can run as background daemon processes.
 
 ### Process Lifecycle
 
-```
+```text
 stopped → (install) → installing → stopped → (start) → starting → running → (stop) → stopped
                                                                                 ↓
                                                                               error
@@ -328,7 +332,7 @@ stopped → (install) → installing → stopped → (start) → starting → ru
 
 Plugin daemons run on `127.0.0.1:{port}` which is inaccessible from the iframe (CORS). PocketPaw provides a **reverse proxy** so the frontend can reach the backend:
 
-```
+```text
 Frontend → POST /api/v1/plugins/{plugin_id}/proxy/v1/chat/completions
                         ↓ PocketPaw proxy ↓
 Backend  → POST http://127.0.0.1:{port}/v1/chat/completions
@@ -337,6 +341,12 @@ Backend  → POST http://127.0.0.1:{port}/v1/chat/completions
 - Non-streaming requests are forwarded directly
 - Streaming (SSE) requests are proxied chunk-by-chunk via `httpx`
 - The proxy auto-detects `"stream": true` in JSON request bodies
+- **Framing headers are stripped**: `X-Frame-Options` and `Content-Security-Policy` from upstream responses are removed so the UI can render in PocketPaw's iframe
+- **Rate limiting is bypassed** for proxy paths: Gradio UIs fire 100+ parallel asset requests on load, which would exhaust the normal API rate limiter (10 req/s, burst 30)
+- PocketPaw's security middleware sets `X-Frame-Options: SAMEORIGIN` (not DENY) for proxy paths
+- CSP is **not applied** to proxy paths — the upstream app has its own security model
+
+> **Important for Gradio/Streamlit plugins:** These frameworks set restrictive framing headers by default (`X-Frame-Options: DENY`, `CSP frame-ancestors 'none'`). PocketPaw's proxy strips these automatically — no action needed from the extension developer.
 
 ---
 
@@ -817,6 +827,175 @@ When the user asks to create a new extension, **always scaffold a React + Vite p
 - Python executable is `Scripts/python.exe`
 - PATH separator is `;` (not `:`)
 - Process termination uses `process.terminate()` then `os.kill(pid, signal.CTRL_BREAK_EVENT)`
+- **`.git` directory cleanup**: On Windows, git holds file locks briefly after clone. Use `shutil.rmtree(git_dir, onerror=_force_remove)` with a retry handler that calls `os.chmod(path, 0o777)` and retries 3 times with `time.sleep(1)` between attempts
+- **Never use `os.execv`** on Windows — it replaces the process, breaking PocketPaw's PID tracking and output monitoring. Use `subprocess.run` or direct script execution instead
+
+---
+
+## Self-Bootstrapping Pattern (External Repos)
+
+For extensions that wrap an existing open-source project (e.g. Gradio apps, Streamlit dashboards), use the **self-bootstrapping pattern**: clone the upstream repo at install time via `build.py`, then run its entry point via `start.path`.
+
+### When to Use
+
+- Wrapping an external GitHub project that has its own `requirements.txt`
+- The upstream project has a Gradio/Streamlit/FastAPI UI you want to embed
+- You need to modify or extend the upstream code after cloning
+
+### Architecture
+
+```text
+my-ext/
+├── extension.json       ← PocketPaw manifest
+├── build.py             ← Clones upstream repo during install
+├── requirements.txt     ← (or upstream has its own)
+├── upstream/            ← Cloned at install time (gitignored)
+│   ├── wgp.py           ← Upstream entry point
+│   ├── requirements.txt ← Upstream dependencies
+│   └── ...
+├── index.html           ← Built by Vite → PocketPaw serves this
+├── assets/              ← Vite build output
+└── ui/                  ← React wrapper (optional — may use upstream UI)
+```
+
+### Example: WanGP (Gradio Video Generator)
+
+```json
+{
+  "id": "wan2gp",
+  "name": "WanGP",
+  "version": "1.0.0",
+  "description": "AI video generator for the GPU Poor.",
+  "icon": "video",
+  "route": "wan2gp",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env",
+    "torch": {
+      "version": "2.7.1",
+      "cuda": "cu128",
+      "extras": ["torchvision==0.22.1", "torchaudio==2.7.1"]
+    },
+    "env": {
+      "GRADIO_SERVER_NAME": "127.0.0.1"
+    }
+  },
+  "install": {
+    "steps": [
+      { "node": true },
+      { "run": "python build.py" },
+      { "torch": true },
+      { "pip": "requirements.txt", "path": "upstream" }
+    ]
+  },
+  "start": {
+    "command": "python wgp.py --server-port __PORT__ --server-name 127.0.0.1",
+    "daemon": true,
+    "ready_pattern": "Running on local URL",
+    "port": "auto",
+    "path": "upstream"
+  }
+}
+```
+
+**Key points:**
+
+1. **`build.py`** clones the upstream repo into `upstream/` (shallow clone, `.git` removed)
+2. **`{ "pip": "requirements.txt", "path": "upstream" }`** installs the upstream's own dependencies
+3. **`start.path: "upstream"`** runs the command from the cloned directory
+4. **`ready_pattern`** matches the upstream server's startup message (e.g. Gradio's `"Running on local URL"`)
+5. **`sandbox.env.GRADIO_SERVER_NAME`** forces Gradio to bind to `127.0.0.1` instead of `0.0.0.0`
+
+### Build Script Template (for self-bootstrapping)
+
+```python
+"""Build script for self-bootstrapping extension.
+
+Runs inside PocketPaw sandbox (Python, Node.js, git all on PATH).
+"""
+import os
+import shutil
+import subprocess
+import time
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent.resolve()
+UPSTREAM_DIR = SCRIPT_DIR / "upstream"
+UI_DIR = SCRIPT_DIR / "ui"
+REPO_URL = "https://github.com/owner/repo.git"
+
+def run(cmd, cwd=None):
+    print(f"==> {' '.join(cmd)}", flush=True)
+    result = subprocess.run(cmd, cwd=str(cwd) if cwd else None)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed: {' '.join(cmd)}")
+
+def main():
+    # 1. Clone upstream if missing
+    if not (UPSTREAM_DIR / "main_script.py").exists():
+        if UPSTREAM_DIR.exists():
+            shutil.rmtree(UPSTREAM_DIR, ignore_errors=True)
+        run(["git", "clone", "--depth", "1", REPO_URL, str(UPSTREAM_DIR)])
+
+        # Remove .git (Windows needs special handling for file locks)
+        git_dir = UPSTREAM_DIR / ".git"
+        if git_dir.exists():
+            def _force_remove(func, path, exc_info):
+                os.chmod(path, 0o777)
+                for attempt in range(3):
+                    try:
+                        func(path)
+                        return
+                    except PermissionError:
+                        time.sleep(1)
+                func(path)  # final attempt — let it raise
+            time.sleep(1)  # let git release file handles
+            shutil.rmtree(git_dir, onerror=_force_remove)
+
+    # 2. Build React UI wrapper (if using one)
+    if UI_DIR.exists():
+        npm = shutil.which("npm")
+        if not (UI_DIR / "node_modules").exists():
+            run([npm, "install"], cwd=UI_DIR)
+        npx = shutil.which("npx")
+        run([npx, "vite", "build"], cwd=UI_DIR)
+
+    print("==> Build complete!", flush=True)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Embedding Third-Party UIs (Gradio, Streamlit, etc.)
+
+When wrapping a project that provides its own web UI (Gradio, Streamlit, FastAPI + Swagger), the extension can rely on PocketPaw's proxy to embed the upstream UI directly:
+
+1. **The `ready_pattern`** must match what the upstream framework prints to stdout when ready:
+   - Gradio: `"Running on local URL"`
+   - Streamlit: `"You can now view"`
+   - Uvicorn/FastAPI: `"Uvicorn running on"`
+   - Flask: `"Running on http://"`
+
+2. **Force the server to bind to `127.0.0.1`** — not `0.0.0.0`. Set this via:
+   - Command flags: `--server-name 127.0.0.1` or `--host 127.0.0.1`
+   - Environment variable: `"GRADIO_SERVER_NAME": "127.0.0.1"` in `sandbox.env`
+
+3. **PocketPaw's proxy handles all framing issues automatically:**
+   - Strips `X-Frame-Options` and `Content-Security-Policy` from upstream responses
+   - Sets `X-Frame-Options: SAMEORIGIN` to allow iframe embedding
+   - Skips rate limiting for proxy paths (Gradio fires 100+ parallel requests)
+
+4. **The extension's React dashboard** should show the proxy URL in an iframe when the plugin status is `"running"`:
+
+   ```typescript
+   const gradioUrl = port
+     ? `${API_BASE}/api/v1/plugins/${PLUGIN_ID}/proxy/`
+     : null;
+   ```
 
 ---
 
@@ -845,6 +1024,13 @@ When the user asks to create a new extension, **always scaffold a React + Vite p
 - **pnpm not found**: Check `GET /api/v1/plugins/node` — if not detected, the `{ "node": true }` step auto-installs it
 - **blob: CSP error**: PocketPaw adds `blob:` to `connect-src` for extension iframes — check CSP headers
 
+### Daemon Process Issues
+
+- **Plugin stuck in "starting" forever**: The most common cause is **buffered stdout**. PocketPaw sets `PYTHONUNBUFFERED=1` automatically, but if your plugin spawns child processes, ensure they also flush output. Verify `ready_pattern` matches what the server actually prints.
+- **Plugin shows "running" but iframe is blank**: Check browser console for 429 errors (rate limiting) or CSP violations. Both are fixed in PocketPaw's proxy, but if accessing the daemon directly (not via proxy), these issues will appear.
+- **Gradio iframe shows "Loading..." forever**: Gradio fires many parallel asset requests. Ensure you're using the proxy URL (`/api/v1/plugins/{id}/proxy/`) — not direct port access. The proxy strips Gradio's restrictive framing headers.
+- **`os.execv` kills monitoring on Windows**: Never use `os.execv` in launch scripts — it replaces the process, so PocketPaw loses PID tracking and output capture. Use `subprocess.run` or direct script execution.
+
 ### Build Issues (React + Vite Plugins)
 
 - **Blank page**: Check `base: "./"` in `vite.config.ts` and asset paths in `index.html`
@@ -852,3 +1038,9 @@ When the user asks to create a new extension, **always scaffold a React + Vite p
 - **outDir warning**: The `build.outDir` pointing to parent is expected (Vite warns but works)
 - **Build script hangs on Windows**: Don't use `CREATE_NO_WINDOW` in build.py subprocess calls — the sandbox handles it
 - **pnpm/npx not found in build.py**: Use `shutil.which("pnpm")` — sandbox PATH includes managed Node.js
+
+### Self-Bootstrapping Issues
+
+- **`.git` cleanup fails on Windows**: Use the retry handler pattern (see Build Script Template above). Git holds file locks briefly after clone; `os.chmod` + retry handles this.
+- **`upstream/` directory is empty**: Check that `build.py` runs before other install steps that depend on it (e.g. `pip` with `path: "upstream"`).
+- **Wrong working directory**: If using `start.path: "upstream"`, make sure the command is relative to that directory (e.g. `python wgp.py`, not `python upstream/wgp.py`).

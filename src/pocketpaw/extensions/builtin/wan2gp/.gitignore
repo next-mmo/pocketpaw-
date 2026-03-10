@@ -1,0 +1,26 @@
+# Python sandbox
+env/
+
+# Upstream source (cloned separately, not tracked in pocketpaw repo)
+upstream/
+
+# Vite build output (rebuilt via build.py)
+index.html
+assets/
+
+# Generated models & data
+models/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env (local config)
+.env
+
+# Node
+node_modules/

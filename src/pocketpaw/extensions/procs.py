@@ -260,6 +260,12 @@ class PluginProcessManager:
 
         logger.info("Starting plugin %s: %s (cwd=%s)", plugin_id, cmd, sandbox.root)
 
+        # Resolve working directory — supports start.path for subdirectories
+        cwd = sandbox.root
+        if start_config.path:
+            cwd = sandbox.root / start_config.path
+            logger.info("Plugin %s start path: %s", plugin_id, cwd)
+
         try:
             # On Windows, uvicorn uses SelectorEventLoop which does NOT
             # support asyncio.create_subprocess_*.  We fall back to
@@ -279,7 +285,7 @@ class PluginProcessManager:
                     cmd_parts,
                     stdout=_sp.PIPE,
                     stderr=_sp.STDOUT,
-                    cwd=str(sandbox.root),
+                    cwd=str(cwd),
                     env=env,
                     creationflags=_sp.CREATE_NO_WINDOW,
                 )
@@ -339,7 +345,7 @@ class PluginProcessManager:
                     *cmd_parts,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
-                    cwd=sandbox.root,
+                    cwd=cwd,
                     env=env,
                     preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN),
                 )

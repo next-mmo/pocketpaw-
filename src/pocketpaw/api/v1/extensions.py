@@ -922,42 +922,46 @@ async def start_plugin(plugin_id: str, request: Request):
     if not sandbox.is_installed:
         raise HTTPException(status_code=400, detail="Plugin is not installed yet. Run install first.")
 
-    # Determine which model to use
-    body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
-
-    model_file = body.get("model", "").strip() if body else ""
-    if not model_file:
-        # Auto-pick the smallest GGUF file in models/ (smallest is safest default)
-        models_dir = record.root_dir / "models"
-        if models_dir.exists():
-            gguf_paths = sorted(
-                (p for p in models_dir.iterdir()
-                 if p.is_file() and p.suffix.lower() in (".gguf", ".bin")),
-                key=lambda p: p.stat().st_size,
-            )
-            if gguf_paths:
-                model_file = gguf_paths[0].name
-
-    if not model_file:
-        raise HTTPException(
-            status_code=400,
-            detail="No model found. Download a GGUF model first.",
-        )
-
-    # Build the model path (relative to plugin root for portability)
-    model_path = str(record.root_dir / "models" / model_file)
-
-    # Clone the start config and inject the model path into the command
+    # Determine which model to use (only needed if command uses __MODEL__)
     from copy import deepcopy
     start_cfg = deepcopy(record.manifest.start)
-    start_cfg.command = start_cfg.command.replace("__MODEL__", model_path)
-    # If command still has no --model flag, append it
-    if "--model" not in start_cfg.command:
-        start_cfg.command += f' --model "{model_path}"'
+
+    needs_model = "__MODEL__" in start_cfg.command
+
+    if needs_model:
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            pass
+
+        model_file = body.get("model", "").strip() if body else ""
+        if not model_file:
+            # Auto-pick the smallest GGUF file in models/ (smallest is safest default)
+            models_dir = record.root_dir / "models"
+            if models_dir.exists():
+                gguf_paths = sorted(
+                    (p for p in models_dir.iterdir()
+                     if p.is_file() and p.suffix.lower() in (".gguf", ".bin")),
+                    key=lambda p: p.stat().st_size,
+                )
+                if gguf_paths:
+                    model_file = gguf_paths[0].name
+
+        if not model_file:
+            raise HTTPException(
+                status_code=400,
+                detail="No model found. Download a GGUF model first.",
+            )
+
+        # Build the model path (relative to plugin root for portability)
+        model_path = str(record.root_dir / "models" / model_file)
+
+        # Inject the model path into the command
+        start_cfg.command = start_cfg.command.replace("__MODEL__", model_path)
+        # If command still has no --model flag, append it
+        if "--model" not in start_cfg.command:
+            start_cfg.command += f' --model "{model_path}"'
 
     mgr = get_plugin_process_manager()
     proc = await mgr.start(plugin_id, sandbox, start_cfg)
@@ -1380,13 +1384,16 @@ async def download_model_from_hf(
     )
 
 
-@router.post("/plugins/{plugin_id}/proxy/{proxy_path:path}")
+@router.api_route("/plugins/{plugin_id}/proxy/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request):
     """Reverse proxy requests to a running plugin server.
 
     Forwards the request to the plugin's local server, bypassing CORS
     restrictions that prevent the iframe from talking directly to
     http://127.0.0.1:{port}.
+
+    Supports all HTTP methods (GET, POST, PUT, DELETE, etc.) to enable
+    full-featured backends like Gradio.
     """
     import httpx
 
@@ -1403,9 +1410,12 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
             detail=f"Plugin {plugin_id} is not running",
         )
 
+    # Rebuild target URL including query string
     target_url = f"http://127.0.0.1:{proc.port}/{proxy_path}"
+    if request.url.query:
+        target_url += f"?{request.url.query}"
 
-    # Read request body
+    # Read request body (empty for GET/HEAD)
     body = await request.body()
 
     # Check if client wants streaming
@@ -1416,6 +1426,11 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
             is_stream = parsed.get("stream", False)
         except Exception:
             pass
+
+    # Also treat SSE Accept header as streaming
+    accept = request.headers.get("accept", "")
+    if "text/event-stream" in accept:
+        is_stream = True
 
     headers = {
         k: v
@@ -1428,9 +1443,9 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
         async def _stream_proxy():
             async with httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream(
-                    "POST",
+                    request.method,
                     target_url,
-                    content=body,
+                    content=body if body else None,
                     headers=headers,
                 ) as resp:
                     async for chunk in resp.aiter_bytes():
@@ -1451,11 +1466,25 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
             resp = await client.request(
                 method=request.method,
                 url=target_url,
-                content=body,
+                content=body if body else None,
                 headers=headers,
             )
+            # Forward response headers — strip framing restrictions so
+            # Gradio can be embedded in PocketPaw's iframe.  Gradio sends
+            # X-Frame-Options: DENY and CSP frame-ancestors: 'none' by default.
+            _skip_headers = {
+                "transfer-encoding", "content-encoding", "content-length",
+                "x-frame-options", "content-security-policy",
+                "content-security-policy-report-only",
+            }
+            response_headers = {}
+            for key, value in resp.headers.items():
+                if key.lower() not in _skip_headers:
+                    response_headers[key] = value
             return StreamingResponse(
                 content=iter([resp.content]),
                 status_code=resp.status_code,
-                media_type=resp.headers.get("content-type", "application/json"),
+                headers=response_headers,
+                media_type=resp.headers.get("content-type", "application/octet-stream"),
             )
+

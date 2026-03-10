@@ -178,18 +178,21 @@ async def _auth_dispatch(request: Request) -> Response | None:
             return None  # allow through
 
     # Rate limiting — pick tier based on path
-    client_ip = request.client.host if request.client else "unknown"
-    is_auth_path = request.url.path in ("/api/auth/session", "/api/qr")
-    limiter = auth_limiter if is_auth_path else api_limiter
-    rl_info = limiter.check(client_ip)
-    if not rl_info.allowed:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Too many requests"},
-            headers=rl_info.headers(),
-        )
-    # Stash rate limit info to add response headers later
-    request.state.rate_limit_headers = rl_info.headers()
+    # Skip for plugin proxy paths — Gradio fires 100+ parallel asset requests
+    is_proxy_path = "/plugins/" in request.url.path and "/proxy/" in request.url.path
+    if not is_proxy_path:
+        client_ip = request.client.host if request.client else "unknown"
+        is_auth_path = request.url.path in ("/api/auth/session", "/api/qr")
+        limiter = auth_limiter if is_auth_path else api_limiter
+        rl_info = limiter.check(client_ip)
+        if not rl_info.allowed:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests"},
+                headers=rl_info.headers(),
+            )
+        # Stash rate limit info to add response headers later
+        request.state.rate_limit_headers = rl_info.headers()
 
     # Check for token in query or header
     token = request.query_params.get("token")

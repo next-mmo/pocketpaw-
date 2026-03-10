@@ -7,6 +7,7 @@ import {
   RobotOutlined,
   UserOutlined,
 } from "@ant-design/icons";
+import { Avatar } from "antd";
 import { useChatStore, type Message } from "../stores/chatStore";
 import { useServerStore, API_BASE, PLUGIN_ID } from "../stores/serverStore";
 
@@ -279,9 +280,17 @@ export default function ChatPanel() {
             placement:
               item.role === "user" ? ("end" as const) : ("start" as const),
             avatar:
-              item.role === "user"
-                ? { icon: <UserOutlined />, style: { background: "#1677ff" } }
-                : { icon: <RobotOutlined />, style: { background: "#722ed1" } },
+              item.role === "user" ? (
+                <Avatar
+                  icon={<UserOutlined />}
+                  style={{ background: "#1677ff" }}
+                />
+              ) : (
+                <Avatar
+                  icon={<RobotOutlined />}
+                  style={{ background: "#722ed1" }}
+                />
+              ),
             messageRender: (content: string) => (
               <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                 {content}

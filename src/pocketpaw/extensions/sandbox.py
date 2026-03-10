@@ -81,6 +81,10 @@ class StartConfig(BaseModel):
         default=None,
         description="Port the daemon listens on ('auto' for auto-detection)",
     )
+    path: str | None = Field(
+        default=None,
+        description="Working directory relative to plugin root (e.g. 'upstream')",
+    )
 
 
 def _get_shared_uv_cache() -> Path:
@@ -178,6 +182,13 @@ class SandboxManager:
         if platform.system() == "Windows":
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
+
+        # Force unbuffered output so that stdout/stderr lines are flushed
+        # immediately. Without this, when Python runs with stdout piped
+        # (as PocketPaw does for daemon monitoring), output is fully buffered
+        # and the ready_pattern detector never sees lines like
+        # "Running on local URL" from Gradio until the process exits.
+        env["PYTHONUNBUFFERED"] = "1"
 
         # Shared uv cache across all plugins
         # This saves disk space and speeds up installs since Python versions
