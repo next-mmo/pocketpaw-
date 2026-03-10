@@ -926,17 +926,24 @@ async def start_plugin(plugin_id: str, request: Request):
     from copy import deepcopy
     start_cfg = deepcopy(record.manifest.start)
 
+    # Parse request body for model and engine selection
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    # Engine switching: if "node" engine selected, swap the command
+    engine = (body.get("engine") or "python").strip().lower() if body else "python"
+    if engine == "node":
+        start_cfg.command = "node node_server.mjs --host 127.0.0.1 --port __PORT__"
+
     needs_model = "__MODEL__" in start_cfg.command or (
-        "llama_cpp.server" in start_cfg.command and "--model" not in start_cfg.command
+        ("llama_cpp.server" in start_cfg.command or "node_server.mjs" in start_cfg.command)
+        and "--model" not in start_cfg.command
     )
 
     if needs_model:
-        body = {}
-        try:
-            body = await request.json()
-        except Exception:
-            pass
-
         model_file = body.get("model", "").strip() if body else ""
         if not model_file:
             # Auto-pick the smallest GGUF file in models/ (smallest is safest default)
@@ -1080,6 +1087,127 @@ async def reset_plugin_env(plugin_id: str, request: Request):
         await sandbox.delete_venv()
 
     return {"status": "ok", "plugin_id": plugin_id, "message": "Environment reset"}
+
+
+class _RebuildEngineRequest(BaseModel):
+    cuda: bool = False
+
+
+@router.post("/plugins/{plugin_id}/rebuild-engine")
+async def rebuild_plugin_engine(
+    plugin_id: str,
+    request: Request,
+    body: _RebuildEngineRequest | None = None,
+):
+    """Rebuild llama-cpp-python from source with the latest llama.cpp.
+
+    This clones the llama-cpp-python repo, updates its llama.cpp
+    submodule to the latest commit, and builds/installs into the
+    plugin's venv.  Optionally builds with CUDA support.
+
+    The process runs in the background.  Poll ``/plugins/{plugin_id}/status``
+    and ``/plugins/{plugin_id}/logs`` for progress.
+    """
+    _require_admin_or_full_access(request)
+
+    from pocketpaw.extensions.procs import get_plugin_process_manager
+
+    registry = get_extension_registry()
+    record = registry.get(plugin_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    if not record.is_plugin:
+        raise HTTPException(status_code=400, detail="Extension is not a plugin type")
+
+    sandbox = record.get_sandbox_manager()
+    if sandbox is None or not sandbox.is_installed:
+        raise HTTPException(
+            status_code=400,
+            detail="Plugin is not installed yet. Run install first.",
+        )
+
+    # Stop any running process
+    mgr = get_plugin_process_manager()
+    proc = mgr.get(plugin_id)
+    if proc and proc.is_alive:
+        await mgr.stop(plugin_id)
+
+    rebuild_script = record.root_dir / "rebuild_engine.py"
+    if not rebuild_script.exists():
+        raise HTTPException(
+            status_code=400,
+            detail="rebuild_engine.py not found in plugin root",
+        )
+
+    use_cuda = body.cuda if body else False
+
+    # Run the rebuild as a managed process so logs are captured
+    cmd_parts = [str(sandbox.python_path), str(rebuild_script)]
+    if use_cuda:
+        cmd_parts.append("--cuda")
+
+    async def _do_rebuild():
+        proc_entry = mgr.get_or_create(plugin_id)
+        proc_entry.status = "installing"
+        proc_entry.install_progress = 0.0
+        proc_entry.error = None
+        proc_entry.log_lines = []
+
+        output_queue: asyncio.Queue[str] = asyncio.Queue()
+
+        async def _drain_output():
+            while True:
+                try:
+                    line = await asyncio.wait_for(output_queue.get(), timeout=0.5)
+                    proc_entry.push_log(line)
+                except (TimeoutError, asyncio.TimeoutError):
+                    if proc_entry.status != "installing":
+                        break
+                except asyncio.CancelledError:
+                    break
+
+        drain_task = asyncio.create_task(_drain_output())
+
+        try:
+            env = sandbox.get_env()
+            env["PYTHONUNBUFFERED"] = "1"
+
+            rc = await sandbox._run_cmd(
+                cmd_parts,
+                cwd=record.root_dir,
+                env=env,
+                on_output=output_queue,
+            )
+
+            if rc == 0:
+                proc_entry.status = "stopped"
+                proc_entry.install_progress = 1.0
+                logger.info("Plugin %s engine rebuild complete", plugin_id)
+            else:
+                proc_entry.status = "error"
+                proc_entry.error = f"Engine rebuild failed (exit code {rc})"
+                logger.error("Plugin %s engine rebuild failed with code %d", plugin_id, rc)
+        except Exception as exc:
+            logger.exception("Plugin %s engine rebuild error", plugin_id)
+            proc_entry.status = "error"
+            proc_entry.error = str(exc)
+        finally:
+            drain_task.cancel()
+            try:
+                await drain_task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.create_task(_do_rebuild())
+    await asyncio.sleep(0.1)
+
+    proc = mgr.get_or_create(plugin_id)
+    return PluginStatusResponse(
+        plugin_id=plugin_id,
+        status=proc.status,
+        install_progress=proc.install_progress,
+        is_installed=record.is_installed,
+    )
 
 
 @router.post("/plugins/{plugin_id}/uninstall")

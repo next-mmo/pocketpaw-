@@ -12,6 +12,8 @@ import {
   Divider,
   message,
   Alert,
+  Popconfirm,
+  Tooltip,
 } from "antd";
 import {
   PlayCircleOutlined,
@@ -19,8 +21,16 @@ import {
   ReloadOutlined,
   DownloadOutlined,
   CloudServerOutlined,
+  ToolOutlined,
+  ThunderboltOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
-import { useServerStore, API_BASE, PLUGIN_ID } from "../stores/serverStore";
+import {
+  useServerStore,
+  API_BASE,
+  PLUGIN_ID,
+  type EngineType,
+} from "../stores/serverStore";
 
 const { Text, Title } = Typography;
 
@@ -52,11 +62,13 @@ export default function SettingsPanel() {
     installProgress,
     models,
     selectedModel,
+    engine,
     nGpuLayers,
     contextSize,
     setServerInfo,
     setModels,
     setSelectedModel,
+    setEngine,
     setNGpuLayers,
     setContextSize,
   } = useServerStore();
@@ -66,6 +78,7 @@ export default function SettingsPanel() {
   const [downloadFile, setDownloadFile] = useState("");
   const [customRepo, setCustomRepo] = useState("");
   const [customFile, setCustomFile] = useState("");
+  const [rebuilding, setRebuilding] = useState(false);
 
   // Poll server status
   useEffect(() => {
@@ -85,6 +98,17 @@ export default function SettingsPanel() {
             isInstalled: data.is_installed,
             installProgress: data.install_progress,
           });
+          // Track rebuild completion
+          if (rebuilding && data.status !== "installing") {
+            setRebuilding(false);
+            if (data.status === "stopped") {
+              message.success("Engine rebuild complete!");
+            } else if (data.status === "error") {
+              message.error(
+                `Engine rebuild failed: ${data.error || "unknown error"}`,
+              );
+            }
+          }
         }
       } catch {
         // ignore
@@ -93,7 +117,7 @@ export default function SettingsPanel() {
     poll();
     const interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
-  }, [setServerInfo]);
+  }, [setServerInfo, rebuilding]);
 
   // Load models
   const loadModels = useCallback(async () => {
@@ -122,14 +146,16 @@ export default function SettingsPanel() {
         method: "POST",
       });
       message.info("Installing plugin environment...");
-    } catch (e) {
+    } catch {
       message.error("Install failed");
     }
   };
 
   const handleStart = async () => {
     try {
-      const body = selectedModel ? { model: selectedModel } : {};
+      const body: Record<string, unknown> = {};
+      if (selectedModel) body.model = selectedModel;
+      if (engine) body.engine = engine;
       const res = await fetch(`${API_BASE}/api/v1/plugins/${PLUGIN_ID}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -141,7 +167,7 @@ export default function SettingsPanel() {
         const data = await res.json();
         message.error(data.detail || "Start failed");
       }
-    } catch (e) {
+    } catch {
       message.error("Start failed");
     }
   };
@@ -152,8 +178,48 @@ export default function SettingsPanel() {
         method: "POST",
       });
       message.info("Server stopping...");
-    } catch (e) {
+    } catch {
       message.error("Stop failed");
+    }
+  };
+
+  // Rebuild engine
+  const handleRebuildEngine = async (cuda: boolean) => {
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/v1/plugins/${PLUGIN_ID}/rebuild-engine`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cuda }),
+        },
+      );
+      if (res.ok) {
+        setRebuilding(true);
+        message.info(
+          `Rebuilding engine (${cuda ? "CUDA" : "CPU"})... This may take several minutes.`,
+        );
+      } else {
+        const data = await res.json();
+        message.error(data.detail || "Rebuild failed");
+      }
+    } catch {
+      message.error("Rebuild request failed");
+    }
+  };
+
+  // Reinstall (reset env + re-install)
+  const handleReinstall = async () => {
+    try {
+      await fetch(`${API_BASE}/api/v1/plugins/${PLUGIN_ID}/env`, {
+        method: "DELETE",
+      });
+      await fetch(`${API_BASE}/api/v1/plugins/${PLUGIN_ID}/install`, {
+        method: "POST",
+      });
+      message.info("Reinstalling... This will recreate the environment.");
+    } catch {
+      message.error("Reinstall failed");
     }
   };
 
@@ -221,6 +287,8 @@ export default function SettingsPanel() {
     error: "red",
   };
 
+  const isBusy = status === "installing" || status === "starting" || rebuilding;
+
   return (
     <div style={{ padding: 16, overflow: "auto", height: "100%" }}>
       <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -276,7 +344,7 @@ export default function SettingsPanel() {
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 onClick={handleStart}
-                disabled={models.length === 0}
+                disabled={models.length === 0 || isBusy}
               >
                 Start Server
               </Button>
@@ -383,6 +451,38 @@ export default function SettingsPanel() {
         <Card size="small" title="Settings">
           <Space direction="vertical" size="small" style={{ width: "100%" }}>
             <div>
+              <Text
+                type="secondary"
+                style={{ display: "block", marginBottom: 4 }}
+              >
+                Engine
+              </Text>
+              <Select
+                value={engine}
+                onChange={(v) => setEngine(v as EngineType)}
+                style={{ width: "100%" }}
+                disabled={status === "running" || status === "starting"}
+                options={[
+                  {
+                    label: "🐍 Python (llama-cpp-python)",
+                    value: "python",
+                  },
+                  {
+                    label: "⚡ Node.js (node-llama-cpp)",
+                    value: "node",
+                  },
+                ]}
+              />
+              <Text
+                type="secondary"
+                style={{ fontSize: 11, display: "block", marginTop: 4 }}
+              >
+                {engine === "node"
+                  ? "Prebuilt binaries — supports newest models faster, auto GPU detection."
+                  : "Classic backend — stable, CUDA wheel support."}
+              </Text>
+            </div>
+            <div>
               <Text type="secondary">GPU Layers (-1 = all)</Text>
               <InputNumber
                 value={nGpuLayers}
@@ -405,6 +505,96 @@ export default function SettingsPanel() {
             </div>
           </Space>
         </Card>
+
+        {/* Engine Management */}
+        {isInstalled && (
+          <Card
+            size="small"
+            title={
+              <Space>
+                <ToolOutlined />
+                <span>Engine</span>
+              </Space>
+            }
+          >
+            <Text
+              type="secondary"
+              style={{ display: "block", marginBottom: 12, fontSize: 12 }}
+            >
+              Rebuild the inference engine from source to get the latest model
+              architecture support. This compiles llama.cpp from the newest
+              code.
+            </Text>
+
+            <Space direction="vertical" size="small" style={{ width: "100%" }}>
+              <Tooltip title="Build with CPU-only support. Works on all systems.">
+                <Popconfirm
+                  title="Rebuild Engine (CPU)"
+                  description="This will rebuild llama-cpp-python from source (CPU-only). It may take several minutes. Continue?"
+                  onConfirm={() => handleRebuildEngine(false)}
+                  okText="Rebuild"
+                  cancelText="Cancel"
+                  disabled={isBusy}
+                >
+                  <Button
+                    block
+                    size="small"
+                    icon={<ToolOutlined />}
+                    disabled={isBusy}
+                    loading={rebuilding && status === "installing"}
+                  >
+                    Rebuild Engine (CPU)
+                  </Button>
+                </Popconfirm>
+              </Tooltip>
+
+              <Tooltip title="Build with CUDA GPU acceleration. Requires CUDA Toolkit (nvcc).">
+                <Popconfirm
+                  title="Rebuild Engine (CUDA)"
+                  description="This will rebuild with CUDA support. Requires CUDA Toolkit (nvcc) installed. Continue?"
+                  onConfirm={() => handleRebuildEngine(true)}
+                  okText="Rebuild"
+                  cancelText="Cancel"
+                  disabled={isBusy}
+                >
+                  <Button
+                    block
+                    size="small"
+                    icon={<ThunderboltOutlined />}
+                    disabled={isBusy}
+                    loading={rebuilding && status === "installing"}
+                  >
+                    Rebuild Engine (CUDA)
+                  </Button>
+                </Popconfirm>
+              </Tooltip>
+
+              <Divider style={{ margin: "8px 0" }} />
+
+              <Tooltip title="Delete the virtual environment and reinstall from scratch. Models are kept.">
+                <Popconfirm
+                  title="Reinstall Environment"
+                  description="This will delete the venv and reinstall from scratch. Models will be kept. Continue?"
+                  onConfirm={handleReinstall}
+                  okText="Reinstall"
+                  cancelText="Cancel"
+                  icon={<WarningOutlined style={{ color: "#faad14" }} />}
+                  disabled={isBusy}
+                >
+                  <Button
+                    block
+                    size="small"
+                    danger
+                    icon={<ReloadOutlined />}
+                    disabled={isBusy}
+                  >
+                    Reinstall Environment
+                  </Button>
+                </Popconfirm>
+              </Tooltip>
+            </Space>
+          </Card>
+        )}
       </Space>
     </div>
   );

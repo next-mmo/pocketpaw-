@@ -2,7 +2,7 @@
   "id": "llama-cpp",
   "name": "Llama.cpp",
   "version": "1.0.0",
-  "description": "Local LLM inference server powered by llama-cpp-python with CUDA acceleration.",
+  "description": "Local LLM inference server powered by llama.cpp with CUDA acceleration.",
   "icon": "bot",
   "route": "llama-cpp",
   "entry": "index.html",
@@ -11,13 +11,14 @@
   "scopes": ["storage.read", "storage.write"],
   "sandbox": {
     "python": "3.11",
-    "venv": "env"
+    "venv": "env",
+    "cuda": "12.4"
   },
   "install": {
     "steps": [
-      {
-        "pip": "requirements.txt"
-      }
+      { "node": true },
+      { "run": "pnpm install --no-frozen-lockfile" },
+      { "pip": "requirements.txt" }
     ]
   },
   "start": {
@@ -25,5 +26,15 @@
     "daemon": true,
     "ready_pattern": "Uvicorn running on",
     "port": "auto"
+  },
+  "engines": {
+    "python": {
+      "label": "Python (llama-cpp-python)",
+      "command": "python -m llama_cpp.server --host 127.0.0.1 --port __PORT__"
+    },
+    "node": {
+      "label": "Node.js (node-llama-cpp)",
+      "command": "node node_server.mjs --host 127.0.0.1 --port __PORT__"
+    }
   }
 }

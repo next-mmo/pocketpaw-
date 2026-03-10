@@ -1,0 +1,9 @@
+{
+  "name": "llama-cpp-node-engine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "node-llama-cpp": "^3.12.0"
+  }
+}

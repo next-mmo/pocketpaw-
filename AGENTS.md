@@ -169,9 +169,23 @@ Or configure via the **Dashboard Settings** UI under LLM Configuration.
 
 > **Note:** Tool/function calling support depends on the model. Models with good tool-calling support (Qwen 2.5, Llama 3.x, Mistral, etc.) are recommended to take full advantage of PocketPaw's built-in tools.
 
+### Extension System
+
+`extensions/` contains the plugin framework that powers PocketPaw's extensible app ecosystem:
+
+- **Extension types**: SPA (frontend-only) and Plugin (full-stack with Python/Node.js sandbox, CUDA, daemon processes)
+- **Managed runtimes**: Python via `uv`, Node.js via auto-install to `~/.pocketpaw/node/`, PyTorch via CUDA-tagged wheels — end users install nothing manually
+- **Sandbox isolation**: Each plugin gets its own venv with managed PATH (`python` → venv, `node` → managed Node.js), env isolation, and shared caches
+- **Daemon lifecycle**: Plugins can run background servers with auto port allocation, `ready_pattern` detection, reverse proxy, and log streaming
+- **Multi-engine support**: Plugins can define multiple engine backends (e.g. Python + Node.js) via the `engines` manifest field — users select the engine in the UI, and the start command is swapped accordingly
+- **Install steps**: Declarative `install.steps` array: `{ "node": true }`, `{ "torch": true }`, `{ "pip": "requirements.txt" }`, `{ "run": "pnpm install" }` — all executed inside the sandbox
+- **Built-in plugins**: `llama-cpp` (local LLM inference with dual Python/Node.js engines), `wan2gp` (AI video generation), `freecut` (video editor)
+
+See `skills/extension-dev/SKILL.md` for comprehensive development documentation.
+
 ### Frontend
 
-The web dashboard (`frontend/`) is vanilla JS/CSS/HTML served via FastAPI+Jinja2. No build step. Communicates with the backend over WebSocket for real-time streaming.
+The web dashboard (`frontend/`) is vanilla JS/CSS/HTML served via FastAPI+Jinja2. No build step. Communicates with the backend over WebSocket for real-time streaming. Extension UIs are React + Vite + Ant Design apps served in iframes.
 
 ## Key Conventions
 

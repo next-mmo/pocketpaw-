@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API Docs — PocketPaw</title>
+
+    <!-- Swagger UI standalone bundle (local) -->
+    <link rel="stylesheet" href="./swagger-ui.css" />
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        width: 100%;
+        background: #1a1a2e;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #e0e0e0;
+        overflow: auto;
+      }
+
+      /* ── Dark theme overrides for Swagger UI ── */
+      .swagger-ui {
+        background: #1a1a2e;
+      }
+      .swagger-ui .topbar {
+        display: none;
+      } /* hide Swagger green bar */
+
+      /* Info header */
+      .swagger-ui .info {
+        margin: 20px 0 10px;
+      }
+      .swagger-ui .info .title {
+        color: #e0e0e0;
+      }
+      .swagger-ui .info .description,
+      .swagger-ui .info p {
+        color: #aaa;
+      }
+      .swagger-ui .info a {
+        color: #1677ff;
+      }
+
+      /* Section headings */
+      .swagger-ui .opblock-tag {
+        color: #e0e0e0 !important;
+        border-bottom-color: #303030 !important;
+      }
+      .swagger-ui .opblock-tag:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .swagger-ui .opblock-tag small {
+        color: #888;
+      }
+
+      /* Operation blocks */
+      .swagger-ui .opblock {
+        border-color: #303030;
+        background: #1f1f2f;
+      }
+      .swagger-ui .opblock .opblock-summary {
+        border-color: #303030;
+      }
+      .swagger-ui .opblock .opblock-summary-description {
+        color: #bbb;
+      }
+      .swagger-ui .opblock .opblock-summary-path {
+        color: #e0e0e0;
+      }
+      .swagger-ui .opblock .opblock-section-header {
+        background: #262640;
+        border-color: #303030;
+      }
+      .swagger-ui .opblock .opblock-section-header h4 {
+        color: #e0e0e0;
+      }
+      .swagger-ui .opblock-body pre.microlight {
+        background: #0d0d1a !important;
+        color: #e0e0e0;
+      }
+      .swagger-ui .opblock .tab-header .tab-item.active h4 span::after {
+        background: #1677ff;
+      }
+
+      /* GET / POST / PUT / DELETE color tweaks */
+      .swagger-ui .opblock.opblock-get {
+        background: rgba(73, 144, 226, 0.08);
+        border-color: rgba(73, 144, 226, 0.3);
+      }
+      .swagger-ui .opblock.opblock-get .opblock-summary {
+        border-color: rgba(73, 144, 226, 0.3);
+      }
+      .swagger-ui .opblock.opblock-post {
+        background: rgba(73, 204, 144, 0.08);
+        border-color: rgba(73, 204, 144, 0.3);
+      }
+      .swagger-ui .opblock.opblock-post .opblock-summary {
+        border-color: rgba(73, 204, 144, 0.3);
+      }
+      .swagger-ui .opblock.opblock-put {
+        background: rgba(252, 161, 48, 0.08);
+        border-color: rgba(252, 161, 48, 0.3);
+      }
+      .swagger-ui .opblock.opblock-put .opblock-summary {
+        border-color: rgba(252, 161, 48, 0.3);
+      }
+      .swagger-ui .opblock.opblock-delete {
+        background: rgba(249, 62, 62, 0.08);
+        border-color: rgba(249, 62, 62, 0.3);
+      }
+      .swagger-ui .opblock.opblock-delete .opblock-summary {
+        border-color: rgba(249, 62, 62, 0.3);
+      }
+      .swagger-ui .opblock.opblock-patch {
+        background: rgba(80, 227, 194, 0.08);
+        border-color: rgba(80, 227, 194, 0.3);
+      }
+      .swagger-ui .opblock.opblock-patch .opblock-summary {
+        border-color: rgba(80, 227, 194, 0.3);
+      }
+
+      /* Tables / models */
+      .swagger-ui table thead tr td,
+      .swagger-ui table thead tr th {
+        color: #ccc;
+        border-color: #303030;
+      }
+      .swagger-ui table tbody tr td {
+        color: #bbb;
+        border-color: #262640;
+      }
+      .swagger-ui .model-box {
+        background: #1f1f2f;
+      }
+      .swagger-ui .model {
+        color: #ccc;
+      }
+      .swagger-ui .model-title {
+        color: #e0e0e0;
+      }
+      .swagger-ui section.models {
+        border-color: #303030;
+      }
+      .swagger-ui section.models.is-open h4 {
+        border-color: #303030;
+        color: #e0e0e0;
+      }
+      .swagger-ui section.models .model-container {
+        background: #1f1f2f;
+        border-color: #303030;
+      }
+
+      /* Params / response */
+      .swagger-ui .parameters-col_description p {
+        color: #bbb;
+      }
+      .swagger-ui .parameter__name {
+        color: #e0e0e0;
+      }
+      .swagger-ui .parameter__type {
+        color: #888;
+      }
+      .swagger-ui .parameter__in {
+        color: #666;
+      }
+      .swagger-ui .response-col_status {
+        color: #e0e0e0;
+      }
+      .swagger-ui .response-col_description {
+        color: #bbb;
+      }
+      .swagger-ui .response-col_links {
+        color: #888;
+      }
+      .swagger-ui .responses-inner h4,
+      .swagger-ui .responses-inner h5 {
+        color: #e0e0e0;
+      }
+
+      /* Buttons */
+      .swagger-ui .btn {
+        color: #e0e0e0;
+        border-color: #444;
+      }
+      .swagger-ui .btn:hover {
+        background: #333;
+      }
+      .swagger-ui .btn.execute {
+        background: #1677ff;
+        border-color: #1677ff;
+        color: #fff;
+      }
+      .swagger-ui .btn.authorize {
+        color: #1677ff;
+        border-color: #1677ff;
+      }
+      .swagger-ui .btn.authorize svg {
+        fill: #1677ff;
+      }
+
+      /* Copy button / Try Out */
+      .swagger-ui .copy-to-clipboard {
+        background: #262640;
+      }
+      .swagger-ui .copy-to-clipboard button {
+        background: #262640;
+      }
+
+      /* Text inputs */
+      .swagger-ui input[type="text"],
+      .swagger-ui textarea,
+      .swagger-ui select {
+        background: #0d0d1a;
+        color: #e0e0e0;
+        border-color: #444;
+      }
+
+      /* Schema / JSON */
+      .swagger-ui .highlight-code > .microlight {
+        background: #0d0d1a !important;
+      }
+      .swagger-ui .renderedMarkdown p {
+        color: #bbb;
+      }
+
+      /* Filter */
+      .swagger-ui .filter .operation-filter-input {
+        background: #1f1f2f;
+        color: #e0e0e0;
+        border-color: #444;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+
+      /* Loading state */
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        z-index: 100;
+        background: #1a1a2e;
+        transition: opacity 0.4s ease;
+      }
+      #loading.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #loading .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #303030;
+        border-top-color: #1677ff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      #loading .label {
+        color: #888;
+        font-size: 13px;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">
+      <div class="spinner"></div>
+      <div class="label">Loading API Documentation…</div>
+    </div>
+
+    <div id="swagger-ui"></div>
+
+    <script src="./swagger-ui-bundle.js"></script>
+    <script>
+      // Detect parent PocketPaw origin (iframe-safe)
+      function getApiBase() {
+        try {
+          if (window.parent !== window) return window.parent.location.origin;
+        } catch (e) {
+          /* cross-origin */
+        }
+        return window.location.origin;
+      }
+
+      const apiBase = getApiBase();
+
+      window.onload = function () {
+        SwaggerUIBundle({
+          url: apiBase + "/api/v1/openapi.json",
+          dom_id: "#swagger-ui",
+          deepLinking: true,
+          filter: true,
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIBundle.SwaggerUIStandalonePreset,
+          ],
+          layout: "BaseLayout",
+          onComplete: function () {
+            document.getElementById("loading").classList.add("hidden");
+          },
+        });
+      };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "id": "api-docs",
+  "name": "API Docs",
+  "version": "1.0.0",
+  "description": "Interactive Swagger UI for the PocketPaw REST API — browse, test, and explore all endpoints.",
+  "icon": "book-open",
+  "route": "api-docs",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": true,
+  "scopes": [],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env"
+  },
+  "install": {
+    "steps": [{ "run": "python build.py" }]
+  }
+}

@@ -354,6 +354,7 @@ const CATALOG: CatalogModel[] = [
     likes: 4500,
     vramEstimate: "~18.5 GB",
   },
+  // Qwen 3.5: requires Node.js engine or a future llama-cpp-python release
   {
     id: "qwen35-9b",
     name: "Qwen 3.5 9B",
@@ -361,7 +362,7 @@ const CATALOG: CatalogModel[] = [
     repo: "unsloth/Qwen3.5-9B-GGUF",
     file: "Qwen3.5-9B-Q4_K_M.gguf",
     description:
-      "Latest Qwen 3.5 generation. Enhanced reasoning and instruction following.",
+      "Latest Qwen 3.5 generation. Enhanced reasoning and instruction following. Use Node.js engine for best compatibility.",
     params: "9B",
     sizeLabel: "5.4 GB",
     sizeMb: 5400,

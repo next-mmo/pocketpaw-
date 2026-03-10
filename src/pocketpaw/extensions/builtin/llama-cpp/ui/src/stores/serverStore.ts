@@ -7,6 +7,8 @@ export interface ModelFile {
   size_mb: number;
 }
 
+export type EngineType = "python" | "node";
+
 interface ServerState {
   // Server state
   status: "stopped" | "starting" | "running" | "installing" | "error";
@@ -22,6 +24,7 @@ interface ServerState {
   selectedModel: string;
 
   // Settings
+  engine: EngineType;
   nGpuLayers: number;
   contextSize: number;
 
@@ -30,6 +33,7 @@ interface ServerState {
   setServerInfo: (info: Partial<ServerState>) => void;
   setModels: (models: ModelFile[]) => void;
   setSelectedModel: (model: string) => void;
+  setEngine: (engine: EngineType) => void;
   setNGpuLayers: (n: number) => void;
   setContextSize: (n: number) => void;
 }
@@ -62,6 +66,7 @@ export const useServerStore = create<ServerState>()(
       installProgress: 0,
       models: [],
       selectedModel: "",
+      engine: "python" as EngineType,
       nGpuLayers: -1,
       contextSize: 2048,
 
@@ -69,6 +74,7 @@ export const useServerStore = create<ServerState>()(
       setServerInfo: (info) => set((s) => ({ ...s, ...info })),
       setModels: (models) => set({ models }),
       setSelectedModel: (model) => set({ selectedModel: model }),
+      setEngine: (engine) => set({ engine }),
       setNGpuLayers: (n) => set({ nGpuLayers: n }),
       setContextSize: (n) => set({ contextSize: n }),
     }),
@@ -76,6 +82,7 @@ export const useServerStore = create<ServerState>()(
       name: "llama-cpp-server",
       partialize: (state) => ({
         selectedModel: state.selectedModel,
+        engine: state.engine,
         nGpuLayers: state.nGpuLayers,
         contextSize: state.contextSize,
       }),

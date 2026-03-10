@@ -258,6 +258,21 @@ class PluginProcessManager:
         elif cmd.startswith("python3 "):
             cmd = f"{venv_python} {cmd[8:]}"
 
+        # Replace bare 'node' with the managed or system node path
+        if cmd.startswith("node "):
+            from pocketpaw.extensions.nodejs import get_node_env, _managed_node_path
+            import shutil as _shutil
+            managed = _managed_node_path()
+            if managed:
+                cmd = f"{str(managed)} {cmd[5:]}"
+                # Merge managed node dir into PATH
+                node_env = get_node_env()
+                env.update(node_env)
+            else:
+                system_node = _shutil.which("node")
+                if system_node:
+                    cmd = f"{system_node} {cmd[5:]}"
+
         logger.info("Starting plugin %s: %s (cwd=%s)", plugin_id, cmd, sandbox.root)
 
         # Resolve working directory — supports start.path for subdirectories
