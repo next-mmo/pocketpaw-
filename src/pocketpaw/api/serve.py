@@ -154,6 +154,7 @@ def run_api_server(
         import pathlib
 
         src_dir = str(pathlib.Path(__file__).resolve().parent.parent)
+        extensions_dir = str(pathlib.Path(src_dir) / "extensions" / "builtin")
         uvicorn.run(
             "pocketpaw.api.serve:create_api_app",
             factory=True,
@@ -162,6 +163,7 @@ def run_api_server(
             reload=True,
             reload_dirs=[src_dir],
             reload_includes=["*.py"],
+            reload_excludes=[extensions_dir],
             log_level="debug",
         )
     else:

@@ -1806,7 +1806,9 @@ def run_dashboard(
         if dev:
             import pathlib
 
+            # Exclude extension virtual envs (e.g. wan2gp/env/) from reload
             src_dir = str(pathlib.Path(__file__).resolve().parent)
+            extensions_dir = str(pathlib.Path(src_dir) / "extensions" / "builtin")
             uvicorn.run(
                 "pocketpaw.dashboard:app",
                 host=host,
@@ -1814,6 +1816,7 @@ def run_dashboard(
                 reload=True,
                 reload_dirs=[src_dir],
                 reload_includes=["*.py", "*.html", "*.js", "*.css"],
+                reload_excludes=[extensions_dir],
                 log_level="debug",
             )
             break  # dev mode handles its own reload, no restart loop

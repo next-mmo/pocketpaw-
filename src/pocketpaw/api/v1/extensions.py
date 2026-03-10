@@ -926,7 +926,9 @@ async def start_plugin(plugin_id: str, request: Request):
     from copy import deepcopy
     start_cfg = deepcopy(record.manifest.start)
 
-    needs_model = "__MODEL__" in start_cfg.command
+    needs_model = "__MODEL__" in start_cfg.command or (
+        "llama_cpp.server" in start_cfg.command and "--model" not in start_cfg.command
+    )
 
     if needs_model:
         body = {}
@@ -958,7 +960,8 @@ async def start_plugin(plugin_id: str, request: Request):
         model_path = str(record.root_dir / "models" / model_file)
 
         # Inject the model path into the command
-        start_cfg.command = start_cfg.command.replace("__MODEL__", model_path)
+        if "__MODEL__" in start_cfg.command:
+            start_cfg.command = start_cfg.command.replace("__MODEL__", model_path)
         # If command still has no --model flag, append it
         if "--model" not in start_cfg.command:
             start_cfg.command += f' --model "{model_path}"'
