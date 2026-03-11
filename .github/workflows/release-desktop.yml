@@ -77,8 +77,8 @@ jobs:
         working-directory: app-wrapper
 
       # ─── Build Electron + Package ─────────────────────────────
-      - name: Build Electron app
-        run: pnpm build:electron
+      - name: Build Electron app (secure)
+        run: pnpm build:secure
         working-directory: app-wrapper
 
       - name: Package Windows installer

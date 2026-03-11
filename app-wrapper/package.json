@@ -9,16 +9,23 @@
     "build:backend": "python scripts/build-backend.py",
     "build:backend:onefile": "python scripts/build-backend.py --onefile",
     "build:electron": "electron-vite build",
+    "compile:bytecode": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/compile-bytecode.js",
     "build": "npm run build:backend && npm run build:electron",
+    "build:secure": "npm run build:electron && npm run compile:bytecode || echo 'Bytecode compilation skipped (optional)'",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "release:win": "npm run build && electron-builder --win --publish never",
-    "release:mac": "npm run build && electron-builder --mac --publish never",
-    "release:linux": "npm run build && electron-builder --linux --publish never",
+    "release:win": "npm run build:secure && electron-builder --win --publish never",
+    "release:mac": "npm run build:secure && electron-builder --mac --publish never",
+    "release:linux": "npm run build:secure && electron-builder --linux --publish never",
     "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "bytenode": "^1.5.7"
   },
   "devDependencies": {
     "@electron-toolkit/utils": "^4.0.0",
+    "bytenode": "^1.5.7",
+    "cross-env": "^10.1.0",
     "electron": "^41.0.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",

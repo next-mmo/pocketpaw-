@@ -3,6 +3,7 @@ import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { startBackend, stopBackend, getDashboardUrl, shouldManageBackend, isBackendRunning } from './backend'
 import { createTray, destroyTray } from './tray'
+import { runSecurityChecks } from './security'
 
 /**
  * PocketPaw Desktop — Main Process
@@ -257,6 +258,12 @@ let backendRunning = false
 // ─── Main Startup ──────────────────────────────────────────────
 
 async function startup() {
+  // ─── Anti-tamper checks (production only) ─────────────────
+  const secCheck = runSecurityChecks({
+    onWarning: (msg) => console.warn('[Security]', msg)
+  })
+  if (!secCheck.passed) return // app.quit() already called
+
   createWindow()
   loadSplash()
 
