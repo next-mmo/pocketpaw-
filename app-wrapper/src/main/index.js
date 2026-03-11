@@ -153,11 +153,13 @@ function setupCSP() {
 function setSplashStatus(text, isError = false) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   const color = isError ? '#ff6b6b' : '#6b6b80'
-  const escaped = text.replace(/'/g, "\\'")
+  // Use JSON.stringify for safe escaping — prevents injection via status text
+  const safeText = JSON.stringify(text)
+  const safeColor = JSON.stringify(color)
   mainWindow.webContents.executeJavaScript(`
     (() => {
       const el = document.getElementById('status');
-      if (el) { el.textContent = '${escaped}'; el.style.color = '${color}'; }
+      if (el) { el.textContent = ${safeText}; el.style.color = ${safeColor}; }
     })()
   `).catch(() => {})
 }
