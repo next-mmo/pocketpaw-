@@ -18,29 +18,40 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "devDependencies": {
-    "electron": "^35.0.0",
-    "electron-vite": "^3.1.0",
-    "electron-builder": "^25.1.8",
-    "@electron-toolkit/utils": "^4.0.0"
+    "@electron-toolkit/utils": "^4.0.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "terser": "^5.37.0"
   },
   "build": {
     "appId": "com.pocketpaw.desktop",
     "productName": "PocketPaw",
+    "copyright": "Copyright © 2026 PocketPaw",
+    "asar": true,
     "directories": {
       "output": "dist"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "!src/**/*",
+      "!**/*.ts",
+      "!**/*.map",
+      "!node_modules/.cache/**/*"
     ],
     "extraResources": [
       {
         "from": "resources",
         "to": "resources",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "resources/icon.png"
     },
     "nsis": {
@@ -51,12 +62,18 @@
       "artifactName": "PocketPaw-Setup-${version}.${ext}"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "resources/icon.png",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "resources/icon.png",
       "category": "Utility"
     }

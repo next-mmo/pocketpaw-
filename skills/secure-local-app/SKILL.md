@@ -16,6 +16,21 @@ description: >
 A skill for designing and implementing license protection and anti-piracy measures
 for commercial desktop applications.
 
+## PocketPaw Desktop (`app-wrapper/`)
+
+PocketPaw already has a working Electron desktop wrapper at `app-wrapper/`.
+Reference it for real-world patterns:
+
+| Component | File | What It Demonstrates |
+|-----------|------|---------------------|
+| Vite config | `electron.vite.config.mjs` | Terser minification, sourcemap stripping |
+| Main process | `src/main/index.js` | CSP headers, DevTools blocking, navigation restriction |
+| Preload | `src/preload/index.js` | contextBridge API — typed, whitelisted IPC channels |
+| Backend spawner | `src/main/backend.js` | Nuitka binary → venv Python → system command fallback |
+| System tray | `src/main/tray.js` | Tray menu with server control, auto-start toggle |
+| Build scripts | `scripts/build-backend.py` | Nuitka compilation of Python backend |
+|              | `scripts/build-backend.js` | Wheel + uv binary bundling |
+
 ## Quick Decision: Which Protection Pattern?
 
 Ask yourself: **"Where does the VALUE live?"**
@@ -73,7 +88,7 @@ Match protection investment to revenue:
 ### Code Hardening
 
 | Tool | Language | Cost | Protection Level |
-|------|----------|------|-----------------|
+|------|----------|------|-----------------:|
 | **Nuitka** | Python | Free / Commercial | High — compiles to C binary |
 | **Cython** | Python | Free | Medium — C extensions |
 | **PyArmor** | Python | Free / Paid | Medium — bytecode obfuscation |

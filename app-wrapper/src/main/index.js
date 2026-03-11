@@ -1,7 +1,7 @@
-import { app, BrowserWindow, shell, globalShortcut } from 'electron'
+import { app, BrowserWindow, shell, globalShortcut, session, ipcMain } from 'electron'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { startBackend, stopBackend, getDashboardUrl, shouldManageBackend } from './backend'
+import { startBackend, stopBackend, getDashboardUrl, shouldManageBackend, isBackendRunning } from './backend'
 import { createTray, destroyTray } from './tray'
 
 /**
@@ -14,6 +14,13 @@ import { createTray, destroyTray } from './tray'
  *   - Global hotkey Alt+Space to toggle show/hide (Raycast-style)
  *   - Minimize to tray on close (keeps running in background)
  *   - Auto-start on login (configurable via tray menu)
+ *
+ * Security hardening (production):
+ *   - CSP headers enforced
+ *   - DevTools disabled + keyboard shortcuts blocked
+ *   - Navigation restricted to app + local server origins
+ *   - New window creation blocked (external links → system browser)
+ *   - Sandbox + contextIsolation enabled
  */
 
 const RETRY_INTERVAL_MS = 1500
@@ -42,7 +49,11 @@ function createWindow() {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      // Disable DevTools in production builds
+      devTools: is.dev
     },
     show: false
   })
@@ -59,6 +70,35 @@ function createWindow() {
     return { action: 'deny' }
   })
 
+  // ─── Security: Restrict navigation ────────────────────────────
+  // Only allow navigation to our own origins (local dashboard + splash)
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const allowed = [
+      'http://127.0.0.1',
+      'http://localhost',
+      'file://'
+    ]
+    // In dev, also allow the Vite dev server
+    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      allowed.push(process.env['ELECTRON_RENDERER_URL'])
+    }
+    if (!allowed.some((prefix) => url.startsWith(prefix))) {
+      event.preventDefault()
+    }
+  })
+
+  // ─── Security: Block DevTools shortcuts in production ─────────
+  if (!is.dev) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (
+        input.key === 'F12' ||
+        ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i')
+      ) {
+        event.preventDefault()
+      }
+    })
+  }
+
   // ─── Minimize to Tray on Close ────────────────────────────────
   // Instead of quitting, hide to tray. User can quit via tray menu.
   mainWindow.on('close', (e) => {
@@ -70,6 +110,41 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+}
+
+// ─── Security: CSP Headers ──────────────────────────────────────
+// Applied globally to all web requests in the session.
+
+function setupCSP() {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    // Build allowed connect sources
+    const connectSrc = [
+      "'self'",
+      'http://127.0.0.1:*',
+      'http://localhost:*',
+      'ws://127.0.0.1:*',
+      'ws://localhost:*'
+    ]
+
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline'",         // inline needed for splash + dashboard
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      `connect-src ${connectSrc.join(' ')}`,
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data: https://fonts.gstatic.com",
+      "media-src 'self' blob:",
+      "frame-src 'self' http://127.0.0.1:*",       // extensions in iframes
+      "worker-src 'self' blob:",
+    ].join('; ')
+
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp]
+      }
+    })
   })
 }
 
@@ -148,6 +223,31 @@ function registerGlobalShortcut() {
   }
 }
 
+// ─── IPC Handlers (preload bridge) ─────────────────────────────
+
+function setupIpcHandlers() {
+  ipcMain.handle('app:version', () => app.getVersion())
+
+  ipcMain.on('window:show', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+
+  ipcMain.on('window:hide', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide()
+    }
+  })
+
+  ipcMain.handle('server:info', () => ({
+    port: getDashboardUrl().split(':').pop(),
+    running: backendRunning || isBackendRunning(),
+    url: getDashboardUrl()
+  }))
+}
+
 // ─── Server State (for tray menu) ──────────────────────────────
 
 let backendRunning = false
@@ -157,6 +257,12 @@ let backendRunning = false
 async function startup() {
   createWindow()
   loadSplash()
+
+  // Apply security CSP
+  setupCSP()
+
+  // Register IPC handlers for preload bridge
+  setupIpcHandlers()
 
   // Register global hotkey
   registerGlobalShortcut()
