@@ -1,0 +1,64 @@
+{
+  "name": "pocketpaw-desktop",
+  "version": "0.4.9",
+  "description": "PocketPaw Desktop — Electron wrapper for the self-hosted AI agent",
+  "author": "PocketPaw Team <hello@pocketpaw.ai>",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build:backend": "python scripts/build-backend.py",
+    "build:backend:onefile": "python scripts/build-backend.py --onefile",
+    "build:electron": "electron-vite build",
+    "build": "npm run build:backend && npm run build:electron",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "release:win": "npm run build && electron-builder --win --publish never",
+    "release:mac": "npm run build && electron-builder --mac --publish never",
+    "release:linux": "npm run build && electron-builder --linux --publish never",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-vite": "^3.1.0",
+    "electron-builder": "^25.1.8",
+    "@electron-toolkit/utils": "^4.0.0"
+  },
+  "build": {
+    "appId": "com.pocketpaw.desktop",
+    "productName": "PocketPaw",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "resources/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "PocketPaw-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "resources/icon.png",
+      "category": "Utility"
+    }
+  }
+}

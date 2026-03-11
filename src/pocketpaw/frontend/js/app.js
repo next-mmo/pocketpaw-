@@ -809,7 +809,7 @@ function app() {
             if (backend === 'claude_agent_sdk') provider = this.settings.claudeSdkProvider || 'anthropic';
             else if (backend === 'openai_agents') provider = this.settings.openaiAgentsProvider || 'openai';
             else if (backend === 'google_adk') provider = 'google';
-            else if (backend === 'codex_cli') provider = 'openai';
+            else if (backend === 'codex_cli') return false;  // manages own credentials
             else if (backend === 'opencode') return false;
             else if (backend === 'copilot_sdk') return false;
 
@@ -821,7 +821,6 @@ function app() {
                 'claude_agent_sdk:anthropic': 'anthropic_api_key',
                 'openai_agents:openai': 'openai_api_key',
                 'google_adk:google': 'google_api_key',
-                'codex_cli:openai': 'openai_api_key',
             };
             return keyMap[backend + ':' + provider] === keyField;
         },
@@ -835,7 +834,7 @@ function app() {
             if (backend === 'claude_agent_sdk') provider = this.settings.claudeSdkProvider || 'anthropic';
             else if (backend === 'openai_agents') provider = this.settings.openaiAgentsProvider || 'openai';
             else if (backend === 'google_adk') provider = 'google';
-            else if (backend === 'codex_cli') provider = 'openai';
+            else if (backend === 'codex_cli') return false;  // manages own credentials
             else return false; // opencode, copilot_sdk don't need keys
 
             if (provider === 'ollama' || provider === 'openai_compatible') return false;
@@ -844,7 +843,6 @@ function app() {
                 'claude_agent_sdk:anthropic': 'hasAnthropicKey',
                 'openai_agents:openai': 'hasOpenaiKey',
                 'google_adk:google': 'hasGoogleApiKey',
-                'codex_cli:openai': 'hasOpenaiKey',
             };
             const flag = needsMap[backend + ':' + provider];
             return flag ? !this[flag] : false;
@@ -936,7 +934,6 @@ function app() {
                 'claude_agent_sdk': 'anthropic',
                 'openai_agents': 'openai',
                 'google_adk': 'google',
-                'codex_cli': 'openai',
             };
             const provider = backendToProvider[backend];
             if (!provider || !keyValue) return;

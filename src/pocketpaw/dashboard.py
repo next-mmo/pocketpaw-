@@ -149,10 +149,11 @@ async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
     response = await call_next(request)
 
-    # Allow the file-content endpoint to be embedded in same-origin iframes
-    # (used by the in-app PDF/file viewer modal).
+    # Allow the file-content and extension asset endpoints to be embedded
+    # in same-origin iframes (extensions run inside iframes in the dashboard).
     is_file_content = request.url.path.startswith("/api/v1/files/content")
-    if is_file_content:
+    is_extension_asset = request.url.path.startswith("/extensions/")
+    if is_file_content or is_extension_asset:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
     else:
         response.headers["X-Frame-Options"] = "DENY"
@@ -160,18 +161,38 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-        "https://cdn.jsdelivr.net https://unpkg.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob:; "
-        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
-        "frame-src 'self'; "
-        "frame-ancestors 'none'"
-    )
+
+    if is_extension_asset:
+        # Extensions need a permissive CSP so their SPAs can load CDN
+        # resources, use blob: URLs for media, and be framed by the dashboard.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
+            "https://fonts.googleapis.com https://esm.sh; "
+            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob:; "
+            "connect-src 'self' ws: wss: blob: https://cdn.jsdelivr.net "
+            "https://unpkg.com https://esm.sh; "
+            "frame-src 'self'; "
+            "frame-ancestors 'self'"
+        )
+    else:
+        # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+            "https://cdn.jsdelivr.net https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
+            "https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
+            "frame-src 'self'; "
+            "frame-ancestors 'none'"
+        )
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -891,6 +912,33 @@ async def get_version_info():
     current = get_version("pocketpaw")
     info = check_for_updates(current, get_config_dir())
     return info or {"current": current, "latest": current, "update_available": False}
+
+
+# ==================== Extension Asset Serving ====================
+
+
+@app.get("/extensions/{extension_id}/{asset_path:path}")
+async def serve_extension_asset(extension_id: str, asset_path: str = ""):
+    """Serve static assets for extensions loaded in dashboard iframes.
+
+    The extension registry maps ``/extensions/{id}/`` to the extension's
+    ``entry`` file (usually index.html) and resolves sub-paths to files
+    within the extension root directory.
+    """
+    import mimetypes
+
+    from fastapi.responses import FileResponse
+
+    from pocketpaw.extensions import get_extension_registry
+
+    registry = get_extension_registry()
+    try:
+        file_path = registry.resolve_asset_path(extension_id, asset_path or None)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Extension asset not found")
+
+    mime, _ = mimetypes.guess_type(str(file_path))
+    return FileResponse(str(file_path), media_type=mime or "application/octet-stream")
 
 
 @app.get("/")

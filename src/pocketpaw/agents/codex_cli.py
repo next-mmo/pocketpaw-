@@ -14,6 +14,7 @@ as a command-line argument.  This avoids the Windows command-line length limit
 """
 
 import asyncio
+import traceback as _tb
 import json
 import logging
 import re
@@ -55,7 +56,7 @@ class CodexCLIBackend:
                 "web_search": "browser",
                 "mcp": "mcp",
             },
-            required_keys=["openai_api_key"],
+            required_keys=[],
             supported_providers=["openai"],
             install_hint={
                 "external_cmd": "npm install -g @openai/codex",
@@ -73,6 +74,7 @@ class CodexCLIBackend:
             logger.info("Codex CLI found: %s", self._codex_path)
         else:
             logger.warning("Codex CLI not found — install with: npm install -g @openai/codex")
+
 
     @staticmethod
     def _inject_history(instruction: str, history: list[dict]) -> str:
@@ -140,6 +142,7 @@ class CodexCLIBackend:
                 model,
                 "-",
             ]
+
 
             if sys.platform == "win32":
                 # On Windows, npm global installs are .cmd wrappers that
@@ -322,8 +325,23 @@ class CodexCLIBackend:
             yield AgentEvent(type="done", content="")
 
         except Exception as e:
-            logger.error("Codex CLI error: %s", e)
-            yield AgentEvent(type="error", content=f"Codex CLI error: {e}")
+            err_str = str(e) or f"{type(e).__name__} (no message)"
+            tb_short = _tb.format_exception_only(type(e), e)[-1].strip()
+            logger.error("Codex CLI error: %s\n%s", err_str, _tb.format_exc())
+            # Try to capture stderr for extra context
+            stderr_hint = ""
+            if self._process and self._process.stderr:
+                try:
+                    stderr_bytes = await asyncio.wait_for(
+                        self._process.stderr.read(), timeout=2.0
+                    )
+                    stderr_hint = stderr_bytes.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+            detail = err_str
+            if stderr_hint:
+                detail += f" | stderr: {stderr_hint[:200]}"
+            yield AgentEvent(type="error", content=f"Codex CLI error: {detail}")
 
     async def stop(self) -> None:
         self._stop_flag = True
