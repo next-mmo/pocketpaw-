@@ -16,9 +16,10 @@
  * (for users who installed via the pip/uv installer).
  */
 
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import {
-  existsSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, mkdirSync
+  existsSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, mkdirSync,
+  readdirSync
 } from 'fs'
 import { join } from 'path'
 import { homedir, platform } from 'os'
@@ -62,6 +63,64 @@ function getBinaryPath() {
   if (existsSync(onefile)) return onefile
 
   return null
+}
+
+/**
+ * Check if a bundled wheel + uv exists in resources/backend/.
+ * Returns { wheel, uvBin } or null.
+ */
+function getBundledWheel() {
+  const backendDir = join(getResourcesDir(), 'backend')
+  if (!existsSync(backendDir)) return null
+
+  try {
+    const files = readdirSync(backendDir)
+    const wheel = files.find(f => f.endsWith('.whl'))
+    if (!wheel) return null
+
+    // Find bundled uv binary
+    const uvDir = join(backendDir, 'uv')
+    const uvBin = platform() === 'win32'
+      ? join(uvDir, 'uv.exe')
+      : join(uvDir, 'uv')
+
+    if (!existsSync(uvBin)) return null
+
+    return {
+      wheel: join(backendDir, wheel),
+      uvBin
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Bootstrap: create venv from bundled wheel + uv.
+ * This runs once on first launch for users who installed the .exe.
+ */
+function bootstrapFromWheel(bundle, onStatus) {
+  const python = venvPython()
+
+  // Create venv if it doesn't exist
+  if (!existsSync(python)) {
+    onStatus('Setting up Python environment…')
+    execSync(`"${bundle.uvBin}" venv "${VENV_DIR}" --python 3.12`, {
+      stdio: 'pipe',
+      timeout: 120000,
+      windowsHide: true
+    })
+  }
+
+  // Install the wheel
+  onStatus('Installing PocketPaw…')
+  execSync(`"${bundle.uvBin}" pip install "${bundle.wheel}" --python "${python}"`, {
+    stdio: 'pipe',
+    timeout: 180000,
+    windowsHide: true
+  })
+
+  return python
 }
 
 /**
@@ -143,8 +202,9 @@ function buildEnv() {
  *
  * Strategy (in order):
  *   1. Compiled Nuitka binary (resources/backend/pocketpaw-server[.exe])
- *   2. Venv Python (installed via pip/uv installer at ~/.pocketpaw/venv)
- *   3. System `pocketpaw` command (global pip install)
+ *   2. Bundled wheel + uv bootstrap (auto-creates venv from .whl in resources/)
+ *   3. Venv Python (installed via pip/uv installer at ~/.pocketpaw/venv)
+ *   4. System `pocketpaw` command (global pip install)
  */
 export async function startBackend(onStatus = () => {}) {
   currentPort = readPortFromConfig()
@@ -161,7 +221,7 @@ export async function startBackend(onStatus = () => {}) {
   // Find the right way to launch
   let cmd, args
   const binaryPath = getBinaryPath()
-  const python = venvPython()
+  let python = venvPython()
 
   if (binaryPath) {
     // ── Strategy 1: Compiled binary ──
@@ -169,15 +229,29 @@ export async function startBackend(onStatus = () => {}) {
     args = ['--port', String(currentPort)]
     onStatus('Starting PocketPaw…')
   } else if (existsSync(python)) {
-    // ── Strategy 2: Venv Python (installer users) ──
+    // ── Strategy 3: Existing venv Python ──
     cmd = python
     args = ['-m', 'pocketpaw', '--port', String(currentPort)]
     onStatus('Starting via Python environment…')
   } else {
-    // ── Strategy 3: System command ──
-    cmd = 'pocketpaw'
-    args = ['--port', String(currentPort)]
-    onStatus('Starting via system pocketpaw…')
+    // ── Strategy 2: Bootstrap from bundled wheel ──
+    const bundle = getBundledWheel()
+    if (bundle) {
+      try {
+        python = bootstrapFromWheel(bundle, onStatus)
+        cmd = python
+        args = ['-m', 'pocketpaw', '--port', String(currentPort)]
+        onStatus('Starting PocketPaw…')
+      } catch (err) {
+        onStatus(`Bootstrap failed: ${err.message}`)
+        return { ok: false, port: currentPort, message: err.message }
+      }
+    } else {
+      // ── Strategy 4: System command ──
+      cmd = 'pocketpaw'
+      args = ['--port', String(currentPort)]
+      onStatus('Starting via system pocketpaw…')
+    }
   }
 
   onStatus(`Starting PocketPaw on port ${currentPort}…`)

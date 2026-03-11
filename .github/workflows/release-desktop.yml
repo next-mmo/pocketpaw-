@@ -4,12 +4,6 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      skip_backend:
-        description: 'Skip Nuitka backend build (faster, no Python binary bundled)'
-        required: false
-        default: 'true'
-        type: boolean
 
 permissions:
   contents: write
@@ -22,21 +16,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ─── Python + UV (for backend build) ──────────────────────
+      # ─── Python + UV ──────────────────────────────────────────
       - name: Set up Python
-        if: ${{ github.event.inputs.skip_backend != 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install uv
-        if: ${{ github.event.inputs.skip_backend != 'true' }}
         uses: astral-sh/setup-uv@v4
 
-      - name: Install Python dependencies
-        if: ${{ github.event.inputs.skip_backend != 'true' }}
-        run: uv sync --group build
-        working-directory: .
+      - name: Build pocketpaw wheel
+        run: uv build --wheel
+        shell: bash
+
+      - name: Bundle backend (wheel + uv binary)
+        shell: bash
+        run: |
+          set -e
+          BACKEND_DIR="app-wrapper/resources/backend"
+          mkdir -p "$BACKEND_DIR"
+
+          # Copy the built wheel
+          cp dist/*.whl "$BACKEND_DIR/"
+
+          # Download uv for Windows
+          UV_VERSION="0.6.6"
+          UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-pc-windows-msvc.zip"
+          curl -fsSL "$UV_URL" -o /tmp/uv.zip
+          mkdir -p "$BACKEND_DIR/uv"
+          unzip -o /tmp/uv.zip -d "$BACKEND_DIR/uv"
+
+          # Write bundle metadata
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          WHEEL=$(ls dist/*.whl | head -1 | xargs basename)
+          cat > "$BACKEND_DIR/bundle.json" <<EOF
+          {
+            "version": "$VERSION",
+            "wheel": "$WHEEL",
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platform": "win32-x64"
+          }
+          EOF
+
+          echo "✅ Backend bundle ready:"
+          ls -la "$BACKEND_DIR/"
 
       # ─── Node.js + pnpm ───────────────────────────────────────
       - name: Set up Node.js
@@ -53,12 +76,6 @@ jobs:
         run: pnpm install
         working-directory: app-wrapper
 
-      # ─── Build Backend (Nuitka) ───────────────────────────────
-      - name: Build Python backend with Nuitka
-        if: ${{ github.event.inputs.skip_backend != 'true' }}
-        run: uv run python app-wrapper/scripts/build-backend.py
-        working-directory: .
-
       # ─── Build Electron + Package ─────────────────────────────
       - name: Build Electron app
         run: pnpm build:electron
@@ -70,7 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ─── Upload Artifact ──────────────────────────────────────
+      # ─── Upload ───────────────────────────────────────────────
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -78,7 +95,6 @@ jobs:
           path: app-wrapper/dist/PocketPaw-Setup-*.exe
           retention-days: 30
 
-      # ─── Create GitHub Release (on tag push) ──────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
