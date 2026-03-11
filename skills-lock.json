@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "create-worktree-skill": {
+      "source": "C:\\Users\\dila\\Documents\\GitHub\\pocketpaw-\\skills",
+      "sourceType": "local",
+      "computedHash": "d52ee6d79c824b7944df11f9264bdfa568776b11a51d2cf67f5b85990ac01cd0"
+    },
+    "extension-dev": {
+      "source": "C:\\Users\\dila\\Documents\\GitHub\\pocketpaw-\\skills",
+      "sourceType": "local",
+      "computedHash": "72dc49baef41ae3334fbb1604df8865e718a028a5b52fa0c2fa27a3a6aebe17a"
+    }
+  }
+}
