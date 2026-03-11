@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "PocketPaw",
-    "description": "Self-hosted AI agent controlled via Telegram, Discord, Slack, WhatsApp, or a web dashboard",
+    "description": "Self-hosted AI agent with a native desktop app. Controlled via Telegram, Discord, Slack, WhatsApp, or a web dashboard.",
     "url": "https://pocketpaw.xyz",
     "version": "1.0.0"
   },
@@ -114,7 +114,7 @@
         "label": "Documentation",
         "href": "/introduction",
         "icon": "lucide:book-open",
-        "groups": ["Introduction", "Getting Started", "Guides", "Core Concepts", "Channels", "Agent Backends", "Tools", "Integrations", "Security", "Memory", "Advanced", "Deployment"]
+        "groups": ["Introduction", "Getting Started", "Guides", "Core Concepts", "Desktop Client", "Channels", "Agent Backends", "Tools", "Integrations", "Security", "Memory", "Advanced", "Deployment"]
       },
       {
         "label": "API Reference",
@@ -207,6 +207,31 @@
         ]
       },
       {
+        "label": "Desktop Client",
+        "items": [
+          {
+            "label": "Overview",
+            "href": "/desktop-client",
+            "icon": "lucide:monitor"
+          },
+          {
+            "label": "Installation",
+            "href": "/desktop-client/installation",
+            "icon": "lucide:download"
+          },
+          {
+            "label": "Development",
+            "href": "/desktop-client/development",
+            "icon": "lucide:code"
+          },
+          {
+            "label": "API Server (serve)",
+            "href": "/desktop-client/api-server",
+            "icon": "lucide:server"
+          }
+        ]
+      },
+      {
         "label": "Core Concepts",
         "items": [
           {
@@ -250,14 +275,14 @@
             "icon": "lucide:shield"
           },
           {
+            "label": "Command Centers",
+            "href": "/concepts/command-centers",
+            "icon": "lucide:layout-dashboard"
+          },
+          {
             "label": "PocketPaw vs OpenClaw",
             "href": "/concepts/vs-openclaw",
             "icon": "lucide:scale"
-          },
-          {
-            "label": "Extension System",
-            "href": "/concepts/extensions",
-            "icon": "lucide:puzzle"
           }
         ]
       },
@@ -523,6 +548,16 @@
             "label": "Self-Audit Daemon",
             "href": "/security/self-audit-daemon",
             "icon": "lucide:activity"
+          },
+          {
+            "label": "PII Detection",
+            "href": "/security/pii-masking",
+            "icon": "lucide:user-x"
+          },
+          {
+            "label": "Streaming Redaction",
+            "href": "/security/streaming-redaction",
+            "icon": "lucide:eye-off"
           }
         ]
       },
@@ -590,6 +625,11 @@
             "icon": "lucide:brain"
           },
           {
+            "label": "PawKit Reference",
+            "href": "/advanced/pawkit",
+            "icon": "lucide:package"
+          },
+          {
             "label": "Mission Control",
             "href": "/advanced/mission-control",
             "icon": "lucide:radar"
@@ -600,14 +640,14 @@
             "icon": "lucide:bell"
           },
           {
+            "label": "AGENTS.md",
+            "href": "/advanced/agents-md",
+            "icon": "lucide:file-text"
+          },
+          {
             "label": "WebMCP",
             "href": "/advanced/webmcp",
             "icon": "lucide:globe"
-          },
-          {
-            "label": "Building Extensions",
-            "href": "/advanced/extensions-dev",
-            "icon": "lucide:puzzle"
           },
           {
             "label": "Roadmap",
@@ -627,336 +667,111 @@
           {
             "label": "Channels",
             "items": [
-              {
-                "label": "Get Channel Status",
-                "href": "/api/get-channels-status",
-                "method": "GET"
-              },
-              {
-                "label": "Save Channel Config",
-                "href": "/api/post-channels-save",
-                "method": "POST"
-              },
-              {
-                "label": "Toggle Channel",
-                "href": "/api/post-channels-toggle",
-                "method": "POST"
-              }
+              { "label": "Get Channel Status", "href": "/api/get-channels-status", "method": "GET" },
+              { "label": "Save Channel Config", "href": "/api/post-channels-save", "method": "POST" },
+              { "label": "Toggle Channel", "href": "/api/post-channels-toggle", "method": "POST" }
             ]
           },
           {
             "label": "Sessions",
             "items": [
-              {
-                "label": "List Sessions",
-                "href": "/api/get-sessions",
-                "method": "GET"
-              },
-              {
-                "label": "Search Sessions",
-                "href": "/api/get-sessions-search",
-                "method": "GET"
-              },
-              {
-                "label": "Delete Session",
-                "href": "/api/delete-session",
-                "method": "DELETE"
-              },
-              {
-                "label": "Rename Session",
-                "href": "/api/post-session-title",
-                "method": "POST"
-              },
-              {
-                "label": "Get Session History",
-                "href": "/api/get-session-history",
-                "method": "GET"
-              }
+              { "label": "List Sessions", "href": "/api/get-sessions", "method": "GET" },
+              { "label": "Search Sessions", "href": "/api/get-sessions-search", "method": "GET" },
+              { "label": "Delete Session", "href": "/api/delete-session", "method": "DELETE" },
+              { "label": "Rename Session", "href": "/api/post-session-title", "method": "POST" },
+              { "label": "Get Session History", "href": "/api/get-session-history", "method": "GET" }
             ]
           },
           {
             "label": "MCP Servers",
             "items": [
-              {
-                "label": "Get MCP Status",
-                "href": "/api/get-mcp-status",
-                "method": "GET"
-              },
-              {
-                "label": "Add MCP Server",
-                "href": "/api/post-mcp-add",
-                "method": "POST"
-              },
-              {
-                "label": "Remove MCP Server",
-                "href": "/api/post-mcp-remove",
-                "method": "POST"
-              },
-              {
-                "label": "Toggle MCP Server",
-                "href": "/api/post-mcp-toggle",
-                "method": "POST"
-              },
-              {
-                "label": "Test MCP Server",
-                "href": "/api/post-mcp-test",
-                "method": "POST"
-              },
-              {
-                "label": "List MCP Presets",
-                "href": "/api/get-mcp-presets",
-                "method": "GET"
-              },
-              {
-                "label": "Install MCP Preset",
-                "href": "/api/post-mcp-preset-install",
-                "method": "POST"
-              },
-              {
-                "label": "MCP OAuth Callback",
-                "href": "/api/get-mcp-oauth-callback",
-                "method": "GET"
-              }
+              { "label": "Get MCP Status", "href": "/api/get-mcp-status", "method": "GET" },
+              { "label": "Add MCP Server", "href": "/api/post-mcp-add", "method": "POST" },
+              { "label": "Remove MCP Server", "href": "/api/post-mcp-remove", "method": "POST" },
+              { "label": "Toggle MCP Server", "href": "/api/post-mcp-toggle", "method": "POST" },
+              { "label": "Test MCP Server", "href": "/api/post-mcp-test", "method": "POST" },
+              { "label": "List MCP Presets", "href": "/api/get-mcp-presets", "method": "GET" },
+              { "label": "Install MCP Preset", "href": "/api/post-mcp-preset-install", "method": "POST" },
+              { "label": "MCP OAuth Callback", "href": "/api/get-mcp-oauth-callback", "method": "GET" }
             ]
           },
           {
             "label": "Memory",
             "items": [
-              {
-                "label": "List Memories",
-                "href": "/api/get-memory-long-term",
-                "method": "GET"
-              },
-              {
-                "label": "Delete Memory",
-                "href": "/api/delete-memory-entry",
-                "method": "DELETE"
-              },
-              {
-                "label": "Get Memory Settings",
-                "href": "/api/get-memory-settings",
-                "method": "GET"
-              },
-              {
-                "label": "Update Memory Settings",
-                "href": "/api/post-memory-settings",
-                "method": "POST"
-              },
-              {
-                "label": "Get Memory Stats",
-                "href": "/api/get-memory-stats",
-                "method": "GET"
-              }
+              { "label": "List Memories", "href": "/api/get-memory-long-term", "method": "GET" },
+              { "label": "Delete Memory", "href": "/api/delete-memory-entry", "method": "DELETE" },
+              { "label": "Get Memory Settings", "href": "/api/get-memory-settings", "method": "GET" },
+              { "label": "Update Memory Settings", "href": "/api/post-memory-settings", "method": "POST" },
+              { "label": "Get Memory Stats", "href": "/api/get-memory-stats", "method": "GET" }
             ]
           },
           {
             "label": "Security & Audit",
             "items": [
-              {
-                "label": "Get Audit Logs",
-                "href": "/api/get-audit-logs",
-                "method": "GET"
-              },
-              {
-                "label": "Run Security Audit",
-                "href": "/api/post-security-audit",
-                "method": "POST"
-              },
-              {
-                "label": "List Audit Reports",
-                "href": "/api/get-self-audit-reports",
-                "method": "GET"
-              },
-              {
-                "label": "Get Audit Report",
-                "href": "/api/get-self-audit-report",
-                "method": "GET"
-              },
-              {
-                "label": "Trigger Self-Audit",
-                "href": "/api/post-self-audit-run",
-                "method": "POST"
-              }
+              { "label": "Get Audit Logs", "href": "/api/get-audit-logs", "method": "GET" },
+              { "label": "Run Security Audit", "href": "/api/post-security-audit", "method": "POST" },
+              { "label": "List Audit Reports", "href": "/api/get-self-audit-reports", "method": "GET" },
+              { "label": "Get Audit Report", "href": "/api/get-self-audit-report", "method": "GET" },
+              { "label": "Trigger Self-Audit", "href": "/api/post-self-audit-run", "method": "POST" }
             ]
           },
           {
             "label": "Authentication",
             "items": [
-              {
-                "label": "Create Session Token",
-                "href": "/api/post-auth-session",
-                "method": "POST"
-              },
-              {
-                "label": "Generate QR Code",
-                "href": "/api/get-qr-code",
-                "method": "GET"
-              },
-              {
-                "label": "Regenerate Token",
-                "href": "/api/post-token-regenerate",
-                "method": "POST"
-              },
-              {
-                "label": "Start OAuth Flow",
-                "href": "/api/get-oauth-authorize",
-                "method": "GET"
-              }
+              { "label": "Create Session Token", "href": "/api/post-auth-session", "method": "POST" },
+              { "label": "Generate QR Code", "href": "/api/get-qr-code", "method": "GET" },
+              { "label": "Regenerate Token", "href": "/api/post-token-regenerate", "method": "POST" },
+              { "label": "Start OAuth Flow", "href": "/api/get-oauth-authorize", "method": "GET" }
             ]
           },
           {
             "label": "Webhooks",
             "items": [
-              {
-                "label": "List Webhooks",
-                "href": "/api/get-webhooks",
-                "method": "GET"
-              },
-              {
-                "label": "Create Webhook",
-                "href": "/api/post-webhooks-add",
-                "method": "POST"
-              },
-              {
-                "label": "Remove Webhook",
-                "href": "/api/post-webhooks-remove",
-                "method": "POST"
-              },
-              {
-                "label": "Receive Payload",
-                "href": "/api/post-webhook-inbound",
-                "method": "POST"
-              }
+              { "label": "List Webhooks", "href": "/api/get-webhooks", "method": "GET" },
+              { "label": "Create Webhook", "href": "/api/post-webhooks-add", "method": "POST" },
+              { "label": "Remove Webhook", "href": "/api/post-webhooks-remove", "method": "POST" },
+              { "label": "Receive Payload", "href": "/api/post-webhook-inbound", "method": "POST" }
             ]
           },
           {
             "label": "Deep Work",
             "items": [
-              {
-                "label": "Start Project",
-                "href": "/api/post-deep-work-start",
-                "method": "POST"
-              },
-              {
-                "label": "Get Plan",
-                "href": "/api/get-deep-work-plan",
-                "method": "GET"
-              },
-              {
-                "label": "Approve Plan",
-                "href": "/api/post-deep-work-approve",
-                "method": "POST"
-              },
-              {
-                "label": "Pause Project",
-                "href": "/api/post-deep-work-pause",
-                "method": "POST"
-              },
-              {
-                "label": "Resume Project",
-                "href": "/api/post-deep-work-resume",
-                "method": "POST"
-              },
-              {
-                "label": "Skip Task",
-                "href": "/api/post-deep-work-skip-task",
-                "method": "POST"
-              }
+              { "label": "Start Project", "href": "/api/post-deep-work-start", "method": "POST" },
+              { "label": "Get Plan", "href": "/api/get-deep-work-plan", "method": "GET" },
+              { "label": "Approve Plan", "href": "/api/post-deep-work-approve", "method": "POST" },
+              { "label": "Pause Project", "href": "/api/post-deep-work-pause", "method": "POST" },
+              { "label": "Resume Project", "href": "/api/post-deep-work-resume", "method": "POST" },
+              { "label": "Cancel Project", "href": "/api/post-deep-work-cancel", "method": "POST" },
+              { "label": "Skip Task", "href": "/api/post-deep-work-skip-task", "method": "POST" },
+              { "label": "Retry Task", "href": "/api/post-deep-work-retry-task", "method": "POST" }
             ]
           },
           {
             "label": "Health",
             "items": [
-              {
-                "label": "Get Health Status",
-                "href": "/api/get-health-status",
-                "method": "GET"
-              },
-              {
-                "label": "Get Health Errors",
-                "href": "/api/get-health-errors",
-                "method": "GET"
-              },
-              {
-                "label": "Run Health Check",
-                "href": "/api/run-health-check",
-                "method": "POST"
-              },
-              {
-                "label": "Clear Health Errors",
-                "href": "/api/clear-health-errors",
-                "method": "DELETE"
-              }
+              { "label": "Get Health Status", "href": "/api/get-health-status", "method": "GET" },
+              { "label": "Get Health Errors", "href": "/api/get-health-errors", "method": "GET" },
+              { "label": "Run Health Check", "href": "/api/run-health-check", "method": "POST" },
+              { "label": "Clear Health Errors", "href": "/api/clear-health-errors", "method": "DELETE" }
             ]
           },
           {
             "label": "Mission Control",
             "items": [
-              {
-                "label": "List Agents",
-                "href": "/api/get-mc-agents",
-                "method": "GET"
-              },
-              {
-                "label": "Create Agent",
-                "href": "/api/post-mc-agent",
-                "method": "POST"
-              },
-              {
-                "label": "List Tasks",
-                "href": "/api/get-mc-tasks",
-                "method": "GET"
-              },
-              {
-                "label": "Create Task",
-                "href": "/api/post-mc-task",
-                "method": "POST"
-              },
-              {
-                "label": "Run Task",
-                "href": "/api/post-mc-run-task",
-                "method": "POST"
-              },
-              {
-                "label": "Get Standup",
-                "href": "/api/get-mc-standup",
-                "method": "GET"
-              }
-            ]
-          },
-          {
-            "label": "Extensions",
-            "items": [
-              {
-                "label": "Upload Extension",
-                "href": "/api/post-extensions-upload",
-                "method": "POST"
-              },
-              {
-                "label": "Delete Extension",
-                "href": "/api/delete-extension",
-                "method": "DELETE"
-              }
+              { "label": "List Agents", "href": "/api/get-mc-agents", "method": "GET" },
+              { "label": "Create Agent", "href": "/api/post-mc-agent", "method": "POST" },
+              { "label": "List Tasks", "href": "/api/get-mc-tasks", "method": "GET" },
+              { "label": "Create Task", "href": "/api/post-mc-task", "method": "POST" },
+              { "label": "Run Task", "href": "/api/post-mc-run-task", "method": "POST" },
+              { "label": "Get Standup", "href": "/api/get-mc-standup", "method": "GET" }
             ]
           },
           {
             "label": "Tunnel",
             "items": [
-              {
-                "label": "Get Tunnel Status",
-                "href": "/api/get-tunnel-status",
-                "method": "GET"
-              },
-              {
-                "label": "Start Tunnel",
-                "href": "/api/post-tunnel-start",
-                "method": "POST"
-              },
-              {
-                "label": "Stop Tunnel",
-                "href": "/api/post-tunnel-stop",
-                "method": "POST"
-              }
+              { "label": "Get Tunnel Status", "href": "/api/get-tunnel-status", "method": "GET" },
+              { "label": "Start Tunnel", "href": "/api/post-tunnel-start", "method": "POST" },
+              { "label": "Stop Tunnel", "href": "/api/post-tunnel-stop", "method": "POST" }
             ]
           },
           {
@@ -1074,15 +889,8 @@
       {
         "title": "Documentation",
         "items": [
-<<<<<<< HEAD
-          {
-            "label": "Getting Started",
-            "href": "/getting-started/installation"
-          },
-=======
           { "label": "Getting Started", "href": "/getting-started/installation" },
           { "label": "Guides & Tutorials", "href": "/guides" },
->>>>>>> upstream/main
           { "label": "Architecture", "href": "/concepts/architecture" },
           { "label": "API Reference", "href": "/api" }
         ]
@@ -1099,21 +907,9 @@
       {
         "title": "Community",
         "items": [
-          {
-            "label": "GitHub",
-            "href": "https://github.com/pocketpaw/pocketpaw",
-            "external": true
-          },
-          {
-            "label": "Discord",
-            "href": "https://discord.gg/asRrtm95Zc",
-            "external": true
-          },
-          {
-            "label": "Issues",
-            "href": "https://github.com/pocketpaw/pocketpaw/issues",
-            "external": true
-          }
+          { "label": "GitHub", "href": "https://github.com/pocketpaw/pocketpaw", "external": true },
+          { "label": "Discord", "href": "https://discord.gg/asRrtm95Zc", "external": true },
+          { "label": "Issues", "href": "https://github.com/pocketpaw/pocketpaw/issues", "external": true }
         ]
       }
     ]

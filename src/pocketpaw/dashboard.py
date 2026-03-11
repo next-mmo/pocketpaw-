@@ -36,7 +36,7 @@ try:
     import uvicorn
     from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, Response
+    from fastapi.responses import Response
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
 except ImportError as _exc:
@@ -134,7 +134,8 @@ _BUILTIN_ORIGINS = [
 ]
 try:
     _custom_origins = Settings.load().api_cors_allowed_origins
-except Exception:
+except Exception as e:
+    logger.debug("Failed to load custom CORS origins: %s", e)
     _custom_origins = []
 _EXTRA_ORIGINS = list(set(_BUILTIN_ORIGINS + _custom_origins))
 
@@ -146,44 +147,34 @@ _EXTRA_ORIGINS = list(set(_BUILTIN_ORIGINS + _custom_origins))
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
     """Add security headers to all responses."""
-    import os
-
     response = await call_next(request)
-    is_extension_asset = request.url.path.startswith("/extensions/")
-    # Plugin proxy paths serve upstream UIs (e.g. Gradio) inside PocketPaw's
-    # dashboard iframe, so they also need permissive framing headers.
-    is_plugin_proxy = "/plugins/" in request.url.path and "/proxy/" in request.url.path
-    allow_framing = is_extension_asset or is_plugin_proxy
-    response.headers["X-Frame-Options"] = "SAMEORIGIN" if allow_framing else "DENY"
+
+    # Allow the file-content endpoint to be embedded in same-origin iframes
+    # (used by the in-app PDF/file viewer modal).
+    is_file_content = request.url.path.startswith("/api/v1/files/content")
+    if is_file_content:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # CSP: allow self + CDN + inline styles/scripts (required by Alpine.js/UnoCSS)
-    # For plugin proxies, use a permissive CSP that won't break Gradio et al.
-    if is_plugin_proxy:
-        # Don't set CSP at all for proxied content — the upstream app has its
-        # own security model and PocketPaw's CSP would break Gradio's inline
-        # scripts, eval(), and dynamically-loaded modules.
-        pass
-    else:
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-            "https://cdn.jsdelivr.net https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-            "img-src 'self' data: blob:; "
-            "connect-src 'self' blob: ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
-            + ("frame-ancestors 'self'" if is_extension_asset else "frame-ancestors 'none'")
-        )
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+        "https://cdn.jsdelivr.net https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; "
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
+        "frame-src 'self'; "
+        "frame-ancestors 'none'"
+    )
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # Dev mode: disable browser caching for HTML pages and static assets
-    if os.environ.get("POCKETPAW_DEV") == "1":
-        path = request.url.path
-        if path == "/" or path.startswith("/static/"):
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     return response
 
 
@@ -213,7 +204,7 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_EXTRA_ORIGINS,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=r"^https?://([a-z]+\.)?localhost(:\d+)?$|^https?://127\.0\.0\.1(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -631,80 +622,6 @@ async def reload_skills():
     }
 
 
-# ─── LLM Endpoint Verification ──────────────────────────────────
-@app.post("/api/llm/verify")
-async def verify_llm_endpoint(request: Request):
-    """Verify connectivity to an OpenAI-compatible LLM endpoint.
-
-    Pings the /models endpoint and returns available models + latency.
-    """
-    import time
-
-    import httpx
-
-    data = await request.json()
-    base_url = (data.get("base_url") or "").strip().rstrip("/")
-
-    if not base_url:
-        return {"ok": False, "error": "Base URL is required."}
-
-    # Normalize: ensure we hit /models (OpenAI standard discovery endpoint)
-    models_url = base_url.rstrip("/v1").rstrip("/") + "/v1/models"
-    if base_url.endswith("/v1"):
-        models_url = base_url + "/models"
-
-    api_key = data.get("api_key") or "none"
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    start = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(models_url, headers=headers)
-        latency_ms = round((time.monotonic() - start) * 1000)
-
-        if resp.status_code == 200:
-            try:
-                body = resp.json()
-                models = []
-                if isinstance(body, dict) and "data" in body:
-                    models = [m.get("id", "") for m in body["data"] if isinstance(m, dict)]
-                return {
-                    "ok": True,
-                    "latency_ms": latency_ms,
-                    "models": models[:20],  # Cap at 20
-                    "models_count": len(models),
-                }
-            except Exception:
-                return {"ok": True, "latency_ms": latency_ms, "models": []}
-        else:
-            # Some servers don't implement /models but still work for chat
-            # Try a lightweight OPTIONS or HEAD on the base URL
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client2:
-                    head = await client2.get(base_url, headers=headers)
-                if head.status_code < 500:
-                    return {
-                        "ok": True,
-                        "latency_ms": latency_ms,
-                        "models": [],
-                        "warning": f"/models returned {resp.status_code}, but endpoint is reachable.",
-                    }
-            except Exception:
-                pass
-            return {
-                "ok": False,
-                "error": f"Server returned HTTP {resp.status_code}.",
-                "latency_ms": latency_ms,
-            }
-    except httpx.ConnectError:
-        return {"ok": False, "error": f"Cannot connect to {base_url}. Is the server running?"}
-    except httpx.TimeoutException:
-        return {"ok": False, "error": f"Connection timed out after 10s."}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
 # ─── Backend Discovery ───────────────────────────────────────────
 @app.get("/api/backends")
 async def list_available_backends():
@@ -737,7 +654,8 @@ async def list_available_backends():
                 attr = hint.get("verify_attr")
                 if attr and not hasattr(mod, attr):
                     return False
-            except Exception:
+            except Exception as e:
+                logger.debug("Backend validation failed: %s", e)
                 return False
         # Check CLI binary if this backend needs one
         binary = _CLI_BINARY.get(info.name)
@@ -950,26 +868,15 @@ async def oauth_callback(
 
 
 def _static_version() -> str:
-    """Generate a cache-busting version string from frontend file mtimes."""
+    """Generate a cache-busting version string from JS file mtimes."""
     import hashlib
 
-    mtimes = []
-    # Hash JS files
     js_dir = FRONTEND_DIR / "js"
-    if js_dir.exists():
-        for f in sorted(js_dir.rglob("*.js")):
-            mtimes.append(str(int(f.stat().st_mtime)))
-    # Hash HTML templates
-    if TEMPLATES_DIR.exists():
-        for f in sorted(TEMPLATES_DIR.rglob("*.html")):
-            mtimes.append(str(int(f.stat().st_mtime)))
-    # Hash CSS files
-    css_dir = FRONTEND_DIR / "css"
-    if css_dir.exists():
-        for f in sorted(css_dir.rglob("*.css")):
-            mtimes.append(str(int(f.stat().st_mtime)))
-    if not mtimes:
+    if not js_dir.exists():
         return "0"
+    mtimes = []
+    for f in sorted(js_dir.rglob("*.js")):
+        mtimes.append(str(int(f.stat().st_mtime)))
     return hashlib.md5("|".join(mtimes).encode()).hexdigest()[:8]
 
 
@@ -997,21 +904,6 @@ async def index(request: Request):
     )
 
 
-@app.get("/extensions/{extension_id}/")
-@app.get("/extensions/{extension_id}/{asset_path:path}")
-async def serve_extension_asset(extension_id: str, asset_path: str = ""):
-    """Serve built extension assets from bundled or user-installed extensions."""
-    from pocketpaw.extensions import get_extension_registry
-
-    registry = get_extension_registry(force_reload=True)
-    try:
-        file_path = registry.resolve_asset_path(extension_id, asset_path)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    return FileResponse(file_path)
-
-
 # NOTE: Session token exchange, cookie login/logout, QR code, and token
 # regeneration routes are all provided by auth_router (from dashboard_auth.py),
 # which is mounted above via app.include_router(auth_router).
@@ -1035,7 +927,7 @@ async def start_tunnel():
         url = await manager.start()
         return {"url": url, "active": True}
     except Exception as e:
-        # Error handling via JSON to frontend
+        logger.warning("Failed to start tunnel: %s", e)
         return {"error": str(e), "active": False}
 
 
@@ -1228,7 +1120,8 @@ async def save_identity(request: Request):
 
     try:
         data = await request.json()
-    except Exception:
+    except Exception as e:
+        logger.debug("Invalid JSON payload received: %s", e)
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     identity_dir = get_config_path().parent / "identity"
@@ -1471,9 +1364,10 @@ async def get_audit_log(limit: int = 100):
                 break
             try:
                 logs.append(json.loads(line))
-            except Exception:
-                pass
-    except Exception:
+            except Exception as e:
+                logger.debug("Failed to parse log line: %s", e)
+    except Exception as e:
+        logger.warning("Failed to load logs: %s", e)
         return []
 
     return logs
@@ -1569,8 +1463,8 @@ async def get_self_audit_reports():
                     "issues": data.get("issues", 0),
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ignoring error while generating reports: %s", e)
     return reports
 
 
@@ -1619,7 +1513,8 @@ async def get_health_errors(limit: int = 20, search: str = ""):
 
         engine = get_health_engine()
         return engine.get_recent_errors(limit=limit, search=search)
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to retrieve recent errors: %s", e)
         return []
 
 
@@ -1633,6 +1528,7 @@ async def clear_health_errors():
         engine.error_store.clear()
         return {"cleared": True}
     except Exception as e:
+        logger.error("Failed to clear errors: %s", e)
         return {"cleared": False, "error": str(e)}
 
 
@@ -1649,8 +1545,8 @@ async def restart_server(request: Request):
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Request body parsing failed: %s", e)
 
     if not body.get("confirm"):
         return JSONResponse(
@@ -1763,10 +1659,6 @@ def run_dashboard(
     """
     global _uvicorn_server, _restart_requested
 
-    if dev:
-        import os
-        os.environ["POCKETPAW_DEV"] = "1"
-
     _MAX_RESTARTS = 5
     _restart_count = 0
     first_run = True
@@ -1806,9 +1698,7 @@ def run_dashboard(
         if dev:
             import pathlib
 
-            # Exclude extension virtual envs (e.g. wan2gp/env/) from reload
             src_dir = str(pathlib.Path(__file__).resolve().parent)
-            extensions_dir = str(pathlib.Path(src_dir) / "extensions" / "builtin")
             uvicorn.run(
                 "pocketpaw.dashboard:app",
                 host=host,
@@ -1816,13 +1706,23 @@ def run_dashboard(
                 reload=True,
                 reload_dirs=[src_dir],
                 reload_includes=["*.py", "*.html", "*.js", "*.css"],
-                reload_excludes=[extensions_dir],
                 log_level="debug",
+                ws_ping_interval=None,
+                ws_ping_timeout=None,
             )
             break  # dev mode handles its own reload, no restart loop
         else:
             _restart_requested = False
-            config = uvicorn.Config(app, host=host, port=port)
+            config = uvicorn.Config(
+                app,
+                host=host,
+                port=port,
+                # Disable WebSocket ping/pong timeout — agent tool use can
+                # run for minutes without sending WS frames, and the default
+                # 20s timeout would close the connection mid-stream.
+                ws_ping_interval=None,
+                ws_ping_timeout=None,
+            )
             _uvicorn_server = uvicorn.Server(config)
             _uvicorn_server.run()
 

@@ -1,6 +1,8 @@
 """
 Builder for assembling the full agent context.
 Created: 2026-02-02
+Updated: 2026-03-10 - AGENTS.md injection: read project-specific constraints from target repos
+Updated: 2026-03-09 - Sanitize file_context paths before injecting into system prompt
 Updated: 2026-02-17 - Inject health state into system prompt when degraded/unhealthy
 Updated: 2026-02-07 - Semantic context injection for mem0 backend
 Updated: 2026-02-10 - Channel-aware format hints
@@ -9,12 +11,15 @@ Updated: 2026-02-10 - Channel-aware format hints
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from pocketpaw.bootstrap.default_provider import DefaultBootstrapProvider
 from pocketpaw.bootstrap.protocol import BootstrapProviderProtocol
 from pocketpaw.bus.events import Channel
 from pocketpaw.bus.format import CHANNEL_FORMAT_HINTS
 from pocketpaw.memory.manager import MemoryManager, get_memory_manager
+
+logger = logging.getLogger(__name__)
 
 
 class AgentContextBuilder:
@@ -40,6 +45,8 @@ class AgentContextBuilder:
         channel: Channel | None = None,
         sender_id: str | None = None,
         session_key: str | None = None,
+        file_context: dict | None = None,
+        agents_md_dir: str | None = None,
     ) -> str:
         """Build the complete system prompt.
 
@@ -49,6 +56,8 @@ class AgentContextBuilder:
             channel: Target channel for format-aware hints.
             sender_id: Sender identifier for memory scoping and identity injection.
             session_key: Current session key for session management tools.
+            file_context: Optional file/directory context from the desktop client.
+            agents_md_dir: Directory to search for AGENTS.md (walks up to repo root).
         """
         # 1. Load static identity + memory context concurrently (independent I/O)
         if include_memory:
@@ -110,14 +119,44 @@ class AgentContextBuilder:
                 f"switch_session, clear_session, rename_session, delete_session)."
             )
 
-        # 6. Inject health state (only when degraded/unhealthy — saves context window)
+        # 6. Inject file context from desktop client
+        if file_context:
+            import re
+
+            def _sanitize_path(p: str) -> str:
+                """Strip non-path characters to prevent prompt injection."""
+                return re.sub(r"[^\w\s\-./\\:~]", "", p).strip()
+
+            fc_parts = []
+            if file_context.get("current_dir"):
+                fc_parts.append(f"Working directory: {_sanitize_path(file_context['current_dir'])}")
+            if file_context.get("open_file"):
+                fc_parts.append(f"Open file: {_sanitize_path(file_context['open_file'])}")
+            if file_context.get("selected_files"):
+                safe_files = [_sanitize_path(f) for f in file_context["selected_files"]]
+                fc_parts.append(f"Selected files: {', '.join(safe_files)}")
+            if fc_parts:
+                parts.append("\n# File Context\n" + "\n".join(fc_parts))
+
+        # 7. Inject health state (only when degraded/unhealthy — saves context window)
         try:
             from pocketpaw.health import get_health_engine
 
             health_block = get_health_engine().get_health_prompt_section()
             if health_block:
                 parts.append(health_block)
-        except Exception:
-            pass  # Health engine failure never breaks prompt building
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Health engine failure (non-fatal, skipping health block): %s", exc)
+
+        # 8. Inject AGENTS.md constraints from the target repo
+        if agents_md_dir:
+            try:
+                from pocketpaw.agents_md import AgentsMdLoader
+
+                agents_md = AgentsMdLoader().find_and_load(agents_md_dir)
+                if agents_md:
+                    parts.append(agents_md.constraints_block)
+            except Exception:
+                pass  # AGENTS.md failure never breaks prompt building
 
         return "\n\n".join(parts)

@@ -10,7 +10,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -62,6 +62,11 @@ idocs/
 *.pyo
 
 temp
-skills-lock.json
-.agent/
-.agents/
+
+# Client (Tauri + SvelteKit)
+node_modules/
+.svelte-kit/
+client/build/
+client/src-tauri/target/
+client/src-tauri/gen/
+client/bun.lock

@@ -15,7 +15,7 @@ import shutil
 from collections.abc import AsyncIterator
 from typing import Any
 
-from pocketpaw.agents.backend import BackendInfo, Capability
+from pocketpaw.agents.backend import _DEFAULT_IDENTITY, BackendInfo, Capability
 from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 
@@ -172,8 +172,8 @@ class CopilotSDKBackend:
 
             # Build the prompt
             prompt_parts = []
-            if system_prompt:
-                prompt_parts.append(f"[System Instructions]\n{system_prompt}\n")
+            effective_system = system_prompt or _DEFAULT_IDENTITY
+            prompt_parts.append(f"[System Instructions]\n{effective_system}\n")
             if history:
                 prompt_parts.append(self._inject_history("", history).strip())
             prompt_parts.append(message)
@@ -182,7 +182,7 @@ class CopilotSDKBackend:
             try:
                 from pocketpaw.agents.tool_bridge import get_tool_instructions_compact
 
-                tool_section = get_tool_instructions_compact(self.settings)
+                tool_section = get_tool_instructions_compact(self.settings, backend="copilot_sdk")
                 if tool_section:
                     prompt_parts.insert(-1, tool_section)
             except ImportError:
@@ -202,8 +202,7 @@ class CopilotSDKBackend:
                     "model": model,
                     "streaming": True,
                 }
-                if system_prompt:
-                    session_opts["system_message"] = system_prompt
+                session_opts["system_message"] = system_prompt or _DEFAULT_IDENTITY
                 if provider_config:
                     session_opts["provider"] = provider_config
 
@@ -265,6 +264,23 @@ class CopilotSDKBackend:
 
                 elif event_type == "session.idle":
                     queue.put_nowait(None)  # sentinel for done
+
+                elif event_type == "assistant.usage":
+                    input_t = getattr(data, "input_tokens", 0) or 0
+                    output_t = getattr(data, "output_tokens", 0) or 0
+                    if input_t or output_t:
+                        queue.put_nowait(
+                            AgentEvent(
+                                type="token_usage",
+                                content="",
+                                metadata={
+                                    "input_tokens": input_t,
+                                    "output_tokens": output_t,
+                                    "model": model,
+                                    "backend": "copilot_sdk",
+                                },
+                            )
+                        )
 
                 elif event_type == "error":
                     error_msg = getattr(data, "message", "Unknown Copilot SDK error")

@@ -1,198 +1,106 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+> This file declares PocketPaw's capabilities, supported tools, and safety boundaries
+> for other AI agents and tools that interact with this repository.
+> Format: [AGENTS.md specification](https://github.com/anthropics/agents-md)
 
-## Project Overview
+## Agent Identity
 
-PocketPaw is a self-hosted AI agent that runs locally and is controlled via Telegram, Discord, Slack, WhatsApp, or a web dashboard. The Python package is named `pocketpaw` (the internal/legacy name), while the public-facing name is `pocketpaw`. Python 3.11+ required.
+**Name:** PocketPaw  
+**Type:** Self-hosted AI assistant agent  
+**Description:** PocketPaw is a locally-run AI agent controlled via Telegram, Discord, Slack,
+WhatsApp, or a web dashboard. It operates on the user's machine with configurable tool access
+and safety guardrails.
 
-## Commands
+## Supported Backends
 
-```bash
-# Install dev dependencies
-uv sync --dev
+PocketPaw can delegate to any of the following AI backends:
 
-# Run the app (web dashboard is the default — auto-starts all configured adapters)
-uv run pocketpaw
+- `claude_agent_sdk` — Anthropic Claude via the official Agent SDK (default)
+- `openai_agents` — OpenAI GPT models or Ollama (local)
+- `google_adk` — Google Gemini via the Agent Development Kit
+- `codex_cli` — OpenAI Codex CLI subprocess
+- `opencode` — External OpenCode server via REST API
+- `copilot_sdk` — GitHub Copilot SDK
 
-# Run Telegram-only mode (legacy pairing flow)
-uv run pocketpaw --telegram
+## Capabilities
 
-# Run headless Discord bot
-uv run pocketpaw --discord
+### File System
 
-# Run headless Slack bot (Socket Mode, no public URL needed)
-uv run pocketpaw --slack
+- ✅ Read files within the configured `file_jail_path` (default: `$HOME`)
+- ✅ Write and edit files within `file_jail_path`
+- ✅ List directories and traverse directory trees
+- ❌ Access files outside `file_jail_path`
 
-# Run headless WhatsApp webhook server
-uv run pocketpaw --whatsapp
+### Shell Execution
 
-# Run multiple headless channels simultaneously
-uv run pocketpaw --discord --slack
+- ✅ Execute shell commands (trust level: `critical` — requires explicit user permission)
+- ❌ Commands matching dangerous patterns in `security/rails.py` are always blocked
+  (e.g., `rm -rf /`, fork bombs, privilege escalation)
+- ❌ Shell commands require `trust_level = "critical"` policy approval
 
-# Run in development mode (auto-reload on file changes)
-uv run pocketpaw --dev
+### Web & Network
 
-# Run all tests (excluding E2E tests)
-uv run pytest --ignore=tests/e2e
+- ✅ Web search (via configured search provider)
+- ✅ URL content extraction
+- ✅ HTTP requests via the browser tool (Playwright-based, accessibility-tree snapshots)
+- ❌ No direct socket access or raw network operations
 
-# Run a single test file
-uv run pytest tests/test_bus.py
+### Memory
 
-# Run a specific test
-uv run pytest tests/test_bus.py::test_publish_subscribe -v
+- ✅ Session memory (per-conversation history)
+- ✅ Long-term memory (`remember`, `recall`, `forget` tools)
+- ✅ Memory stored locally at `~/.pocketpaw/memory/`
 
-# Run E2E tests (requires Playwright browsers - see below)
-uv run pytest tests/e2e/ -v
+### Integrations (optional — require explicit configuration)
 
-# Install Playwright browsers (required for E2E tests, one-time setup)
-# Linux/Mac:
-uv run playwright install
-# Windows (if above fails with trampoline error):
-.venv\Scripts\python -m playwright install
+- Gmail (read, send, label)
+- Google Calendar (list, create)
+- Google Drive (list, download, upload)
+- Google Docs (read, create, search)
+- Spotify (search, playback control)
+- Discord, Slack, Telegram, WhatsApp channels
 
-# Lint
-uv run ruff check .
+### Security & Guardrails
 
-# Format
-uv run ruff format .
+- All shell-executing tools pass through `security/rails.py` before execution.
+- A secondary Guardian AI performs safety checks on high-trust and critical operations.
+- All `trust_level = "high"` and `trust_level = "critical"` actions are audit-logged
+  to `~/.pocketpaw/audit.jsonl`.
+- Prompt injection scanning is enabled by default on all inbound messages.
+- Channel identifiers are validated against configured allowlists before processing.
 
-# Type check
-uv run mypy .
+## Forbidden Operations
 
-# Run pre-commit hooks manually
-pre-commit run --all-files
+- ❌ Hardcoded credentials or API keys — all secrets use encrypted `CredentialStore`
+- ❌ `asyncio.run()` inside library code
+- ❌ Module-level `get_settings()` calls
+- ❌ Logging API keys, tokens, or user PII
+- ❌ Unauthenticated REST endpoints — all routes require existing auth middleware
+- ❌ Creating new event types on the message bus without updating `bus/events.py`
 
-# Build package
-python -m build
-```
+## Project-Specific Instructions for AI Agents
 
-## Architecture
+When working on this repository:
 
-### Message Bus Pattern
+1. Follow the event-driven bus pattern: adapters publish `InboundMessage`, agents publish
+   `OutboundMessage` and `SystemEvent`. Never call agent code directly from an adapter.
+2. Use `Protocol` (not `ABC`) for all public interfaces.
+3. Lazy-import optional SDK dependencies inside `__init__` or first-use methods.
+4. All I/O must be `async def`. Use `asyncio.to_thread()` for unavoidable blocking calls.
+5. Run `uv run ruff check .` and `uv run pytest --ignore=tests/e2e` before committing.
+6. New secret fields must be added to `SECRET_FIELDS` in `credentials.py`.
+7. Every new `AgentBackend` must yield `AgentEvent(type="done", ...)` as its final event.
 
-The core architecture is an event-driven message bus (`src/pocketpaw/bus/`). All communication flows through three event types defined in `bus/events.py`:
+## Tool Policy Groups
 
-- **InboundMessage** — user input from any channel (Telegram, WebSocket, CLI)
-- **OutboundMessage** — agent responses back to channels (supports streaming via `is_stream_chunk`/`is_stream_end`)
-- **SystemEvent** — internal events (tool_start, tool_result, thinking, error) consumed by the web dashboard Activity panel
+| Group | Tools |
+|---|---|
+| `group:fs` | read_file, write_file, edit_file, list_dir, directory_tree |
+| `group:shell` | shell |
+| `group:browser` | browser |
+| `group:memory` | remember, recall, forget |
+| `group:search` | web_search, url_extract |
+| `group:skills` | create_skill, skill |
 
-### AgentLoop → AgentRouter → Backend
-
-The processing pipeline lives in `agents/loop.py` and `agents/router.py`:
-
-1. **AgentLoop** consumes from the message bus, manages memory context, and streams responses back
-2. **AgentRouter** uses a registry-based system (`agents/registry.py`) to select and delegate to one of six backends based on `settings.agent_backend`:
-   - `claude_agent_sdk` (default/recommended) — Official Codex Agent SDK with built-in tools (Bash, Read, Write, etc.). Uses `PreToolUse` hooks for dangerous command blocking. Lives in `agents/claude_sdk.py`.
-   - `openai_agents` — OpenAI Agents SDK with GPT models and **OpenAI-compatible endpoint** support. Lives in `agents/openai_agents.py`. Supports any server that exposes the `/v1/chat/completions` API, including:
-     - **[LM Studio](https://lmstudio.ai/)** — `http://localhost:1234/v1`
-     - **[Ollama](https://ollama.com/)** — `http://localhost:11434/v1` (via built-in `ollama` provider or `openai_compatible`)
-     - **[vLLM](https://docs.vllm.ai/)** — `http://localhost:8000/v1`
-     - **[OpenRouter](https://openrouter.ai/)** — `https://openrouter.ai/api/v1` (requires API key)
-     - **[LiteLLM](https://litellm.ai/)** — `http://localhost:4000/v1` (proxy to 100+ providers)
-     - **[LocalAI](https://localai.io/)** — `http://localhost:8080/v1`
-     - **[Jan](https://jan.ai/)** — `http://localhost:1337/v1`
-     - **[text-generation-webui](https://github.com/oobabooga/text-generation-webui)** — `http://localhost:5000/v1` (with `--api` flag)
-     - **[llama.cpp server](https://github.com/ggerganov/llama.cpp)** — `http://localhost:8080/v1`
-     - **[Groq](https://groq.com/)** — `https://api.groq.com/openai/v1` (requires API key)
-     - **[Together AI](https://together.ai/)** — `https://api.together.xyz/v1` (requires API key)
-     - **[Fireworks AI](https://fireworks.ai/)** — `https://api.fireworks.ai/inference/v1` (requires API key)
-
-     Set `openai_agents_provider` to `openai_compatible`, then configure `openai_compatible_base_url`, `openai_compatible_model`, and optionally `openai_compatible_api_key`. See [OpenAI-Compatible Endpoints](#openai-compatible-endpoints) below.
-
-   - `google_adk` — Google Agent Development Kit with Gemini models and native MCP support. Lives in `agents/google_adk.py`.
-   - `codex_cli` — OpenAI Codex CLI subprocess wrapper with MCP support. Lives in `agents/codex_cli.py`.
-   - `opencode` — External server-based backend via REST API. Lives in `agents/opencode.py`.
-   - `copilot_sdk` — GitHub Copilot SDK with multi-provider support. Lives in `agents/copilot_sdk.py`.
-
-3. All backends implement the `AgentBackend` protocol (`agents/backend.py`) and yield standardized `AgentEvent` objects with `type`, `content`, and `metadata`
-4. Legacy backend names (`pocketpaw_native`, `open_interpreter`, `Codex`, `gemini_cli`) are mapped to active backends via `_LEGACY_BACKENDS` in the registry
-
-### Channel Adapters
-
-`bus/adapters/` contains protocol translators that bridge external channels to the message bus:
-
-- `TelegramAdapter` — python-telegram-bot. Registers Telegram `CommandHandler` and `BotCommand` menu entries from the centralized registry.
-- `WebSocketAdapter` — FastAPI WebSockets
-- `DiscordAdapter` — discord.py (optional dep `pocketpaw[discord]`). Slash command `/paw` + DM/mention support. All commands from the registry are registered as Discord slash commands. Stream buffering with edit-in-place (1.5s rate limit).
-- `SlackAdapter` — slack-bolt Socket Mode (optional dep `pocketpaw[slack]`). Handles `app_mention` + DM events. No public URL needed. Slash commands registered from the centralized registry. Thread support via `thread_ts` metadata.
-- `WhatsAppAdapter` — WhatsApp Business Cloud API via `httpx` (core dep). No streaming; accumulates chunks and sends on `stream_end`. Dashboard exposes `/webhook/whatsapp` routes; standalone mode runs its own FastAPI server.
-
-**Dashboard channel management:** The web dashboard (default mode) auto-starts all configured adapters on startup. Channels can be configured, started, and stopped dynamically from the Channels modal in the sidebar. REST API: `GET /api/channels/status`, `POST /api/channels/save`, `POST /api/channels/toggle`.
-
-### Cross-Channel Commands
-
-Slash commands (`/new`, `/todo`, `/help`, etc.) work identically across all channels. The architecture ensures consistency:
-
-- **`COMMAND_REGISTRY`** (`bus/commands.py`) — Single source of truth. A `dict[str, str]` mapping bare command names to descriptions. All adapters import this instead of maintaining their own lists.
-- **`CommandHandler`** (`bus/commands.py`) — Parses and executes commands before they reach the agent backend. Supports both `/cmd` and `!cmd` prefixes (for channels like Matrix where `/` is intercepted).
-- **Adapter registration** — Telegram, Discord, and Slack adapters loop over `COMMAND_REGISTRY` to register platform-specific handlers (Telegram `CommandHandler`, Discord `@tree.command`, Slack `@app.command`). Text-based channels (WhatsApp, Matrix, Signal) pass all messages through and let `CommandHandler.is_command()` handle detection.
-
-**To add a new command:** Add the handler in `CommandHandler._dispatch()` and one entry in `COMMAND_REGISTRY`. All adapters pick it up automatically — zero adapter changes needed.
-
-### Key Subsystems
-
-- **Memory** (`memory/`) — Session history + long-term facts, file-based storage in `~/.pocketpaw/memory/`. Protocol-based (`MemoryStoreProtocol`) for future backend swaps
-- **Browser** (`browser/`) — Playwright-based automation using accessibility tree snapshots (not screenshots). `BrowserDriver` returns `NavigationResult` with a `refmap` mapping ref numbers to CSS selectors
-- **Security** (`security/`) — Guardian AI (secondary LLM safety check) + append-only audit log (`~/.pocketpaw/audit.jsonl`)
-- **Tools** (`tools/`) — `ToolProtocol` with `ToolDefinition` supporting both Anthropic and OpenAI schema export. Built-in tools in `tools/builtin/`
-- **Bootstrap** (`bootstrap/`) — `AgentContextBuilder` assembles the system prompt from identity, memory, and current state
-- **Config** (`config.py`) — Pydantic Settings with `POCKETPAW_` env prefix, JSON config at `~/.pocketpaw/config.json`. Channel-specific config: `discord_bot_token`, `discord_allowed_guild_ids`, `discord_allowed_user_ids`, `slack_bot_token`, `slack_app_token`, `slack_allowed_channel_ids`, `whatsapp_access_token`, `whatsapp_phone_number_id`, `whatsapp_verify_token`, `whatsapp_allowed_phone_numbers`
-
-### OpenAI-Compatible Endpoints
-
-Any backend that serves the OpenAI `/v1/chat/completions` API can be used with the `openai_agents` backend by setting the provider to `openai_compatible`. Configuration:
-
-**Environment variables:**
-
-```bash
-POCKETPAW_AGENT_BACKEND=openai_agents
-POCKETPAW_OPENAI_AGENTS_PROVIDER=openai_compatible
-POCKETPAW_OPENAI_COMPATIBLE_BASE_URL=http://localhost:1234/v1   # your endpoint
-POCKETPAW_OPENAI_COMPATIBLE_MODEL=my-model-name                 # model loaded on that server
-POCKETPAW_OPENAI_COMPATIBLE_API_KEY=                            # optional, leave empty for local servers
-```
-
-**`~/.pocketpaw/config.json`:**
-
-```json
-{
-  "agent_backend": "openai_agents",
-  "openai_agents_provider": "openai_compatible",
-  "openai_compatible_base_url": "http://localhost:1234/v1",
-  "openai_compatible_model": "my-model-name",
-  "openai_compatible_api_key": ""
-}
-```
-
-Or configure via the **Dashboard Settings** UI under LLM Configuration.
-
-> **Note:** Tool/function calling support depends on the model. Models with good tool-calling support (Qwen 2.5, Llama 3.x, Mistral, etc.) are recommended to take full advantage of PocketPaw's built-in tools.
-
-### Extension System
-
-`extensions/` contains the plugin framework that powers PocketPaw's extensible app ecosystem:
-
-- **Extension types**: SPA (frontend-only) and Plugin (full-stack with Python/Node.js sandbox, CUDA, daemon processes)
-- **Managed runtimes**: Python via `uv`, Node.js via auto-install to `~/.pocketpaw/node/`, PyTorch via CUDA-tagged wheels — end users install nothing manually
-- **Sandbox isolation**: Each plugin gets its own venv with managed PATH (`python` → venv, `node` → managed Node.js), env isolation, and shared caches
-- **Daemon lifecycle**: Plugins can run background servers with auto port allocation, `ready_pattern` detection, reverse proxy, and log streaming
-- **Multi-engine support**: Plugins can define multiple engine backends (e.g. Python + Node.js) via the `engines` manifest field — users select the engine in the UI, and the start command is swapped accordingly
-- **Install steps**: Declarative `install.steps` array: `{ "node": true }`, `{ "torch": true }`, `{ "pip": "requirements.txt" }`, `{ "run": "pnpm install" }` — all executed inside the sandbox
-- **Built-in plugins**: `llama-cpp` (local LLM inference with dual Python/Node.js engines), `wan2gp` (AI video generation), `freecut` (video editor)
-
-See `skills/extension-dev/SKILL.md` for comprehensive development documentation.
-
-### Frontend
-
-The web dashboard (`frontend/`) is vanilla JS/CSS/HTML served via FastAPI+Jinja2. No build step. Communicates with the backend over WebSocket for real-time streaming. Extension UIs are React + Vite + Ant Design apps served in iframes.
-
-## Key Conventions
-
-- **Async everywhere**: All agent, bus, memory, and tool interfaces are async. Tests use `pytest-asyncio` with `asyncio_mode = "auto"`
-- **Protocol-oriented**: Core interfaces (`AgentProtocol`, `ToolProtocol`, `MemoryStoreProtocol`, `BaseChannelAdapter`) are Python `Protocol` classes for swappable implementations
-- **Env vars**: All settings use `POCKETPAW_` prefix (e.g., `POCKETPAW_ANTHROPIC_API_KEY`)
-- **API key required**: The `claude_agent_sdk` backend requires an `ANTHROPIC_API_KEY` when using the Anthropic provider. OAuth tokens from Free/Pro/Max plans are not permitted for third-party use per [Anthropic's policy](https://code.Codex.com/docs/en/legal-and-compliance#authentication-and-credential-use). Ollama/local providers do not require an API key.
-- **Ruff config**: line-length 100, target Python 3.11, lint rules E/F/I/UP
-- **Entry point**: `pocketpaw.__main__:main`
-- **Lazy imports**: Agent backends are imported inside `AgentRouter._initialize_agent()` to avoid loading unused dependencies
+Default profile: `full` (no restrictions). Configure via `tool_profile` in settings.
