@@ -115,29 +115,24 @@ function createWindow() {
 }
 
 // ─── Security: CSP Headers ──────────────────────────────────────
-// Applied globally to all web requests in the session.
+// Only applied to file:// URLs (splash screen).
+// The dashboard server handles its own CSP for http:// responses.
 
 function setupCSP() {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    // Build allowed connect sources
-    const connectSrc = [
-      "'self'",
-      'http://127.0.0.1:*',
-      'http://localhost:*',
-      'ws://127.0.0.1:*',
-      'ws://localhost:*'
-    ]
+    // Only inject CSP for local file:// pages (splash screen)
+    // Let the PocketPaw server handle its own CSP for dashboard pages
+    if (!details.url.startsWith('file://')) {
+      callback({ responseHeaders: details.responseHeaders })
+      return
+    }
 
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",         // inline needed for splash + dashboard
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      `connect-src ${connectSrc.join(' ')}`,
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data: https://fonts.gstatic.com",
-      "media-src 'self' blob:",
-      "frame-src 'self' http://127.0.0.1:*",       // extensions in iframes
-      "worker-src 'self' blob:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self' data:",
     ].join('; ')
 
     callback({
