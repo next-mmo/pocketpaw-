@@ -7,6 +7,9 @@ import ProfilesPage from "./components/ProfilesPage";
 import ActorsPage from "./components/ActorsPage";
 import TeamPage from "./components/TeamPage";
 import ProxiesPage from "./components/ProxiesPage";
+import DiscoveryPage from "./components/DiscoveryPage";
+import SettingsPage from "./components/SettingsPage";
+import ActivityPage from "./components/ActivityPage";
 
 export default function App() {
   const view = useStore((s) => s.view);
@@ -28,6 +31,9 @@ export default function App() {
     actors: <ActorsPage />,
     team: <TeamPage />,
     proxies: <ProxiesPage />,
+    discovery: <DiscoveryPage />,
+    settings: <SettingsPage />,
+    activity: <ActivityPage />,
   };
 
   return (

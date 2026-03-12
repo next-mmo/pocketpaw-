@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { api } from "./api";
 
-type View = "dashboard" | "profiles" | "actors" | "team" | "proxies";
+type View = "dashboard" | "profiles" | "actors" | "discovery" | "team" | "proxies" | "settings" | "activity";
 
 interface AppState {
   // Navigation

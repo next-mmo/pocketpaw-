@@ -5,6 +5,9 @@ import {
   TeamOutlined,
   GlobalOutlined,
   ThunderboltOutlined,
+  ShopOutlined,
+  SettingOutlined,
+  ClockCircleOutlined,
 } from "@ant-design/icons";
 import { useStore } from "../store";
 
@@ -12,6 +15,7 @@ const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard", icon: <DashboardOutlined /> },
   { key: "profiles", label: "Profiles", icon: <ChromeOutlined /> },
   { key: "actors", label: "Actors", icon: <RobotOutlined /> },
+  { key: "discovery", label: "Actor Store", icon: <ShopOutlined /> },
   { key: "team", label: "Team", icon: <TeamOutlined /> },
   { key: "proxies", label: "Proxies", icon: <GlobalOutlined /> },
 ] as const;
@@ -54,6 +58,23 @@ export default function Sidebar() {
           Navigation
         </div>
         {NAV_ITEMS.map((item) => (
+          <div
+            key={item.key}
+            className={`sidebar-item ${view === item.key ? "active" : ""}`}
+            onClick={() => setView(item.key as any)}
+          >
+            <span className="icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </div>
+        ))}
+
+        <div style={{ padding: "14px 12px 8px", fontSize: 10, color: "#444", textTransform: "uppercase", letterSpacing: 1.5 }}>
+          System
+        </div>
+        {[
+          { key: "activity", label: "Activity", icon: <ClockCircleOutlined /> },
+          { key: "settings", label: "Settings", icon: <SettingOutlined /> },
+        ].map((item) => (
           <div
             key={item.key}
             className={`sidebar-item ${view === item.key ? "active" : ""}`}

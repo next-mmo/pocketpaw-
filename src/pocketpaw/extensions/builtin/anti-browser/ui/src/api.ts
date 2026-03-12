@@ -112,4 +112,43 @@ export const api = {
   // Fingerprint
   previewFingerprint: (osType: string, browserType: string) =>
     request(`/api/fingerprint/preview?os_type=${osType}&browser_type=${browserType}`),
+
+  // ── Crawlee Provider ──────────────────────────────────────────────
+  crawleeStatus: () => request("/api/crawlee/status"),
+  crawleeCrawlers: () => request("/api/crawlee/crawlers"),
+  crawleeRun: (data: {
+    urls: string[];
+    crawler_type?: string;
+    script?: string;
+    proxy_urls?: string[];
+    max_requests?: number;
+    max_concurrency?: number;
+    headless?: boolean;
+    browser_type?: string;
+    use_fingerprints?: boolean;
+    timeout_secs?: number;
+    input_data?: Record<string, any>;
+  }) => request("/api/crawlee/crawl", { method: "POST", body: JSON.stringify(data) }),
+
+  // ── Apify Store ───────────────────────────────────────────────────
+  storeListActors: (params?: {
+    search?: string;
+    category?: string;
+    limit?: number;
+    offset?: number;
+    sort_by?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set("search", params.search);
+    if (params?.category) qs.set("category", params.category);
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.offset) qs.set("offset", String(params.offset));
+    if (params?.sort_by) qs.set("sort_by", params.sort_by);
+    const q = qs.toString();
+    return request(`/api/store/actors${q ? `?${q}` : ""}`);
+  },
+  storeGetActor: (slug: string) => request(`/api/store/actors/${slug}`),
+  storeCategories: () => request("/api/store/categories"),
+  storeInstallActor: (slug: string) =>
+    request(`/api/store/install/${slug}`, { method: "POST" }),
 };

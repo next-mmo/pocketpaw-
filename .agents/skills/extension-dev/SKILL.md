@@ -105,6 +105,9 @@ See [references/daemon.md](references/daemon.md#multi-engine-support-engines-fie
 ### Key Sandbox Principles
 
 - **NEVER rely on OS-level installations** — all runtimes are managed by PocketPaw
+- **NEVER `pip install` from a system shell** — always use `{ "pip": "requirements.txt" }` install steps, which run `uv pip install -r` inside the sandbox
+- **NEVER use the project root `.venv/` for plugin deps** — each plugin gets its own isolated `<plugin>/env/` venv
+- **ALL dependency changes go through `requirements.txt`** → trigger install via dashboard or `POST /api/v1/plugins/{id}/install`
 - `sandbox.python` → `uv` downloads exact Python version
 - `{ "node": true }` → auto-installs Node.js LTS + pnpm to `~/.pocketpaw/node/`
 - `{ "torch": true }` → installs PyTorch with CUDA-tagged wheels

@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from db import Database
 from browser_manager import BrowserManager
 from fingerprint_engine import FingerprintEngine
+from crawlee_provider import CrawleeProvider
+from apify_store import ApifyStoreClient, APIFY_CATEGORIES
 
 logger = logging.getLogger("anti-browser")
 
@@ -77,6 +79,20 @@ class ActorRun(BaseModel):
     profile_ids: list[str] = Field(default_factory=list)
 
 
+class CrawlRequest(BaseModel):
+    urls: list[str]
+    crawler_type: str = "beautifulsoup"
+    script: str = ""
+    proxy_urls: list[str] = Field(default_factory=list)
+    max_requests: int = 50
+    max_concurrency: int = 5
+    headless: bool = True
+    browser_type: str = "chromium"
+    use_fingerprints: bool = True
+    timeout_secs: int = 60
+    input_data: dict[str, Any] = Field(default_factory=dict)
+
+
 class TeamMemberCreate(BaseModel):
     name: str
     role: str = "operator"  # admin | manager | operator
@@ -99,7 +115,9 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     app.state.browser_mgr = BrowserManager(DATA_DIR)
     app.state.fp_engine = FingerprintEngine()
-    logger.info("Anti-Browser server ready")
+    app.state.crawlee = CrawleeProvider(DATA_DIR)
+    app.state.apify_store = ApifyStoreClient()
+    logger.info("Anti-Browser server ready (crawlee=%s)", app.state.crawlee.available)
     yield
     await app.state.browser_mgr.close_all()
     await db.close()
@@ -124,6 +142,12 @@ def get_bm() -> BrowserManager:
 
 def get_fp() -> FingerprintEngine:
     return app.state.fp_engine
+
+def get_crawlee() -> CrawleeProvider:
+    return app.state.crawlee
+
+def get_apify_store() -> ApifyStoreClient:
+    return app.state.apify_store
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -572,6 +596,168 @@ async def fingerprint_preview(os_type: str = "windows", browser_type: str = "chr
     fp = get_fp()
     fingerprint = fp.generate(os_type=os_type, browser_type=browser_type)
     return {"fingerprint": fingerprint}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CRAWLEE PROVIDER
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/crawlee/status")
+async def crawlee_status():
+    """Check if Crawlee provider is available."""
+    crawlee = get_crawlee()
+    return {
+        "available": crawlee.available,
+        "crawlers": await crawlee.get_supported_crawlers(),
+    }
+
+
+@app.post("/api/crawlee/crawl")
+async def crawlee_crawl(body: CrawlRequest):
+    """Run a crawl job using Crawlee."""
+    crawlee = get_crawlee()
+    if not crawlee.available:
+        raise HTTPException(503, "Crawlee is not installed. Install with: pip install 'crawlee[all]'")
+
+    result = await crawlee.run_crawl(
+        urls=body.urls,
+        crawler_type=body.crawler_type,
+        script=body.script,
+        proxy_urls=body.proxy_urls if body.proxy_urls else None,
+        max_requests=body.max_requests,
+        max_concurrency=body.max_concurrency,
+        headless=body.headless,
+        browser_type=body.browser_type,
+        use_fingerprints=body.use_fingerprints,
+        request_handler_timeout_secs=body.timeout_secs,
+        input_data=body.input_data,
+    )
+    return result
+
+
+@app.get("/api/crawlee/crawlers")
+async def crawlee_crawlers():
+    """List available crawler types."""
+    crawlee = get_crawlee()
+    return {"crawlers": await crawlee.get_supported_crawlers()}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# APIFY STORE
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/store/actors")
+async def store_list_actors(
+    search: str = "",
+    category: str = "",
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = "popularity",
+):
+    """Browse actors from the Apify Store."""
+    store = get_apify_store()
+    return await store.search_store(
+        search=search,
+        category=category,
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+    )
+
+
+@app.get("/api/store/categories")
+async def store_categories():
+    """List Apify Store categories."""
+    store = get_apify_store()
+    return {"categories": await store.get_categories()}
+
+
+@app.get("/api/store/actors/{actor_slug:path}")
+async def store_get_actor(actor_slug: str):
+    """Get details of an actor from the Apify Store."""
+    store = get_apify_store()
+    actor = await store.get_actor_detail(actor_slug)
+    if not actor:
+        raise HTTPException(404, "Actor not found in Apify Store")
+    return {"actor": actor}
+
+
+@app.post("/api/store/install/{actor_slug:path}")
+async def store_install_actor(actor_slug: str):
+    """
+    Install an actor from the Apify Store into local actors.
+    Creates a local actor entry with a Crawlee-based script template.
+    """
+    store = get_apify_store()
+    detail = await store.get_actor_detail(actor_slug)
+    if not detail:
+        raise HTTPException(404, "Actor not found in Apify Store")
+
+    db = get_db()
+
+    script = _generate_crawlee_script(detail)
+
+    actor = {
+        "id": str(uuid.uuid4())[:8],
+        "name": detail.get("name", actor_slug),
+        "script": script,
+        "profile_ids": [],
+        "schedule": "",
+        "max_concurrency": 5,
+        "description": detail.get("description", ""),
+        "input_schema": detail.get("example_run_input", {}),
+        "created_at": time.time(),
+        "total_runs": 0,
+        "last_run": None,
+        "source": "apify_store",
+        "apify_slug": actor_slug,
+        "apify_url": detail.get("apify_url", ""),
+        "crawler_type": "beautifulsoup",
+    }
+    await db.save_actor(actor)
+    return {"actor": actor}
+
+
+def _generate_crawlee_script(actor_detail: dict) -> str:
+    """Generate a Crawlee-based Python script template for an installed actor."""
+    name = actor_detail.get("name", "Untitled")
+    desc = actor_detail.get("description", "")[:200]
+    slug = actor_detail.get("slug", "")
+
+    return f'''# {name}
+# Installed from Apify Store: {slug}
+# {desc}
+#
+# This script uses Crawlee for Python.
+# Modify the handler below to customize the crawling logic.
+#
+# Available in handler context:
+#   context.request.url  — URL being processed
+#   context.soup         — BeautifulSoup parsed HTML
+#   context.log          — Logger
+#   context.enqueue_links() — Enqueue more URLs
+#   context.push_data()  — Push extracted data
+
+context.log.info(f"Processing {{context.request.url}} ...")
+
+data = {{
+    "url": context.request.url,
+    "title": context.soup.title.string if context.soup.title else None,
+}}
+
+for tag in context.soup.find_all(["script", "style", "nav", "footer"]):
+    tag.decompose()
+
+data["text"] = context.soup.get_text(separator="\\n", strip=True)[:5000]
+data["links"] = [
+    {{"text": a.get_text(strip=True), "href": a["href"]}}
+    for a in context.soup.find_all("a", href=True)[:30]
+    if a["href"].startswith("http")
+]
+
+await context.push_data(data)
+return data
+'''
 
 
 # ── Main ────────────────────────────────────────────────────────────────
