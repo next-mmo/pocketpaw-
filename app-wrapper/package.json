@@ -1,0 +1,88 @@
+{
+  "name": "pocketpaw-desktop",
+  "version": "0.4.9",
+  "description": "PocketPaw Desktop — Electron wrapper for the self-hosted AI agent",
+  "author": "PocketPaw Team <hello@pocketpaw.ai>",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build:backend": "python scripts/build-backend.py",
+    "build:backend:onefile": "python scripts/build-backend.py --onefile",
+    "build:electron": "electron-vite build",
+    "compile:bytecode": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/compile-bytecode.js",
+    "build": "npm run build:backend && npm run build:electron",
+    "build:secure": "npm run build:electron && npm run compile:bytecode || echo 'Bytecode compilation skipped (optional)'",
+    "preview": "electron-vite preview",
+    "start": "electron-vite preview",
+    "release:win": "npm run build:secure && electron-builder --win --publish never",
+    "release:mac": "npm run build:secure && electron-builder --mac --publish never",
+    "release:linux": "npm run build:secure && electron-builder --linux --publish never",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "bytenode": "^1.5.7"
+  },
+  "devDependencies": {
+    "@electron-toolkit/utils": "^4.0.0",
+    "bytenode": "^1.5.7",
+    "cross-env": "^10.1.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "terser": "^5.37.0"
+  },
+  "build": {
+    "appId": "com.pocketpaw.desktop",
+    "productName": "PocketPaw",
+    "copyright": "Copyright © 2026 PocketPaw",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "!src/**/*",
+      "!**/*.ts",
+      "!**/*.map",
+      "!node_modules/.cache/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "PocketPaw-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "resources/icon.png",
+      "category": "Utility"
+    }
+  }
+}

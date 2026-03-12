@@ -1,0 +1,106 @@
+name: Release PocketPaw Desktop (Windows)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ─── Python + UV ──────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build pocketpaw wheel
+        run: uv build --wheel
+        shell: bash
+
+      - name: Bundle backend (wheel + uv binary)
+        shell: bash
+        run: |
+          set -e
+          BACKEND_DIR="app-wrapper/resources/backend"
+          mkdir -p "$BACKEND_DIR"
+
+          # Copy the built wheel
+          cp dist/*.whl "$BACKEND_DIR/"
+
+          # Download uv for Windows
+          UV_VERSION="0.6.6"
+          UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-pc-windows-msvc.zip"
+          curl -fsSL "$UV_URL" -o /tmp/uv.zip
+          mkdir -p "$BACKEND_DIR/uv"
+          unzip -o /tmp/uv.zip -d "$BACKEND_DIR/uv"
+
+          # Write bundle metadata
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          WHEEL=$(ls dist/*.whl | head -1 | xargs basename)
+          cat > "$BACKEND_DIR/bundle.json" <<EOF
+          {
+            "version": "$VERSION",
+            "wheel": "$WHEEL",
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platform": "win32-x64"
+          }
+          EOF
+
+          echo "✅ Backend bundle ready:"
+          ls -la "$BACKEND_DIR/"
+
+      # ─── Node.js + pnpm ───────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Electron dependencies
+        run: pnpm install
+        working-directory: app-wrapper
+
+      # ─── Build Electron + Package ─────────────────────────────
+      - name: Build Electron app (secure)
+        run: pnpm build:secure
+        working-directory: app-wrapper
+
+      - name: Package Windows installer
+        run: pnpm exec electron-builder --win --publish never
+        working-directory: app-wrapper
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ─── Upload ───────────────────────────────────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketPaw-Windows-Setup
+          path: app-wrapper/dist/PocketPaw-Setup-*.exe
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-wrapper/dist/PocketPaw-Setup-*.exe
+          generate_release_notes: true
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
