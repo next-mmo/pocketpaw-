@@ -1,0 +1,28 @@
+{
+  "id": "anti-browser",
+  "name": "Anti-Browser",
+  "version": "1.0.0",
+  "description": "Enterprise anti-detect browser with multi-actor orchestration, team control, fingerprint spoofing, and proxy management. Inspired by Multilogin, GoLogin & Apify.",
+  "icon": "shield",
+  "route": "anti-browser",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env"
+  },
+  "install": {
+    "steps": [
+      { "pip": "requirements.txt" },
+      { "run": "python -m playwright install chromium" }
+    ]
+  },
+  "start": {
+    "command": "python server.py --host 127.0.0.1 --port __PORT__",
+    "daemon": true,
+    "ready_pattern": "Application startup complete",
+    "port": "auto"
+  }
+}

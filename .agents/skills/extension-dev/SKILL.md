@@ -15,17 +15,17 @@ Use this skill whenever the user asks about building, packaging, uploading, or t
 
 Detailed documentation is split into focused files:
 
-| File                                               | Contents                                                                  |
-| -------------------------------------------------- | ------------------------------------------------------------------------- |
-| [ref/manifest.md](ref/manifest.md)                 | `extension.json` format, field reference, scopes                          |
-| [ref/sandbox.md](ref/sandbox.md)                   | Managed runtimes (Python, Node.js, PyTorch), install steps, env isolation |
-| [ref/daemon.md](ref/daemon.md)                     | Daemon process management, multi-engine support, reverse proxy            |
-| [ref/ui-stack.md](ref/ui-stack.md)                 | React + Vite setup, Ant Design theme, project structure, gitignore        |
-| [ref/api.md](ref/api.md)                           | All API endpoints, packaging, CUDA detection                              |
-| [ref/chat-integration.md](ref/chat-integration.md) | Chat control via slash commands, composer assist, shared storage          |
-| [ref/scaffolding.md](ref/scaffolding.md)           | Step-by-step scaffolding guide, LLM & Stable Diffusion examples           |
-| [ref/self-bootstrap.md](ref/self-bootstrap.md)     | Self-bootstrapping pattern, build scripts, embedding Gradio/Streamlit     |
-| [ref/troubleshooting.md](ref/troubleshooting.md)   | Error solutions, daemon issues, platform notes, Windows specifics         |
+| File                                                             | Contents                                                                  |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [references/manifest.md](references/manifest.md)                 | `extension.json` format, field reference, scopes                          |
+| [references/sandbox.md](references/sandbox.md)                   | Managed runtimes (Python, Node.js, PyTorch), install steps, env isolation |
+| [references/daemon.md](references/daemon.md)                     | Daemon process management, multi-engine support, reverse proxy            |
+| [references/ui-stack.md](references/ui-stack.md)                 | React + Vite setup, Ant Design theme, project structure, gitignore        |
+| [references/api.md](references/api.md)                           | All API endpoints, packaging, CUDA detection                              |
+| [references/chat-integration.md](references/chat-integration.md) | Chat control via slash commands, composer assist, shared storage          |
+| [references/scaffolding.md](references/scaffolding.md)           | Step-by-step scaffolding guide, LLM & Stable Diffusion examples           |
+| [references/self-bootstrap.md](references/self-bootstrap.md)     | Self-bootstrapping pattern, build scripts, embedding Gradio/Streamlit     |
+| [references/troubleshooting.md](references/troubleshooting.md)   | Error solutions, daemon issues, platform notes, Windows specifics         |
 
 ---
 
@@ -100,7 +100,7 @@ Detailed documentation is split into focused files:
 }
 ```
 
-See [ref/daemon.md](ref/daemon.md#multi-engine-support-engines-field) for full details.
+See [references/daemon.md](references/daemon.md#multi-engine-support-engines-field) for full details.
 
 ### Key Sandbox Principles
 
@@ -111,7 +111,7 @@ See [ref/daemon.md](ref/daemon.md#multi-engine-support-engines-field) for full d
 - CUDA drivers are the **only** OS-level dependency
 - All managed runtimes are added to sandbox PATH automatically
 
-See [ref/sandbox.md](ref/sandbox.md) for full details.
+See [references/sandbox.md](references/sandbox.md) for full details.
 
 ### Key UI Rules
 
@@ -119,7 +119,7 @@ See [ref/sandbox.md](ref/sandbox.md) for full details.
 - **Always** `base: "./"` and `outDir: ".."` in Vite config
 - **Always** gitignore: `assets/`, `index.html`, `env/`, `node_modules/`, `models/`
 
-See [ref/ui-stack.md](ref/ui-stack.md) for full details.
+See [references/ui-stack.md](references/ui-stack.md) for full details.
 
 ### Command Resolution
 
@@ -139,20 +139,20 @@ See [ref/ui-stack.md](ref/ui-stack.md) for full details.
 | `GET /api/v1/plugins/cuda`               | Detect CUDA / GPU                           |
 | `POST /api/v1/plugins/{id}/proxy/{path}` | Reverse proxy to daemon                     |
 
-See [ref/api.md](ref/api.md) for all endpoints.
+See [references/api.md](references/api.md) for all endpoints.
 
 ---
 
 ## When To Use Which Reference
 
-| User asks about...                     | Read...                                            |
-| -------------------------------------- | -------------------------------------------------- |
-| Creating a new extension               | [ref/scaffolding.md](ref/scaffolding.md)           |
-| `extension.json` fields                | [ref/manifest.md](ref/manifest.md)                 |
-| Python/Node.js setup, install steps    | [ref/sandbox.md](ref/sandbox.md)                   |
-| Starting servers, multi-engine         | [ref/daemon.md](ref/daemon.md)                     |
-| React UI, Vite config, theming         | [ref/ui-stack.md](ref/ui-stack.md)                 |
-| API endpoints, packaging               | [ref/api.md](ref/api.md)                           |
-| Chat control, slash commands           | [ref/chat-integration.md](ref/chat-integration.md) |
-| Wrapping external repos (Gradio, etc.) | [ref/self-bootstrap.md](ref/self-bootstrap.md)     |
-| Debugging errors                       | [ref/troubleshooting.md](ref/troubleshooting.md)   |
+| User asks about...                     | Read...                                                          |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| Creating a new extension               | [references/scaffolding.md](references/scaffolding.md)           |
+| `extension.json` fields                | [references/manifest.md](references/manifest.md)                 |
+| Python/Node.js setup, install steps    | [references/sandbox.md](references/sandbox.md)                   |
+| Starting servers, multi-engine         | [references/daemon.md](references/daemon.md)                     |
+| React UI, Vite config, theming         | [references/ui-stack.md](references/ui-stack.md)                 |
+| API endpoints, packaging               | [references/api.md](references/api.md)                           |
+| Chat control, slash commands           | [references/chat-integration.md](references/chat-integration.md) |
+| Wrapping external repos (Gradio, etc.) | [references/self-bootstrap.md](references/self-bootstrap.md)     |
+| Debugging errors                       | [references/troubleshooting.md](references/troubleshooting.md)   |
