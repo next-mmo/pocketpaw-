@@ -35,6 +35,15 @@ window.PocketPaw.Extensions = {
         sessions: {},
         frameSrcs: {},
         initialized: false,
+        // Plugin install/start state per plugin_id
+        pluginStates: {},
+        // pluginStates[id] = {
+        //   status: 'idle'|'installing'|'installed'|'starting'|'running'|'error'|'stopped'|'uninstalling',
+        //   progress: 0.0-1.0,
+        //   error: null|string,
+        //   logs: [],
+        //   pollTimer: null
+        // }
       },
     };
   },
@@ -174,7 +183,27 @@ window.PocketPaw.Extensions = {
             route: extension.route,
             name: extension.name,
             icon: extension.icon || "app-window",
+            isPlugin: extension.is_plugin || false,
           });
+        }
+
+        // For plugin-type extensions, check install status first
+        if (extension.is_plugin) {
+          const ps = this._getPluginState(extension.id);
+          if (!extension.is_installed && ps.status === 'idle') {
+            // Not installed — show the install screen (no iframe yet)
+            this.extensionsHost.activeTabId = extension.id;
+            this.updateHash(`#/apps/${route}`);
+            this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+            return;
+          }
+          if (ps.status === 'installing' || ps.status === 'starting') {
+            // Still in progress — show the install screen
+            this.extensionsHost.activeTabId = extension.id;
+            this.updateHash(`#/apps/${route}`);
+            this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+            return;
+          }
         }
 
         // Prepare iframe src
@@ -732,6 +761,272 @@ window.PocketPaw.Extensions = {
           return;
         }
         await this.openAppTab(route);
+      },
+
+      // ── Plugin Install / Start Flow ──────────────────────
+
+      /**
+       * Get or initialize the plugin state tracker for a given ID.
+       */
+      _getPluginState(pluginId) {
+        if (!this.extensionsHost.pluginStates[pluginId]) {
+          this.extensionsHost.pluginStates[pluginId] = {
+            status: 'idle',
+            progress: 0,
+            error: null,
+            logs: [],
+            pollTimer: null,
+          };
+        }
+        return this.extensionsHost.pluginStates[pluginId];
+      },
+
+      /**
+       * Check if current active tab is a plugin that needs install.
+       */
+      activeTabNeedsInstall() {
+        const tabId = this.extensionsHost.activeTabId;
+        if (!tabId) return false;
+        const ext = this.extensionsHost.items.find(i => i.id === tabId);
+        if (!ext || !ext.is_plugin) return false;
+        const ps = this._getPluginState(tabId);
+        // Show install screen for idle (not installed), installing, uninstalling, error, or installed-but-not-started
+        return !ext.is_installed || ['idle', 'installing', 'uninstalling', 'installed', 'starting', 'stopped', 'error'].includes(ps.status);
+      },
+
+      /**
+       * Get the plugin state for the currently active tab.
+       */
+      activePluginState() {
+        const tabId = this.extensionsHost.activeTabId;
+        if (!tabId) return null;
+        return this._getPluginState(tabId);
+      },
+
+      /**
+       * Get the extension data for the currently active tab.
+       */
+      activePluginExt() {
+        const tabId = this.extensionsHost.activeTabId;
+        if (!tabId) return null;
+        return this.extensionsHost.items.find(i => i.id === tabId) || null;
+      },
+
+      /**
+       * Install a plugin extension (calls /api/v1/plugins/{id}/install).
+       */
+      async installPlugin(pluginId) {
+        const ps = this._getPluginState(pluginId);
+        ps.status = 'installing';
+        ps.progress = 0;
+        ps.error = null;
+        ps.logs = [];
+
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/install`, {
+            method: 'POST',
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Install request failed');
+          }
+          // Start polling for progress
+          this._pollPluginStatus(pluginId);
+        } catch (error) {
+          console.error('Plugin install failed:', error);
+          ps.status = 'error';
+          ps.error = error.message;
+        }
+      },
+
+      /**
+       * Poll plugin status and logs during install/start.
+       */
+      _pollPluginStatus(pluginId) {
+        const ps = this._getPluginState(pluginId);
+        if (ps.pollTimer) clearInterval(ps.pollTimer);
+
+        const poll = async () => {
+          try {
+            const [statusResp, logsResp] = await Promise.all([
+              fetch(`/api/v1/plugins/${pluginId}/status`),
+              fetch(`/api/v1/plugins/${pluginId}/logs?tail=50`),
+            ]);
+
+            if (statusResp.ok) {
+              const data = await statusResp.json();
+              ps.progress = data.install_progress || 0;
+
+              if (data.status === 'installing' || data.status === 'starting') {
+                ps.status = data.status;
+              } else if (data.status === 'running') {
+                ps.status = 'running';
+                clearInterval(ps.pollTimer);
+                ps.pollTimer = null;
+                // Reload extensions list (is_installed may have changed)
+                await this.loadExtensions(true);
+                // Now load the iframe
+                const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+                if (ext) {
+                  this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+                  try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
+                }
+                this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+              } else if (data.status === 'stopped') {
+                // Install finished (stopped = completed install, not yet started)
+                ps.progress = 1;
+                clearInterval(ps.pollTimer);
+                ps.pollTimer = null;
+                // Reload the extension list to get updated is_installed
+                await this.loadExtensions(true);
+                // Check if this plugin has a daemon to start
+                const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+                if (ext && !ext.has_start) {
+                  // No daemon needed — skip straight to iframe
+                  ps.status = 'running';
+                  this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+                  try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
+                } else {
+                  ps.status = 'installed';
+                }
+                this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+              } else if (data.status === 'error') {
+                ps.status = 'error';
+                ps.error = data.error || 'Unknown error';
+                clearInterval(ps.pollTimer);
+                ps.pollTimer = null;
+              }
+            }
+
+            if (logsResp.ok) {
+              const logData = await logsResp.json();
+              ps.logs = logData.lines || [];
+            }
+          } catch (error) {
+            console.error('Poll error:', error);
+          }
+        };
+
+        // Immediate first poll, then every 2s
+        poll();
+        ps.pollTimer = setInterval(poll, 2000);
+      },
+
+      /**
+       * Start a plugin daemon (calls /api/v1/plugins/{id}/start).
+       */
+      async startPlugin(pluginId) {
+        const ps = this._getPluginState(pluginId);
+        ps.status = 'starting';
+        ps.error = null;
+
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/start`, {
+            method: 'POST',
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Start request failed');
+          }
+          // Poll until running
+          this._pollPluginStatus(pluginId);
+        } catch (error) {
+          console.error('Plugin start failed:', error);
+          ps.status = 'error';
+          ps.error = error.message;
+        }
+      },
+
+      /**
+       * Skip the plugin install screen and load iframe directly.
+       * Used for SPA-only plugins that don't need a backend daemon.
+       */
+      async skipPluginInstall(pluginId) {
+        const ps = this._getPluginState(pluginId);
+        ps.status = 'running';
+        const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+        if (ext) {
+          this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+          try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
+        }
+        this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+      },
+
+      /**
+       * Uninstall a plugin (stop daemon, delete venv, upstream, built assets).
+       * Resets the plugin to pre-install state so it can be re-installed.
+       */
+      async uninstallPlugin(pluginId) {
+        if (!confirm('Uninstall this plugin? This will delete its environment, cached data, and built assets. You can re-install later.')) return;
+
+        const ps = this._getPluginState(pluginId);
+        ps.status = 'uninstalling';
+        ps.progress = 0;
+        ps.error = null;
+
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/uninstall`, {
+            method: 'POST',
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Uninstall failed');
+          }
+          const data = await resp.json();
+
+          // Reset plugin state to idle
+          ps.status = 'idle';
+          ps.progress = 0;
+          ps.logs = [];
+
+          // Clear iframe src
+          delete this.extensionsHost.frameSrcs[pluginId];
+
+          // Reload extensions list to update is_installed flag
+          await this.loadExtensions(true);
+
+          const removed = data.removed || [];
+          this.showToast(`Uninstalled: ${removed.join(', ') || 'done'}`, 'success');
+          this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+        } catch (error) {
+          console.error('Plugin uninstall failed:', error);
+          ps.status = 'error';
+          ps.error = error.message;
+          this.showToast(error.message || 'Uninstall failed', 'error');
+        }
+      },
+
+      /**
+       * Reinstall a plugin (clean upstream + assets, re-run install steps).
+       * Keeps venv to avoid re-downloading Python; refreshes source + frontend.
+       */
+      async reinstallPlugin(pluginId) {
+        if (!confirm('Reinstall this plugin? This will re-download source and rebuild. Your models and venv will be preserved.')) return;
+
+        const ps = this._getPluginState(pluginId);
+        ps.status = 'installing';
+        ps.progress = 0;
+        ps.error = null;
+        ps.logs = [];
+
+        // Clear iframe src so the install screen shows
+        delete this.extensionsHost.frameSrcs[pluginId];
+
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/update`, {
+            method: 'POST',
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Reinstall request failed');
+          }
+          // Start polling for progress (same as install)
+          this._pollPluginStatus(pluginId);
+        } catch (error) {
+          console.error('Plugin reinstall failed:', error);
+          ps.status = 'error';
+          ps.error = error.message;
+        }
       },
     };
   },

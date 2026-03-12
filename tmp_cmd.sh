@@ -1,0 +1,1 @@
+uv run python -m pocketpaw.tools.cli forget '{"query":"hi"}'

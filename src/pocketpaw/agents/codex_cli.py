@@ -54,7 +54,7 @@ class CodexCLIBackend:
                 "web_search": "browser",
                 "mcp": "mcp",
             },
-            required_keys=["openai_api_key"],
+            required_keys=[],
             supported_providers=["openai"],
             install_hint={
                 "external_cmd": "npm install -g @openai/codex",

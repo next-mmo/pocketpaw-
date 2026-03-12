@@ -164,13 +164,18 @@ class MCTaskExecutor:
         # Initialize stop flag
         self._stop_flags[task_id] = False
 
-        # Build agent settings with the agent's backend.
+        # Build agent settings for task execution.
         # bypass_permissions is ALWAYS True for task execution because
         # tasks run headlessly (no terminal for interactive prompts).
         # The PreToolUse hook still blocks dangerous commands.
+        #
+        # Always use the global agent_backend from settings: the Mission
+        # Control UI does not expose per-agent backend selection, so
+        # agent.backend carries the old hardcoded default. The user's
+        # actual choice lives in Settings → General → Agent Backend.
         base_settings = get_settings()
         agent_settings = base_settings.model_copy(
-            update={"agent_backend": agent.backend, "bypass_permissions": True}
+            update={"bypass_permissions": True}
         )
 
         # Create dedicated router for this task

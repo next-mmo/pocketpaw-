@@ -19,17 +19,17 @@ All endpoints use the extension `id` from [extension.json](manifest.md). For fro
 
 These endpoints manage the [daemon process](daemon.md) and [sandbox](sandbox.md) installation:
 
-| Method   | Endpoint                              | Description                                                          |
-| -------- | ------------------------------------- | -------------------------------------------------------------------- |
-| `POST`   | `/api/v1/plugins/{id}/install`        | Install: create venv, pip install, torch, node, pnpm install, run    |
-| `POST`   | `/api/v1/plugins/{id}/start`          | Start daemon process (accepts `{"engine": "node"}` to select engine) |
-| `POST`   | `/api/v1/plugins/{id}/stop`           | Stop daemon process                                                  |
-| `GET`    | `/api/v1/plugins/{id}/status`         | Poll current status                                                  |
-| `GET`    | `/api/v1/plugins/{id}/logs`           | Get recent log lines                                                 |
-| `DELETE` | `/api/v1/plugins/{id}/env`            | Delete venv only (light reset)                                       |
-| `POST`   | `/api/v1/plugins/{id}/uninstall`      | Full cleanup: stop + delete venv, upstream, assets                   |
-| `POST`   | `/api/v1/plugins/{id}/update`         | Clean upstream + assets, re-run all install steps                    |
-| `POST`   | `/api/v1/plugins/{id}/rebuild-engine` | Rebuild backend engine from source (accepts `{"cuda": true}`)        |
+| Method   | Endpoint                              | Description                                                                          |
+| -------- | ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `POST`   | `/api/v1/plugins/{id}/install`        | Install: create venv, pip install, torch, node, pnpm install, run custom steps       |
+| `POST`   | `/api/v1/plugins/{id}/start`          | Start daemon process (accepts `{"engine": "node"}` to select engine)                 |
+| `POST`   | `/api/v1/plugins/{id}/stop`           | Stop daemon process                                                                  |
+| `GET`    | `/api/v1/plugins/{id}/status`         | Poll current status (`idle`, `installing`, `installed`, `running`, `stopped`, `error`) |
+| `GET`    | `/api/v1/plugins/{id}/logs`           | Get recent log lines (add `?tail=50` for last 50 lines)                              |
+| `POST`   | `/api/v1/plugins/{id}/uninstall`      | Full uninstall: stop daemon + delete venv, upstream/, assets/, models/                |
+| `POST`   | `/api/v1/plugins/{id}/update`         | Reinstall: clean upstream + assets, re-run install steps (keeps venv + models)        |
+| `DELETE` | `/api/v1/plugins/{id}/env`            | Delete venv only (light reset — keeps everything else)                               |
+| `POST`   | `/api/v1/plugins/{id}/rebuild-engine` | Rebuild backend engine from source (accepts `{"cuda": true}`)                        |
 
 ## Model Management (for LLM plugins)
 

@@ -2,7 +2,7 @@
 name: extension-dev
 description: "How to build, package, upload, and manage PocketPaw dashboard extensions (SPA apps and full plugins with Python/Node.js sandboxes, uv, CUDA, multi-engine support, and daemon processes). Covers manifest format, SDK usage, scopes, sandbox config, PyTorch, install steps, process lifecycle, and API endpoints."
 user-invocable: true
-argument-hint: "[topic] — e.g. 'scaffold', 'plugin', 'cuda', 'sandbox', 'torch', 'manifest', 'sdk', 'upload', 'scopes', 'proxy', 'models', 'engine'"
+argument-hint: "[topic] — e.g. 'scaffold', 'plugin', 'cuda', 'sandbox', 'torch', 'manifest', 'sdk', 'upload', 'scopes', 'proxy', 'models', 'engine', 'install', 'uninstall', 'reinstall'"
 ---
 
 # PocketPaw Extension Development
@@ -128,6 +128,79 @@ See [references/ui-stack.md](references/ui-stack.md) for full details.
 | `python ...`   | `<venv>/Scripts/python.exe ...` (or `<venv>/bin/python` on Linux/Mac)   |
 | `node ...`     | Managed Node.js (`~/.pocketpaw/node/node.exe`) or system `node` on PATH |
 
+---
+
+## Plugin Lifecycle: Install → Start → Stop → Uninstall
+
+Plugin extensions have a mandatory install step before they can run. The install screen is shown automatically when the user opens a plugin tab for the first time. The full lifecycle is:
+
+```text
+idle → installing → installed → starting → running → stopped
+                                                        ↓
+                                                   uninstalling → idle (re-install available)
+```
+
+### Install (Required First Step)
+
+When a user opens a plugin extension for the first time, they see the **install screen** instead of the app. The install step:
+
+1. Creates a Python venv with the pinned version (via `uv`)
+2. Installs pip dependencies from `requirements.txt`
+3. Installs PyTorch with CUDA wheels (if `{ "torch": true }`)
+4. Installs Node.js + pnpm (if `{ "node": true }`)
+5. Runs custom build commands (if `{ "run": "..." }`)
+
+The install is triggered via `POST /api/v1/plugins/{id}/install` and progress is polled via `GET /api/v1/plugins/{id}/status`.
+
+### Start (After Install)
+
+After installation completes, the user clicks **Start** to launch the daemon backend. This calls `POST /api/v1/plugins/{id}/start`. The daemon runs as a subprocess with `ready_pattern` detection.
+
+### Stop
+
+The daemon can be stopped via `POST /api/v1/plugins/{id}/stop` or via the UI power button. The plugin remains installed and the user can restart without re-installing.
+
+### Uninstall
+
+The user can **uninstall** a plugin to reset it to its pre-install state. This:
+
+1. Stops the daemon if running
+2. Deletes the venv (`env/`)
+3. Deletes the upstream source (`upstream/`)
+4. Deletes built assets (`index.html`, `assets/`)
+5. Deletes downloaded models (`models/`)
+
+After uninstall, the plugin returns to the `idle` state and the user sees the install screen again.
+
+**API**: `POST /api/v1/plugins/{id}/uninstall`
+
+### Reinstall (Clean Rebuild)
+
+The user can **reinstall** a plugin without fully uninstalling. This:
+
+1. Stops the daemon if running
+2. Deletes upstream source and built assets (NOT the venv or models)
+3. Re-runs all install steps (re-clones source, rebuilds frontend)
+
+This is faster than a full uninstall + install because the Python venv is preserved.
+
+**API**: `POST /api/v1/plugins/{id}/update`
+
+### UI States
+
+The plugin install screen shows different states with available actions:
+
+| State          | UI Shows                                | Actions Available                        |
+| -------------- | --------------------------------------- | ---------------------------------------- |
+| `idle`         | "Install" button                        | Install                                  |
+| `installing`   | Progress bar + logs                     | (wait)                                   |
+| `installed`    | "Start" button + success badge          | Start, Reinstall, Uninstall              |
+| `starting`     | Spinner "Starting service..."           | (wait)                                   |
+| `running`      | Extension iframe (app loaded)           | Stop (via power button in address bar)   |
+| `stopped`      | "Restart" button                        | Restart, Reinstall, Uninstall            |
+| `uninstalling` | Spinner "Uninstalling..."               | (wait)                                   |
+| `error`        | Error message + "Retry Install" button  | Retry Install, Uninstall                 |
+
 ### Common API Endpoints
 
 | Endpoint                                 | Description                                 |
@@ -136,6 +209,9 @@ See [references/ui-stack.md](references/ui-stack.md) for full details.
 | `POST /api/v1/plugins/{id}/start`        | Start daemon (accepts `{"engine": "node"}`) |
 | `POST /api/v1/plugins/{id}/stop`         | Stop daemon                                 |
 | `GET /api/v1/plugins/{id}/status`        | Poll status                                 |
+| `POST /api/v1/plugins/{id}/uninstall`    | Full cleanup: stop + delete venv, upstream, assets, models |
+| `POST /api/v1/plugins/{id}/update`       | Reinstall: clean upstream + assets, re-run install steps   |
+| `DELETE /api/v1/plugins/{id}/env`        | Delete venv only (light reset)              |
 | `GET /api/v1/plugins/cuda`               | Detect CUDA / GPU                           |
 | `POST /api/v1/plugins/{id}/proxy/{path}` | Reverse proxy to daemon                     |
 
@@ -156,3 +232,4 @@ See [references/api.md](references/api.md) for all endpoints.
 | Chat control, slash commands           | [references/chat-integration.md](references/chat-integration.md) |
 | Wrapping external repos (Gradio, etc.) | [references/self-bootstrap.md](references/self-bootstrap.md)     |
 | Debugging errors                       | [references/troubleshooting.md](references/troubleshooting.md)   |
+| Install / uninstall / reinstall        | This file (Plugin Lifecycle section above)                       |

@@ -70,7 +70,7 @@ class CreateAgentRequest(BaseModel):
     role: str = Field(..., min_length=1, max_length=100)
     description: str = Field(default="")
     specialties: list[str] = Field(default_factory=list)
-    backend: str = Field(default="claude_agent_sdk")
+    backend: str = Field(default="")
     level: str = Field(default="specialist")
 
 
@@ -174,14 +174,21 @@ async def list_agents(status: str | None = None, limit: int = 100) -> dict[str, 
 @router.post("/agents")
 async def create_agent(request: CreateAgentRequest) -> dict[str, Any]:
     """Create a new agent."""
+    from pocketpaw.config import get_settings
+
     manager = get_mission_control_manager()
+
+    # If no backend explicitly provided, inherit the global agent_backend setting
+    backend = request.backend
+    if not backend:
+        backend = get_settings().agent_backend
 
     agent = await manager.create_agent(
         name=request.name,
         role=request.role,
         description=request.description,
         specialties=request.specialties,
-        backend=request.backend,
+        backend=backend,
     )
 
     # Set level if not default
