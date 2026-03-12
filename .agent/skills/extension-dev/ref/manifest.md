@@ -82,12 +82,28 @@ Every extension folder needs an `extension.json`:
 
 ## Available Scopes
 
-| Scope            | Description                                     |
-| ---------------- | ----------------------------------------------- |
-| `storage.read`   | Read extension-scoped key-value storage         |
-| `storage.write`  | Write extension-scoped key-value storage        |
-| `chat.send`      | Send messages to AI (blocking request/response) |
-| `chat.stream`    | Stream AI responses (Server-Sent Events)        |
-| `sessions.read`  | List existing chat sessions                     |
-| `host.navigate`  | Navigate the dashboard to a different view      |
-| `host.open_chat` | Open the chat pane with pre-filled text         |
+| Scope                  | Description                                         |
+| ---------------------- | --------------------------------------------------- |
+| `storage.read`         | Read extension-scoped key-value storage             |
+| `storage.write`        | Write extension-scoped key-value storage            |
+| `chat.send`            | Send messages to AI (blocking request/response)     |
+| `chat.stream`          | Stream AI responses (Server-Sent Events)            |
+| `sessions.read`        | List existing chat sessions                         |
+| `host.navigate`        | Navigate the dashboard to a different view          |
+| `host.open_chat`       | Open the chat pane with pre-filled text             |
+| `reminders.read`       | List active reminders                               |
+| `reminders.write`      | Create / delete reminders                           |
+| `intentions.read`      | List intentions (scheduled AI tasks)                |
+| `intentions.write`     | Create / update / delete / toggle / run intentions  |
+| `memory.read`          | Read long-term memories                             |
+| `memory.write`         | Delete long-term memory entries                     |
+| `skills.read`          | List installed user-invocable skills                |
+| `health.read`          | Read server health status and version               |
+| `events.read`          | Subscribe to real-time system events (SSE)          |
+| `notifications.write`  | Push toasts / broadcast custom events               |
+| `commands.read`        | List extension-registered slash commands            |
+| `commands.write`       | Register / unregister slash commands                |
+| `tools.read`           | List extension-registered agent tools               |
+| `tools.write`          | Register / unregister agent tools                   |
+| `settings.read`        | Read PocketPaw server configuration                 |
+| `settings.write`       | Write PocketPaw server configuration                |

@@ -1,6 +1,19 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useStore } from "../store";
-import { Empty, Spin, Tag, Input, Select, Badge } from "antd";
+import { api } from "../api";
+import {
+  Empty,
+  Spin,
+  Tag,
+  Input,
+  Select,
+  Badge,
+  Button,
+  Popconfirm,
+  message,
+  Tooltip,
+  Pagination,
+} from "antd";
 import {
   ThunderboltOutlined,
   CheckCircleOutlined,
@@ -13,85 +26,100 @@ import {
   UserOutlined,
   RobotOutlined,
   GlobalOutlined,
-  ChromeOutlined,
+  CameraOutlined,
+  EditOutlined,
   ClockCircleOutlined,
-  FilterOutlined,
+  ClearOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 
 const { Search } = Input;
 
-// ── Mock activity data (would come from backend in production) ──
-
 interface ActivityEvent {
-  id: string;
-  type: "profile_created" | "profile_launched" | "profile_stopped" | "actor_run_started" | "actor_run_completed" | "actor_run_failed" | "team_member_added" | "proxy_added" | "proxy_checked" | "fingerprint_regen" | "actor_installed";
+  id: number;
+  profile_id: string;
+  type: string;
   message: string;
   resource: string;
+  meta: Record<string, any>;
   timestamp: number;
-  meta?: Record<string, any>;
 }
 
-const EVENT_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
-  profile_created: { icon: <PlusOutlined />, color: "#667eea", label: "Profile" },
-  profile_launched: { icon: <PlayCircleOutlined />, color: "#52c41a", label: "Profile" },
-  profile_stopped: { icon: <PauseCircleOutlined />, color: "#888", label: "Profile" },
-  actor_run_started: { icon: <ThunderboltOutlined />, color: "#1890ff", label: "Actor" },
-  actor_run_completed: { icon: <CheckCircleOutlined />, color: "#52c41a", label: "Actor" },
-  actor_run_failed: { icon: <CloseCircleOutlined />, color: "#ff4d4f", label: "Actor" },
-  team_member_added: { icon: <UserOutlined />, color: "#764ba2", label: "Team" },
-  proxy_added: { icon: <GlobalOutlined />, color: "#faad14", label: "Proxy" },
-  proxy_checked: { icon: <ReloadOutlined />, color: "#13c2c2", label: "Proxy" },
-  fingerprint_regen: { icon: <ReloadOutlined />, color: "#f5576c", label: "Fingerprint" },
-  actor_installed: { icon: <RobotOutlined />, color: "#667eea", label: "Store" },
+const EVENT_CONFIG: Record<
+  string,
+  { icon: React.ReactNode; color: string; label: string }
+> = {
+  profile_created: {
+    icon: <PlusOutlined />,
+    color: "#667eea",
+    label: "Profile",
+  },
+  profile_launched: {
+    icon: <PlayCircleOutlined />,
+    color: "#52c41a",
+    label: "Profile",
+  },
+  profile_stopped: {
+    icon: <PauseCircleOutlined />,
+    color: "#888",
+    label: "Profile",
+  },
+  profile_updated: {
+    icon: <EditOutlined />,
+    color: "#faad14",
+    label: "Profile",
+  },
+  profile_deleted: {
+    icon: <DeleteOutlined />,
+    color: "#ff4d4f",
+    label: "Profile",
+  },
+  fingerprint_regen: {
+    icon: <ReloadOutlined />,
+    color: "#f5576c",
+    label: "Fingerprint",
+  },
+  screenshot_taken: {
+    icon: <CameraOutlined />,
+    color: "#13c2c2",
+    label: "Screenshot",
+  },
+  actor_run_started: {
+    icon: <ThunderboltOutlined />,
+    color: "#1890ff",
+    label: "Actor",
+  },
+  actor_run_completed: {
+    icon: <CheckCircleOutlined />,
+    color: "#52c41a",
+    label: "Actor",
+  },
+  actor_run_failed: {
+    icon: <CloseCircleOutlined />,
+    color: "#ff4d4f",
+    label: "Actor",
+  },
+  actor_installed: {
+    icon: <RobotOutlined />,
+    color: "#667eea",
+    label: "Store",
+  },
+  team_member_added: {
+    icon: <UserOutlined />,
+    color: "#764ba2",
+    label: "Team",
+  },
+  proxy_added: {
+    icon: <GlobalOutlined />,
+    color: "#faad14",
+    label: "Proxy",
+  },
+  proxy_checked: {
+    icon: <ReloadOutlined />,
+    color: "#13c2c2",
+    label: "Proxy",
+  },
 };
-
-function generateMockActivity(profiles: any[], actors: any[], team: any[]): ActivityEvent[] {
-  const events: ActivityEvent[] = [];
-  const now = Date.now() / 1000;
-
-  // Generate events from real data
-  profiles.forEach((p, i) => {
-    events.push({
-      id: `pe-${p.id}`,
-      type: "profile_created",
-      message: `Profile "${p.name}" was created`,
-      resource: p.name,
-      timestamp: (p.created_at || now - (profiles.length - i) * 600),
-    });
-    if (p.status === "running") {
-      events.push({
-        id: `pl-${p.id}`,
-        type: "profile_launched",
-        message: `Browser launched for "${p.name}"`,
-        resource: p.name,
-        timestamp: (p.created_at || now) + 60,
-      });
-    }
-  });
-
-  actors.forEach((a, i) => {
-    events.push({
-      id: `ac-${a.id}`,
-      type: "actor_installed",
-      message: `Actor "${a.name}" was installed`,
-      resource: a.name,
-      timestamp: (a.created_at || now - (actors.length - i) * 400),
-    });
-  });
-
-  team.forEach((t) => {
-    events.push({
-      id: `tm-${t.id}`,
-      type: "team_member_added",
-      message: `"${t.name}" joined as ${t.role}`,
-      resource: t.name,
-      timestamp: t.created_at || now - 1000,
-    });
-  });
-
-  // Sort by timestamp descending
-  return events.sort((a, b) => b.timestamp - a.timestamp);
-}
 
 function timeAgo(ts: number): string {
   const now = Date.now() / 1000;
@@ -104,32 +132,74 @@ function timeAgo(ts: number): string {
 
 export default function ActivityPage() {
   const profiles = useStore((s) => s.profiles);
-  const actors = useStore((s) => s.actors);
-  const team = useStore((s) => s.team);
-
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-
-  const events = useMemo(
-    () => generateMockActivity(profiles, actors, team),
-    [profiles, actors, team],
+  const [filterProfile, setFilterProfile] = useState<string | undefined>(
+    undefined
   );
+  const [page, setPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
+  const pageSize = 50;
 
+  const fetchActivity = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params: any = {
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+      };
+      if (filter !== "all") params.type = filter;
+      if (filterProfile) params.profile_id = filterProfile;
+      const data = await api.listActivity(params);
+      setEvents(data.events || []);
+      setTotal(data.total || 0);
+    } catch (e: any) {
+      console.error("Failed to fetch activity:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, filter, filterProfile]);
+
+  useEffect(() => {
+    fetchActivity();
+  }, [fetchActivity]);
+
+  // Auto-refresh every 10s
+  useEffect(() => {
+    const timer = setInterval(fetchActivity, 10_000);
+    return () => clearInterval(timer);
+  }, [fetchActivity]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchActivity();
+    setRefreshing(false);
+  };
+
+  const handleClear = async () => {
+    try {
+      await api.clearActivity(filterProfile);
+      message.success("Activity cleared");
+      fetchActivity();
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  };
+
+  // Client-side search within loaded events
   const filteredEvents = useMemo(() => {
-    let result = events;
-    if (filter !== "all") {
-      result = result.filter((e) => EVENT_CONFIG[e.type]?.label.toLowerCase() === filter);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (e) =>
-          e.message.toLowerCase().includes(q) ||
-          e.resource.toLowerCase().includes(q),
-      );
-    }
-    return result;
-  }, [events, filter, search]);
+    if (!search.trim()) return events;
+    const q = search.toLowerCase();
+    return events.filter(
+      (e) =>
+        e.message.toLowerCase().includes(q) ||
+        e.resource.toLowerCase().includes(q) ||
+        e.profile_id.toLowerCase().includes(q)
+    );
+  }, [events, search]);
 
   // Group by date
   const groupedEvents = useMemo(() => {
@@ -146,6 +216,28 @@ export default function ActivityPage() {
     return groups;
   }, [filteredEvents]);
 
+  // Unique event type options for filter
+  const typeOptions = useMemo(() => {
+    const uniqueTypes = new Set(events.map((e) => e.type));
+    return [
+      { value: "all", label: "All Events" },
+      ...Array.from(uniqueTypes).map((t) => ({
+        value: t,
+        label: `${EVENT_CONFIG[t]?.icon ? "" : ""}${EVENT_CONFIG[t]?.label || t} — ${t.replace(/_/g, " ")}`,
+      })),
+    ];
+  }, [events]);
+
+  // Event badge counts
+  const badgeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filteredEvents.forEach((e) => {
+      const label = (EVENT_CONFIG[e.type]?.label || "Other").toLowerCase();
+      counts[label] = (counts[label] || 0) + 1;
+    });
+    return counts;
+  }, [filteredEvents]);
+
   return (
     <div className="content-area">
       <div className="fade-in">
@@ -157,8 +249,29 @@ export default function ActivityPage() {
               Activity Log
             </h2>
             <p style={{ color: "#555", marginTop: 4, fontSize: 13 }}>
-              {events.length} event{events.length !== 1 ? "s" : ""} tracked
+              {total} event{total !== 1 ? "s" : ""} tracked
+              {filterProfile && " (filtered by profile)"}
             </p>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              icon={<SyncOutlined spin={refreshing} />}
+              onClick={handleRefresh}
+            >
+              Refresh
+            </Button>
+            <Popconfirm
+              title={
+                filterProfile
+                  ? "Clear activity for this profile?"
+                  : "Clear all activity?"
+              }
+              onConfirm={handleClear}
+            >
+              <Button danger icon={<ClearOutlined />}>
+                Clear
+              </Button>
+            </Popconfirm>
           </div>
         </div>
 
@@ -174,50 +287,80 @@ export default function ActivityPage() {
           />
           <Select
             value={filter}
-            onChange={setFilter}
-            style={{ width: 160 }}
+            onChange={(v) => {
+              setFilter(v);
+              setPage(1);
+            }}
+            style={{ width: 200 }}
             options={[
               { value: "all", label: "All Events" },
-              { value: "profile", label: "🛡️  Profiles" },
-              { value: "actor", label: "🤖  Actors" },
-              { value: "team", label: "👥  Team" },
-              { value: "proxy", label: "🌐  Proxies" },
-              { value: "store", label: "🛒  Store" },
-              { value: "fingerprint", label: "🔒  Fingerprint" },
+              { value: "profile_created", label: "➕ Profile Created" },
+              { value: "profile_launched", label: "▶️ Profile Launched" },
+              { value: "profile_stopped", label: "⏸️ Profile Stopped" },
+              { value: "profile_updated", label: "✏️ Profile Updated" },
+              { value: "profile_deleted", label: "🗑️ Profile Deleted" },
+              { value: "fingerprint_regen", label: "🔒 Fingerprint Regen" },
+              { value: "screenshot_taken", label: "📸 Screenshot" },
             ]}
+          />
+          <Select
+            placeholder="All Profiles"
+            allowClear
+            value={filterProfile}
+            onChange={(v) => {
+              setFilterProfile(v);
+              setPage(1);
+            }}
+            style={{ width: 200 }}
+            options={profiles.map((p: any) => ({
+              value: p.id,
+              label: `${p.name} (${p.id})`,
+            }))}
           />
         </div>
 
         {/* Event summary badges */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 24, flexWrap: "wrap" }}>
-          {["profile", "actor", "team", "proxy", "store"].map((type) => {
-            const count = events.filter((e) => EVENT_CONFIG[e.type]?.label.toLowerCase() === type).length;
-            if (count === 0) return null;
-            return (
-              <div
-                key={type}
-                onClick={() => setFilter(filter === type ? "all" : type)}
-                style={{
-                  padding: "4px 14px",
-                  borderRadius: 20,
-                  fontSize: 12,
-                  cursor: "pointer",
-                  background: filter === type ? "rgba(102,126,234,0.15)" : "rgba(255,255,255,0.03)",
-                  border: filter === type ? "1px solid rgba(102,126,234,0.3)" : "1px solid rgba(255,255,255,0.06)",
-                  color: filter === type ? "#b8c5ff" : "#777",
-                  transition: "all 0.2s",
-                }}
-              >
-                {type.charAt(0).toUpperCase() + type.slice(1)}{" "}
-                <Badge count={count} size="small" style={{ marginLeft: 4, background: filter === type ? "#667eea" : "#444" }} />
-              </div>
-            );
-          })}
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginBottom: 24,
+            flexWrap: "wrap",
+          }}
+        >
+          {Object.entries(badgeCounts).map(([type, count]) => (
+            <div
+              key={type}
+              style={{
+                padding: "4px 14px",
+                borderRadius: 20,
+                fontSize: 12,
+                cursor: "default",
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                color: "#777",
+              }}
+            >
+              {type.charAt(0).toUpperCase() + type.slice(1)}{" "}
+              <Badge
+                count={count}
+                size="small"
+                style={{ marginLeft: 4, background: "#444" }}
+              />
+            </div>
+          ))}
         </div>
 
         {/* Timeline */}
-        {filteredEvents.length === 0 ? (
-          <Empty description="No activity found" style={{ marginTop: 60 }} />
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 60 }}>
+            <Spin size="large" />
+          </div>
+        ) : filteredEvents.length === 0 ? (
+          <Empty
+            description="No activity logged yet"
+            style={{ marginTop: 60 }}
+          />
         ) : (
           <div style={{ paddingBottom: 32 }}>
             {Object.entries(groupedEvents).map(([date, evts]) => (
@@ -252,8 +395,18 @@ export default function ActivityPage() {
                     }}
                   />
 
-                  {evts.map((event, i) => {
-                    const cfg = EVENT_CONFIG[event.type] || { icon: <ThunderboltOutlined />, color: "#888", label: "System" };
+                  {evts.map((event) => {
+                    const cfg = EVENT_CONFIG[event.type] || {
+                      icon: <ThunderboltOutlined />,
+                      color: "#888",
+                      label: "System",
+                    };
+
+                    // Find profile name
+                    const profile = profiles.find(
+                      (p: any) => p.id === event.profile_id
+                    );
+
                     return (
                       <div
                         key={event.id}
@@ -287,10 +440,24 @@ export default function ActivityPage() {
 
                         {/* Content */}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, color: "#e0e0e0", lineHeight: 1.5 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              color: "#e0e0e0",
+                              lineHeight: 1.5,
+                            }}
+                          >
                             {event.message}
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              marginTop: 4,
+                              flexWrap: "wrap",
+                            }}
+                          >
                             <Tag
                               style={{
                                 borderRadius: 4,
@@ -303,8 +470,50 @@ export default function ActivityPage() {
                             >
                               {cfg.label}
                             </Tag>
+                            {event.profile_id && profile && (
+                              <Tag
+                                style={{
+                                  borderRadius: 4,
+                                  fontSize: 10,
+                                  margin: 0,
+                                  background: "rgba(102,126,234,0.08)",
+                                  color: "#8a9cf7",
+                                  border: "1px solid rgba(102,126,234,0.2)",
+                                }}
+                              >
+                                🛡️ {profile.name}
+                              </Tag>
+                            )}
+                            {event.meta &&
+                              Object.keys(event.meta).length > 0 && (
+                                <Tooltip
+                                  title={
+                                    <pre
+                                      style={{
+                                        margin: 0,
+                                        fontSize: 10,
+                                        whiteSpace: "pre-wrap",
+                                      }}
+                                    >
+                                      {JSON.stringify(event.meta, null, 2)}
+                                    </pre>
+                                  }
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: 10,
+                                      color: "#555",
+                                      cursor: "help",
+                                    }}
+                                  >
+                                    📋 details
+                                  </span>
+                                </Tooltip>
+                              )}
                             <span style={{ fontSize: 11, color: "#444" }}>
-                              <ClockCircleOutlined style={{ marginRight: 3 }} />
+                              <ClockCircleOutlined
+                                style={{ marginRight: 3 }}
+                              />
                               {timeAgo(event.timestamp)}
                             </span>
                           </div>
@@ -315,6 +524,26 @@ export default function ActivityPage() {
                 </div>
               </div>
             ))}
+
+            {/* Pagination */}
+            {total > pageSize && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  marginTop: 24,
+                }}
+              >
+                <Pagination
+                  current={page}
+                  pageSize={pageSize}
+                  total={total}
+                  onChange={(p) => setPage(p)}
+                  size="small"
+                  showSizeChanger={false}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

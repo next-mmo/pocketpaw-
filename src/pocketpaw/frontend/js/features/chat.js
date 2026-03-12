@@ -312,6 +312,25 @@ window.PocketPaw.Chat = {
                 } else {
                     this.slashPicker.open = false;
                 }
+                // Show Todo Copilot composer assist when /todo is active
+                if (/^\/todo\s*$/i.test(text)) {
+                    this.openComposerAssist({
+                        title: 'Todo Copilot',
+                        subtitle: 'Direct CRUD in chat',
+                        summary: 'No tasks yet',
+                        icon: 'list-todo',
+                        actions: [
+                            { key: 'add', label: 'Add a task', behavior: 'insert', value: '/todo add ' },
+                            { key: 'list', label: 'Show list', behavior: 'insert', value: '/todo list' }
+                        ],
+                        examples: ['/todo add Buy milk']
+                    });
+                } else if (!text.startsWith('/todo')) {
+                    // Dismiss if user moves away from /todo
+                    if (this.composerAssist.active && this.composerAssist.title === 'Todo Copilot') {
+                        this.dismissComposerAssist();
+                    }
+                }
                 // Sync composer assist state if active
                 this.syncComposerAssistWithInput();
             },
@@ -339,6 +358,7 @@ window.PocketPaw.Chat = {
                 // Built-in commands
                 const builtins = [
                     { key: '/help', command: '/help', description: 'Show available commands', kind: 'builtin' },
+                    { key: '/todo', command: '/todo', description: 'Direct CRUD in chat', kind: 'builtin' },
                     { key: '/backend', command: '/backend', description: 'Switch or show current AI backend', kind: 'builtin' },
                     { key: '/backends', command: '/backends', description: 'List all available backends', kind: 'builtin' },
                     { key: '/model', command: '/model', description: 'Show or set the active model', kind: 'builtin' },
@@ -372,6 +392,7 @@ window.PocketPaw.Chat = {
                 if (!item) return;
                 this.inputText = item.command + ' ';
                 this.slashPicker.open = false;
+                this.handleChatInputChange();
                 this.focusChatComposer();
             },
 

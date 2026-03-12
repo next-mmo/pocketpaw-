@@ -794,6 +794,713 @@ async def extension_chat_stream(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Reminders (list / create / delete)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/reminders")
+async def extension_reminders_list(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("reminders.read")),
+):
+    """List all active reminders."""
+    from pocketpaw.scheduler import get_scheduler
+
+    sched = get_scheduler()
+    raw = sched.get_reminders()
+    return [
+        {
+            "id": r.get("id", ""),
+            "text": r.get("text", ""),
+            "trigger_at": r.get("trigger_at", ""),
+            "created_at": r.get("created_at", ""),
+            "time_remaining": sched.format_time_remaining(r),
+        }
+        for r in raw
+    ]
+
+
+class _AddReminderBody(BaseModel):
+    message: str
+
+
+@router.post("/extensions/runtime/{extension_id}/reminders")
+async def extension_reminders_create(
+    extension_id: str,
+    body: _AddReminderBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("reminders.write")),
+):
+    """Add a reminder from natural language (e.g. 'in 5 minutes to call mom')."""
+    from pocketpaw.scheduler import get_scheduler
+
+    sched = get_scheduler()
+    result = sched.add_reminder(body.message)
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not parse time from message. Try 'in 5 minutes' or 'at 3pm'",
+        )
+    return {
+        "id": result.get("id", ""),
+        "text": result.get("text", ""),
+        "trigger_at": result.get("trigger_at", ""),
+        "created_at": result.get("created_at", ""),
+        "time_remaining": sched.format_time_remaining(result),
+    }
+
+
+@router.delete("/extensions/runtime/{extension_id}/reminders/{reminder_id}")
+async def extension_reminders_delete(
+    extension_id: str,
+    reminder_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("reminders.write")),
+):
+    """Delete a reminder by ID."""
+    from pocketpaw.scheduler import get_scheduler
+
+    sched = get_scheduler()
+    deleted = sched.delete_reminder(reminder_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    return {"id": reminder_id, "deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Intentions (CRUD / toggle / run)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/intentions")
+async def extension_intentions_list(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.read")),
+):
+    """List all intentions."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    return daemon.get_intentions()
+
+
+class _CreateIntentionBody(BaseModel):
+    name: str
+    prompt: str
+    trigger: dict = {}
+    context_sources: list = []
+    enabled: bool = True
+
+
+@router.post("/extensions/runtime/{extension_id}/intentions")
+async def extension_intentions_create(
+    extension_id: str,
+    body: _CreateIntentionBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.write")),
+):
+    """Create a new intention."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    result = daemon.create_intention(
+        name=body.name,
+        prompt=body.prompt,
+        trigger=body.trigger,
+        context_sources=body.context_sources,
+        enabled=body.enabled,
+    )
+    return result
+
+
+class _UpdateIntentionBody(BaseModel):
+    name: str | None = None
+    prompt: str | None = None
+    trigger: dict | None = None
+    context_sources: list | None = None
+    enabled: bool | None = None
+
+
+@router.patch("/extensions/runtime/{extension_id}/intentions/{intention_id}")
+async def extension_intentions_update(
+    extension_id: str,
+    intention_id: str,
+    body: _UpdateIntentionBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.write")),
+):
+    """Partially update an intention."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    result = daemon.update_intention(intention_id, updates)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Intention not found")
+    return result
+
+
+@router.delete("/extensions/runtime/{extension_id}/intentions/{intention_id}")
+async def extension_intentions_delete(
+    extension_id: str,
+    intention_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.write")),
+):
+    """Delete an intention by ID."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    deleted = daemon.delete_intention(intention_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Intention not found")
+    return {"id": intention_id, "deleted": True}
+
+
+@router.post("/extensions/runtime/{extension_id}/intentions/{intention_id}/toggle")
+async def extension_intentions_toggle(
+    extension_id: str,
+    intention_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.write")),
+):
+    """Toggle the enabled state of an intention."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    result = daemon.toggle_intention(intention_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Intention not found")
+    return result
+
+
+@router.post("/extensions/runtime/{extension_id}/intentions/{intention_id}/run")
+async def extension_intentions_run(
+    extension_id: str,
+    intention_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("intentions.write")),
+):
+    """Manually trigger an intention to run now."""
+    from pocketpaw.daemon.proactive import get_daemon
+
+    daemon = get_daemon()
+    intentions = daemon.get_intentions()
+    intention = next((i for i in intentions if i.get("id") == intention_id), None)
+    if intention is None:
+        raise HTTPException(status_code=404, detail="Intention not found")
+
+    asyncio.create_task(daemon.run_intention_now(intention_id))
+    return {
+        "id": intention_id,
+        "status": "running",
+        "message": f"Running intention: {intention.get('name', '')}",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Long-term Memory (list / delete)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/memory")
+async def extension_memory_list(
+    extension_id: str,
+    limit: int = 50,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("memory.read")),
+):
+    """Get long-term memories."""
+    from pocketpaw.memory import MemoryType, get_memory_manager
+
+    manager = get_memory_manager()
+    items = await manager._store.get_by_type(MemoryType.LONG_TERM, limit=limit)
+    return [
+        {
+            "id": item.id,
+            "content": item.content,
+            "timestamp": (
+                item.created_at.isoformat()
+                if hasattr(item.created_at, "isoformat")
+                else str(item.created_at)
+            ),
+            "tags": item.tags,
+        }
+        for item in items
+    ]
+
+
+@router.delete("/extensions/runtime/{extension_id}/memory/{entry_id}")
+async def extension_memory_delete(
+    extension_id: str,
+    entry_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("memory.write")),
+):
+    """Delete a long-term memory entry by ID."""
+    from pocketpaw.memory import get_memory_manager
+
+    manager = get_memory_manager()
+    deleted = await manager._store.delete(entry_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory entry not found")
+    return {"id": entry_id, "deleted": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Skills (list)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/skills")
+async def extension_skills_list(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("skills.read")),
+):
+    """List all installed user-invocable skills."""
+    from pocketpaw.skills import get_skill_loader
+
+    loader = get_skill_loader()
+    loader.reload()
+    return [
+        {"name": s.name, "description": s.description, "argument_hint": s.argument_hint}
+        for s in loader.get_invocable()
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Health & Version (read-only)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/health")
+async def extension_health(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("health.read")),
+):
+    """Get health summary for the PocketPaw server."""
+    try:
+        from pocketpaw.health import get_health_engine
+
+        engine = get_health_engine()
+        return engine.summary.model_dump() if hasattr(engine.summary, "model_dump") else {}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/extensions/runtime/{extension_id}/version")
+async def extension_version(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("health.read")),
+):
+    """Get PocketPaw version info."""
+    import sys
+
+    from pocketpaw import __version__
+    from pocketpaw.config import Settings
+
+    settings = Settings.load()
+    return {
+        "version": __version__,
+        "python": sys.version,
+        "agent_backend": settings.agent_backend,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Events SSE stream
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/events/stream")
+async def extension_events_stream(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("events.read")),
+):
+    """Subscribe to real-time system events via SSE (scoped to extension)."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _subscribe():
+        from pocketpaw.bus import get_message_bus
+        from pocketpaw.bus.events import SystemEvent
+
+        bus = get_message_bus()
+
+        async def _on_event(evt: SystemEvent) -> None:
+            await queue.put(
+                {
+                    "event": evt.event_type,
+                    "data": evt.data or {},
+                }
+            )
+
+        bus.subscribe_system(_on_event)
+        return _on_event
+
+    sub = await _subscribe()
+
+    async def _event_generator():
+        try:
+            yield f"event: connected\ndata: {json.dumps({'status': 'ok', 'extension_id': extension_id})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"event: {event['event']}\ndata: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            from pocketpaw.bus import get_message_bus
+
+            bus = get_message_bus()
+            bus.unsubscribe_system(sub)
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Notifications (push toasts / broadcasts)
+# ═══════════════════════════════════════════════════════════════════════════
+#  Inspired by OpenClaw: plugins can surface information in the dashboard
+#  without requiring the user to be inside the extension's iframe.
+
+
+class _NotificationBody(BaseModel):
+    title: str
+    message: str = ""
+    level: str = "info"  # info | success | warning | error
+    duration: int = 5000  # milliseconds, 0 = sticky
+
+
+@router.post("/extensions/runtime/{extension_id}/notifications")
+async def extension_notify(
+    extension_id: str,
+    body: _NotificationBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("notifications.write")),
+):
+    """Push a toast/notification to the dashboard."""
+    from pocketpaw.dashboard_state import active_connections
+
+    payload = {
+        "type": "extension_notification",
+        "extension_id": extension_id,
+        "title": body.title,
+        "message": body.message,
+        "level": body.level,
+        "duration": body.duration,
+    }
+    # Broadcast to all connected WS clients
+    for ws in list(active_connections):
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            pass  # Connection may be closed
+    return {"sent": True, "to": len(active_connections)}
+
+
+class _BroadcastBody(BaseModel):
+    event: str
+    data: dict = {}
+
+
+@router.post("/extensions/runtime/{extension_id}/broadcast")
+async def extension_broadcast(
+    extension_id: str,
+    body: _BroadcastBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("notifications.write")),
+):
+    """Emit a custom event on the system bus (other extensions/listeners can receive it)."""
+    from pocketpaw.bus import get_message_bus
+    from pocketpaw.bus.events import SystemEvent
+
+    bus = get_message_bus()
+    await bus.publish_system(
+        SystemEvent(
+            event_type=f"extension:{extension_id}:{body.event}",
+            data=body.data,
+        )
+    )
+    return {"broadcast": True, "event": f"extension:{extension_id}:{body.event}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Commands (register slash commands from extensions)
+# ═══════════════════════════════════════════════════════════════════════════
+#  Inspired by OpenClaw's api.registerCommand(): extensions can register
+#  auto-reply slash commands that work without invoking the AI agent.
+
+# In-memory command registry (persists for the lifetime of the server)
+_extension_commands: dict[str, dict] = {}
+
+
+class _RegisterCommandBody(BaseModel):
+    name: str  # command name without leading /
+    description: str = ""
+    accepts_args: bool = False
+    response_text: str | None = None  # static response; for dynamic, use webhook_url
+    webhook_url: str | None = None  # called with POST {args, sender} for dynamic response
+
+
+@router.post("/extensions/runtime/{extension_id}/commands")
+async def extension_register_command(
+    extension_id: str,
+    body: _RegisterCommandBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("commands.write")),
+):
+    """Register a slash command that routes to this extension."""
+    import re
+
+    cmd_name = body.name.lower().strip().lstrip("/")
+    if not re.match(r"^[a-z][a-z0-9_-]{0,31}$", cmd_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Command name must start with a letter and contain only a-z, 0-9, -, _",
+        )
+
+    # Prevent overriding reserved commands
+    reserved = {"help", "status", "reset", "new", "clear", "skills", "reminders"}
+    if cmd_name in reserved:
+        raise HTTPException(status_code=400, detail=f"/{cmd_name} is a reserved command")
+
+    _extension_commands[cmd_name] = {
+        "name": cmd_name,
+        "extension_id": extension_id,
+        "description": body.description,
+        "accepts_args": body.accepts_args,
+        "response_text": body.response_text,
+        "webhook_url": body.webhook_url,
+    }
+    return {"registered": True, "command": f"/{cmd_name}"}
+
+
+@router.get("/extensions/runtime/{extension_id}/commands")
+async def extension_list_commands(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("commands.read")),
+):
+    """List commands registered by this extension."""
+    return [
+        cmd for cmd in _extension_commands.values()
+        if cmd["extension_id"] == extension_id
+    ]
+
+
+@router.delete("/extensions/runtime/{extension_id}/commands/{command_name}")
+async def extension_unregister_command(
+    extension_id: str,
+    command_name: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("commands.write")),
+):
+    """Unregister a command owned by this extension."""
+    cmd = _extension_commands.get(command_name)
+    if not cmd or cmd["extension_id"] != extension_id:
+        raise HTTPException(status_code=404, detail="Command not found")
+    del _extension_commands[command_name]
+    return {"unregistered": True, "command": f"/{command_name}"}
+
+
+# Public endpoint for the dashboard/agent to look up extension commands
+@router.get("/extensions/commands")
+async def list_all_extension_commands(request: Request):
+    """List all extension-registered commands (public, no scope check)."""
+    return list(_extension_commands.values())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Agent Tools (expose tools to the AI agent)
+# ═══════════════════════════════════════════════════════════════════════════
+#  Inspired by OpenClaw's agent tool registration: extensions can register
+#  tools that the AI agent can call, bridging extension functionality
+#  into the agent's tool-use capabilities.
+
+_extension_tools: dict[str, dict] = {}
+
+
+class _ToolParamSchema(BaseModel):
+    name: str
+    type: str = "string"
+    description: str = ""
+    required: bool = False
+
+
+class _RegisterToolBody(BaseModel):
+    name: str  # snake_case tool name
+    description: str
+    parameters: list[_ToolParamSchema] = []
+    webhook_url: str  # POST'd with {params} when the agent calls this tool
+
+
+@router.post("/extensions/runtime/{extension_id}/tools")
+async def extension_register_tool(
+    extension_id: str,
+    body: _RegisterToolBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("tools.write")),
+):
+    """Register a tool that the AI agent can invoke."""
+    import re
+
+    tool_name = body.name.lower().strip()
+    if not re.match(r"^[a-z][a-z0-9_]{0,63}$", tool_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Tool name must be snake_case (a-z, 0-9, _)",
+        )
+
+    _extension_tools[tool_name] = {
+        "name": tool_name,
+        "extension_id": extension_id,
+        "description": body.description,
+        "parameters": [p.model_dump() for p in body.parameters],
+        "webhook_url": body.webhook_url,
+    }
+    return {"registered": True, "tool": tool_name}
+
+
+@router.get("/extensions/runtime/{extension_id}/tools")
+async def extension_list_tools(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("tools.read")),
+):
+    """List tools registered by this extension."""
+    return [
+        tool for tool in _extension_tools.values()
+        if tool["extension_id"] == extension_id
+    ]
+
+
+@router.delete("/extensions/runtime/{extension_id}/tools/{tool_name}")
+async def extension_unregister_tool(
+    extension_id: str,
+    tool_name: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("tools.write")),
+):
+    """Unregister a tool owned by this extension."""
+    tool = _extension_tools.get(tool_name)
+    if not tool or tool["extension_id"] != extension_id:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    del _extension_tools[tool_name]
+    return {"unregistered": True, "tool": tool_name}
+
+
+# Public endpoint — used by agent loop to discover plugin-registered tools
+@router.get("/extensions/tools")
+async def list_all_extension_tools(request: Request):
+    """List all extension-registered agent tools (public)."""
+    return list(_extension_tools.values())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Settings (read/write server config)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/extensions/runtime/{extension_id}/settings")
+async def extension_settings_get(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("settings.read")),
+):
+    """Get current PocketPaw settings (safe subset)."""
+    from pocketpaw.config import Settings
+
+    settings = Settings.load()
+    return {
+        "agent_backend": settings.agent_backend,
+        "llm_provider": settings.llm_provider,
+        "web_search_provider": settings.web_search_provider,
+        "tts_provider": settings.tts_provider,
+        "stt_provider": settings.stt_provider,
+        "memory_backend": settings.memory_backend,
+        "tool_profile": settings.tool_profile,
+        "plan_mode": settings.plan_mode,
+        "bypass_permissions": settings.bypass_permissions,
+    }
+
+
+class _SettingsPatchBody(BaseModel):
+    agent_backend: str | None = None
+    llm_provider: str | None = None
+    web_search_provider: str | None = None
+    tts_provider: str | None = None
+    stt_provider: str | None = None
+    tool_profile: str | None = None
+    plan_mode: bool | None = None
+
+
+@router.patch("/extensions/runtime/{extension_id}/settings")
+async def extension_settings_patch(
+    extension_id: str,
+    body: _SettingsPatchBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("settings.write")),
+):
+    """Update PocketPaw settings (from extension scope)."""
+    from pocketpaw.config import Settings
+
+    settings = Settings.load()
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+
+    for key, value in updates.items():
+        if hasattr(settings, key):
+            setattr(settings, key, value)
+    settings.save()
+    return {"updated": list(updates.keys())}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Extension Runtime — Config Store (per-extension validated config)
+# ═══════════════════════════════════════════════════════════════════════════
+#  Inspired by OpenClaw's configSchema + uiHints: each extension can
+#  have its own configuration separate from key-value storage.
+
+
+@router.get("/extensions/runtime/{extension_id}/config")
+async def extension_config_get(
+    extension_id: str,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("storage.read")),
+):
+    """Get the extension's configuration (stored in config.json alongside extension.json)."""
+    from pocketpaw.extensions.registry import get_extension_registry
+
+    registry = get_extension_registry()
+    ext = registry.get(extension_id)
+    if not ext:
+        raise HTTPException(status_code=404, detail="Extension not found")
+
+    config_path = ext.root_dir / "config.json"
+    if config_path.exists():
+        try:
+            return json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+class _ConfigPutBody(BaseModel):
+    config: dict
+
+
+@router.put("/extensions/runtime/{extension_id}/config")
+async def extension_config_put(
+    extension_id: str,
+    body: _ConfigPutBody,
+    _ctx: _ExtensionRuntimeContext = Depends(require_extension_runtime("storage.write")),
+):
+    """Save the extension's configuration."""
+    from pocketpaw.extensions.registry import get_extension_registry
+
+    registry = get_extension_registry()
+    ext = registry.get(extension_id)
+    if not ext:
+        raise HTTPException(status_code=404, detail="Extension not found")
+
+    config_path = ext.root_dir / "config.json"
+    config_path.write_text(json.dumps(body.config, indent=2), encoding="utf-8")
+    return {"saved": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Plugin Management Endpoints
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1536,10 +2243,31 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
     proc = mgr.get(plugin_id)
 
     if proc is None or proc.status != "running" or not proc.port:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Plugin {plugin_id} is not running",
-        )
+        # Auto-start the plugin if it's installed but not running
+        registry = get_extension_registry()
+        record = registry.get(plugin_id)
+        if record and record.is_plugin and record.is_installed and record.manifest.start:
+            sandbox = record.get_sandbox_manager()
+            if sandbox and sandbox.is_installed:
+                from copy import deepcopy
+                start_cfg = deepcopy(record.manifest.start)
+                try:
+                    proc = await mgr.start(plugin_id, sandbox, start_cfg)
+                    # Wait up to 15 seconds for the daemon to become ready
+                    for _ in range(30):
+                        if proc.status == "running" and proc.port:
+                            break
+                        await asyncio.sleep(0.5)
+                except Exception as exc:
+                    logger.warning("Auto-start of plugin %s failed: %s", plugin_id, exc)
+
+        # Re-check after auto-start attempt
+        proc = mgr.get(plugin_id)
+        if proc is None or proc.status != "running" or not proc.port:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Plugin {plugin_id} is not running",
+            )
 
     # Rebuild target URL including query string
     target_url = f"http://127.0.0.1:{proc.port}/{proxy_path}"

@@ -17,9 +17,9 @@
 
 import os
 import socket
+import threading
 import time
 from contextlib import closing
-from multiprocessing import Process
 
 import pytest
 
@@ -33,7 +33,11 @@ def find_free_port() -> int:
 
 
 def run_dashboard(port: int):
-    """Run the dashboard server in a subprocess."""
+    """Run the dashboard server in a thread.
+
+    Uses threading instead of multiprocessing because Windows' ``spawn``
+    start-method cannot pickle functions defined in conftest.py.
+    """
     import uvicorn
 
     from pocketpaw.dashboard import app
@@ -41,7 +45,7 @@ def run_dashboard(port: int):
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
 
 
-def wait_for_server(port: int, timeout: float = 10.0) -> bool:
+def wait_for_server(port: int, timeout: float = 15.0) -> bool:
     """Wait for the server to be ready."""
     start = time.time()
     while time.time() - start < timeout:
@@ -51,7 +55,7 @@ def wait_for_server(port: int, timeout: float = 10.0) -> bool:
                 s.connect(("127.0.0.1", port))
                 return True
         except (OSError, ConnectionRefusedError):
-            time.sleep(0.1)
+            time.sleep(0.2)
     return False
 
 
@@ -70,23 +74,22 @@ def dashboard_server(dashboard_port: int):
     # Set test environment
     os.environ["POCKETPAW_TEST_MODE"] = "1"
 
-    # Start server in subprocess
-    process = Process(target=run_dashboard, args=(dashboard_port,))
-    process.start()
+    # Start server in a daemon thread (cross-platform, no pickling issues)
+    thread = threading.Thread(
+        target=run_dashboard,
+        args=(dashboard_port,),
+        daemon=True,
+        name="e2e-dashboard",
+    )
+    thread.start()
 
     # Wait for server to be ready
     if not wait_for_server(dashboard_port):
-        process.terminate()
-        process.join(timeout=5)
         pytest.fail(f"Dashboard server failed to start on port {dashboard_port}")
 
     yield f"http://127.0.0.1:{dashboard_port}"
 
-    # Cleanup
-    process.terminate()
-    process.join(timeout=5)
-    if process.is_alive():
-        process.kill()
+    # Daemon thread will be cleaned up automatically on process exit
 
 
 @pytest.fixture(scope="session")

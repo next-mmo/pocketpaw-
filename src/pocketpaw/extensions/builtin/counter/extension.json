@@ -1,11 +1,30 @@
 {
   "id": "counter",
   "name": "Counter",
-  "version": "1.0.0",
-  "description": "A minimal sample app — perfect starting point for community extension developers.",
+  "version": "2.0.0",
+  "description": "A full-stack Python counter app with Gradio UI, FastAPI backend, and PocketPaw SDK integration.",
   "icon": "hash",
   "route": "counter",
   "entry": "index.html",
+  "type": "plugin",
   "autostart": false,
-  "scopes": ["storage.read", "storage.write"]
+  "scopes": ["storage.read", "storage.write", "host.open_chat"],
+  "sandbox": {
+    "python": "3.11",
+    "venv": "env",
+    "env": {
+      "GRADIO_SERVER_NAME": "127.0.0.1"
+    }
+  },
+  "install": {
+    "steps": [
+      { "pip": "requirements.txt" }
+    ]
+  },
+  "start": {
+    "command": "python server.py --host 127.0.0.1 --port __PORT__",
+    "daemon": true,
+    "ready_pattern": "Uvicorn running on",
+    "port": "auto"
+  }
 }

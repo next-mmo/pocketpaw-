@@ -1,11 +1,12 @@
 """
 SQLite database layer for Anti-Browser.
-Stores profiles, actors, runs, team members, proxies, and groups.
+Stores profiles, actors, runs, team members, proxies, groups, and activity logs.
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,19 @@ class Database:
                 id TEXT PRIMARY KEY,
                 data TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id TEXT,
+                event_type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                resource TEXT NOT NULL DEFAULT '',
+                meta TEXT DEFAULT '{}',
+                timestamp REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_activity_profile
+                ON activity_logs(profile_id);
+            CREATE INDEX IF NOT EXISTS idx_activity_timestamp
+                ON activity_logs(timestamp DESC);
         """)
         await self._db.commit()
 
@@ -174,3 +188,102 @@ class Database:
 
     async def delete_group(self, group_id: str):
         await self._delete("groups_", group_id)
+
+    # ── Activity Logs ───────────────────────────────────────────────
+
+    async def log_activity(
+        self,
+        event_type: str,
+        message: str,
+        resource: str = "",
+        profile_id: str | None = None,
+        meta: dict | None = None,
+    ):
+        """Record an activity log entry."""
+        await self._db.execute(
+            """INSERT INTO activity_logs
+               (profile_id, event_type, message, resource, meta, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                profile_id or "",
+                event_type,
+                message,
+                resource,
+                json.dumps(meta or {}),
+                time.time(),
+            ),
+        )
+        await self._db.commit()
+
+    async def list_activity(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        event_type: str | None = None,
+        profile_id: str | None = None,
+    ) -> list[dict]:
+        """List activity logs, optionally filtered."""
+        conditions = []
+        params: list[Any] = []
+
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if profile_id:
+            conditions.append("profile_id = ?")
+            params.append(profile_id)
+
+        where = ""
+        if conditions:
+            where = "WHERE " + " AND ".join(conditions)
+
+        params.extend([limit, offset])
+        cursor = await self._db.execute(
+            f"SELECT id, profile_id, event_type, message, resource, meta, timestamp "
+            f"FROM activity_logs {where} "
+            f"ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "profile_id": r[1],
+                "type": r[2],
+                "message": r[3],
+                "resource": r[4],
+                "meta": json.loads(r[5]) if r[5] else {},
+                "timestamp": r[6],
+            }
+            for r in rows
+        ]
+
+    async def list_profile_activity(
+        self, profile_id: str, limit: int = 50
+    ) -> list[dict]:
+        """List activity for a specific profile."""
+        return await self.list_activity(limit=limit, profile_id=profile_id)
+
+    async def count_activity(self, profile_id: str | None = None) -> int:
+        """Count total activity entries."""
+        if profile_id:
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM activity_logs WHERE profile_id = ?",
+                (profile_id,),
+            )
+        else:
+            cursor = await self._db.execute("SELECT COUNT(*) FROM activity_logs")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def clear_activity(self, profile_id: str | None = None):
+        """Clear activity logs, optionally for a specific profile."""
+        if profile_id:
+            await self._db.execute(
+                "DELETE FROM activity_logs WHERE profile_id = ?",
+                (profile_id,),
+            )
+        else:
+            await self._db.execute("DELETE FROM activity_logs")
+        await self._db.commit()
+

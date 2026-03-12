@@ -30,6 +30,24 @@ ALLOWED_EXTENSION_SCOPES = frozenset(
         "sessions.read",
         "host.navigate",
         "host.open_chat",
+        # SDK v2 — backend features
+        "reminders.read",
+        "reminders.write",
+        "intentions.read",
+        "intentions.write",
+        "memory.read",
+        "memory.write",
+        "skills.read",
+        "health.read",
+        "events.read",
+        # SDK v2 — OpenClaw-inspired
+        "notifications.write",
+        "commands.read",
+        "commands.write",
+        "tools.read",
+        "tools.write",
+        "settings.read",
+        "settings.write",
     }
 )
 

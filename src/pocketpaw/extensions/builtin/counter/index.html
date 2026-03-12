@@ -4,56 +4,88 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PocketPaw Counter</title>
-    <link rel="stylesheet" href="./styles.css" />
-    <!-- PocketPaw Extension SDK — gives us storage, chat, etc. -->
-    <script src="/static/js/extensions-sdk.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; }
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        display: block;
+      }
+      /* Loading state before Gradio is ready */
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        color: rgba(255,255,255,0.4);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        letter-spacing: 0.05em;
+      }
+      .loading .spinner {
+        width: 20px; height: 20px;
+        border: 2px solid rgba(255,255,255,0.1);
+        border-top-color: #007aff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-right: 12px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
-    <main class="shell">
-      <section class="hero">
-        <div>
-          <p class="eyebrow">PocketPaw Extension</p>
-          <h1>Counter</h1>
-          <p class="lede">
-            A minimal sample app showing how to use the Extension SDK.<br />
-            Fork this to build your own extensions!
-          </p>
-        </div>
-      </section>
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      Starting Counter server…
+    </div>
+    <iframe id="gradio-frame" style="display:none"></iframe>
 
-      <section class="panel">
-        <div class="counter-display">
-          <span id="count-value">0</span>
-        </div>
-        <div class="counter-controls">
-          <button id="btn-decrement" class="btn secondary" title="Decrement">
-            −
-          </button>
-          <button id="btn-reset" class="btn ghost" title="Reset">Reset</button>
-          <button id="btn-increment" class="btn primary" title="Increment">
-            +
-          </button>
-        </div>
-        <p id="status" class="status">Connecting to PocketPaw…</p>
-      </section>
+    <script>
+      /**
+       * This page is served by PocketPaw inside an iframe.
+       * Once the plugin daemon is running, PocketPaw proxies to it at:
+       *   /api/v1/plugins/counter/proxy/
+       *
+       * We embed the Gradio UI (served by the daemon) in a nested iframe
+       * pointed at the proxy URL.
+       */
+      (function () {
+        // Derive the proxy base from the current page's URL
+        // Current page is at: /api/v1/extensions/counter/static/index.html
+        // Proxy is at: /api/v1/plugins/counter/proxy/
+        const origin = window.location.origin;
+        const proxyUrl = `${origin}/api/v1/plugins/counter/proxy/`;
 
-      <section class="docs">
-        <h2>How this extension works</h2>
-        <ul>
-          <li>
-            <strong>extension.json</strong> — manifest with id, name, scopes
-          </li>
-          <li><strong>index.html</strong> — this page (entry point)</li>
-          <li><strong>styles.css</strong> — all styling</li>
-          <li><strong>app.js</strong> — logic using the PocketPaw SDK</li>
-        </ul>
-        <p class="hint">
-          To create your own: copy this folder, edit
-          <code>extension.json</code>, zip it, and upload via the Apps page.
-        </p>
-      </section>
-    </main>
+        const frame = document.getElementById("gradio-frame");
+        const loading = document.getElementById("loading");
 
-    <script src="./app.js"></script>
+        // Poll until the Gradio server is reachable
+        let attempts = 0;
+        const maxAttempts = 60; // 30 seconds
+
+        function tryConnect() {
+          fetch(proxyUrl, { method: "HEAD", mode: "no-cors" })
+            .then(() => {
+              // Server is reachable — show the iframe
+              loading.style.display = "none";
+              frame.style.display = "block";
+              frame.src = proxyUrl;
+            })
+            .catch(() => {
+              attempts++;
+              if (attempts < maxAttempts) {
+                setTimeout(tryConnect, 500);
+              } else {
+                loading.innerHTML =
+                  '<span style="color:#ff3b30">⚠ Counter server did not start. Check plugin logs.</span>';
+              }
+            });
+        }
+
+        tryConnect();
+      })();
+    </script>
   </body>
 </html>

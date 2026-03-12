@@ -80,14 +80,28 @@
           <i data-lucide="plus" class="w-4 h-4"></i>
           <span>New Chat</span>
         </button>
-        <div class="relative">
-          <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30"></i>
-          <input
-              type="text"
-              x-model="sessionSearch"
-              class="session-search-input w-full py-1.5 pl-8 pr-3 rounded-lg bg-white/5 border border-white/8 text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent/40 transition-colors"
-              placeholder="Search sessions..."
-          />
+        <div class="relative flex items-center gap-1">
+          <div class="relative flex-1">
+            <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30"></i>
+            <input
+                type="text"
+                x-model="sessionSearch"
+                class="session-search-input w-full py-1.5 pl-8 pr-3 rounded-lg bg-white/5 border border-white/8 text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent/40 transition-colors"
+                placeholder="Search sessions..."
+            />
+          </div>
+          <button
+              x-show="sessions.length > 0"
+              class="shrink-0 flex items-center gap-1 px-1.5 py-1 rounded-lg text-xs transition-all"
+              :class="confirmClearAll
+                  ? 'bg-danger/20 text-danger border border-danger/30'
+                  : 'text-white/30 hover:text-danger hover:bg-danger/10'"
+              @click="clearAllSessions()"
+              :title="confirmClearAll ? 'Click again to confirm' : 'Clear all conversations'"
+          >
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span x-show="confirmClearAll" x-transition class="text-[10px] font-medium">Clear?</span>
+          </button>
         </div>
       </div>
 

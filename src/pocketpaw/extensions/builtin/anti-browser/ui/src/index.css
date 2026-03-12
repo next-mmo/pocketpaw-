@@ -309,3 +309,78 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
 }
+
+/* ── Profiles table (Apify-cloud inspired) ── */
+.profiles-table .ant-table {
+  background: transparent !important;
+}
+
+.profiles-table .ant-table-thead > tr > th,
+.profiles-table .ant-table-thead > tr > td {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #888 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  padding: 10px 12px !important;
+}
+
+.profiles-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  padding: 10px 12px !important;
+  background: transparent !important;
+  transition: background 0.2s ease;
+}
+
+.profiles-table .ant-table-tbody > tr:hover > td {
+  background: rgba(102, 126, 234, 0.06) !important;
+}
+
+.profiles-table .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: rgba(102, 126, 234, 0.1) !important;
+}
+
+.profiles-table .ant-table-cell-fix-left,
+.profiles-table .ant-table-cell-fix-right {
+  background: transparent !important;
+}
+
+.profiles-table .ant-table-tbody > tr:hover .ant-table-cell-fix-left,
+.profiles-table .ant-table-tbody > tr:hover .ant-table-cell-fix-right {
+  background: rgba(102, 126, 234, 0.06) !important;
+}
+
+.profiles-table .ant-pagination {
+  margin-top: 16px !important;
+}
+
+.profiles-table .ant-pagination .ant-pagination-item {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.profiles-table .ant-pagination .ant-pagination-item-active {
+  border-color: #667eea !important;
+  background: rgba(102, 126, 234, 0.15) !important;
+}
+
+.profiles-table .ant-table-filter-trigger {
+  color: #555 !important;
+}
+
+.profiles-table .ant-table-filter-trigger:hover {
+  color: #667eea !important;
+}
+
+.profiles-table .ant-checkbox-inner {
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.profiles-table .ant-checkbox-checked .ant-checkbox-inner {
+  background: #667eea !important;
+  border-color: #667eea !important;
+}
+

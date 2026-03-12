@@ -36,7 +36,7 @@ class BrowserManager:
         self._pages: dict[str, Page] = {}
         self._lock = asyncio.Lock()
 
-    async def _ensure_browser(self):
+    async def _ensure_browser(self, headless: bool = True):
         """Lazily start a shared Playwright Chromium instance."""
         if self._browser and self._browser.is_connected():
             return
@@ -44,7 +44,7 @@ class BrowserManager:
             raise RuntimeError("Playwright is not installed")
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
-            headless=True,
+            headless=headless,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process",
@@ -52,7 +52,7 @@ class BrowserManager:
                 "--no-default-browser-check",
             ],
         )
-        logger.info("Chromium browser launched")
+        logger.info("Chromium browser launched (headless=%s)", headless)
 
     def _profile_storage_dir(self, profile_id: str) -> Path:
         d = self._profiles_dir / profile_id
@@ -70,7 +70,7 @@ class BrowserManager:
         if profile_id in self._contexts:
             return {"cdp_url": "", "message": "Already running"}
 
-        await self._ensure_browser()
+        await self._ensure_browser(headless=profile.get("headless", True))
 
         fp = profile.get("fingerprint", {})
         proxy_cfg = profile.get("proxy", {})

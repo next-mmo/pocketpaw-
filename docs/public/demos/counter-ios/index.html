@@ -1,0 +1,346 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>iOS Liquid Glass Counter</title>
+  <style>
+    :root {
+      --bg-1: #1b2340;
+      --bg-2: #324675;
+      --bg-3: #c5d6ff;
+      --text-primary: #f7f9ff;
+      --text-muted: rgba(247, 249, 255, 0.72);
+      --glass-fill: rgba(255, 255, 255, 0.2);
+      --glass-line: rgba(255, 255, 255, 0.45);
+      --glass-shadow: rgba(8, 20, 50, 0.35);
+      --accent-a: #58d3ff;
+      --accent-b: #6f8dff;
+      --danger-a: #ff7b9f;
+      --danger-b: #ff476f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      color: var(--text-primary);
+      background:
+        radial-gradient(1300px 780px at 14% 8%, rgba(115, 157, 255, 0.75), transparent 58%),
+        radial-gradient(980px 620px at 86% 88%, rgba(90, 214, 255, 0.54), transparent 62%),
+        linear-gradient(145deg, var(--bg-1) 0%, var(--bg-2) 42%, var(--bg-3) 100%);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: auto;
+      width: 52vmin;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(8px);
+      z-index: 0;
+    }
+
+    body::before {
+      top: -12vmin;
+      right: -14vmin;
+      background: radial-gradient(circle at 25% 30%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+    }
+
+    body::after {
+      bottom: -18vmin;
+      left: -12vmin;
+      background: radial-gradient(circle at 70% 65%, rgba(120, 188, 255, 0.72), rgba(120, 188, 255, 0));
+    }
+
+    .glass-card {
+      position: relative;
+      width: min(92vw, 420px);
+      border-radius: 38px;
+      padding: 24px;
+      background: linear-gradient(170deg, rgba(255, 255, 255, 0.26) 2%, rgba(255, 255, 255, 0.1) 98%);
+      border: 1px solid var(--glass-line);
+      backdrop-filter: blur(24px) saturate(150%);
+      box-shadow:
+        0 30px 85px var(--glass-shadow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        inset 0 -22px 36px rgba(255, 255, 255, 0.08);
+      z-index: 1;
+      transform-style: preserve-3d;
+      transition: transform 220ms ease;
+    }
+
+    .glass-card::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: 36px;
+      pointer-events: none;
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0));
+      opacity: 0.9;
+    }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 22px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .title {
+      margin: 0;
+      font-size: clamp(1.2rem, 4vw, 1.45rem);
+      letter-spacing: 0.01em;
+      font-weight: 650;
+    }
+
+    .ios-pill {
+      font-size: 0.76rem;
+      padding: 7px 12px;
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.92);
+      background: rgba(255, 255, 255, 0.16);
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      backdrop-filter: blur(10px);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+    }
+
+    .counter-wrap {
+      position: relative;
+      margin: 10px 0 20px;
+      border-radius: 30px;
+      padding: 24px 16px;
+      text-align: center;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.08));
+      border: 1px solid rgba(255, 255, 255, 0.34);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        inset 0 -16px 28px rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .counter-wrap::after {
+      content: "";
+      position: absolute;
+      top: -28%;
+      left: 8%;
+      width: 84%;
+      height: 64%;
+      background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+      pointer-events: none;
+    }
+
+    .label {
+      margin: 0;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      position: relative;
+      z-index: 1;
+    }
+
+    .counter {
+      margin: 8px 0 0;
+      font-size: clamp(3rem, 16vw, 4.8rem);
+      line-height: 0.98;
+      font-weight: 700;
+      letter-spacing: -0.05em;
+      text-shadow: 0 8px 22px rgba(10, 26, 65, 0.28);
+      position: relative;
+      z-index: 1;
+      transition: transform 130ms ease;
+    }
+
+    .counter.bump {
+      transform: scale(1.065);
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .btn {
+      border: 1px solid rgba(255, 255, 255, 0.44);
+      background: linear-gradient(165deg, rgba(255, 255, 255, 0.25), rgba(255, 255, 255, 0.11));
+      color: var(--text-primary);
+      border-radius: 22px;
+      padding: 16px 12px;
+      font-size: clamp(1.15rem, 5vw, 1.4rem);
+      font-weight: 640;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+      box-shadow:
+        0 10px 20px rgba(8, 24, 56, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.34);
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      touch-action: manipulation;
+    }
+
+    .btn:active {
+      transform: scale(0.97);
+    }
+
+    .btn.primary {
+      background: linear-gradient(145deg, rgba(88, 211, 255, 0.9), rgba(111, 141, 255, 0.88));
+      border-color: rgba(213, 245, 255, 0.62);
+      color: #f8fcff;
+    }
+
+    .btn.negative {
+      background: linear-gradient(145deg, rgba(255, 130, 165, 0.82), rgba(255, 72, 111, 0.82));
+      border-color: rgba(255, 219, 228, 0.6);
+      color: #fff9fc;
+    }
+
+    .btn.reset {
+      width: 100%;
+      margin-top: 2px;
+      padding: 14px 12px;
+      border-radius: 18px;
+      font-size: 0.96rem;
+      font-weight: 620;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.9);
+      background: linear-gradient(165deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08));
+    }
+
+    .hint {
+      margin: 14px 0 0;
+      font-size: 0.82rem;
+      color: rgba(247, 249, 255, 0.76);
+      text-align: center;
+      letter-spacing: 0.01em;
+      position: relative;
+      z-index: 1;
+    }
+
+    @media (max-width: 380px) {
+      .glass-card {
+        padding: 20px;
+        border-radius: 30px;
+      }
+
+      .counter-wrap {
+        border-radius: 24px;
+      }
+
+      .controls {
+        gap: 10px;
+      }
+
+      .btn {
+        border-radius: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="glass-card" id="card" role="application" aria-label="iOS style counter app">
+    <div class="title-row">
+      <h1 class="title">Counter</h1>
+      <span class="ios-pill">Liquid Glass</span>
+    </div>
+
+    <section class="counter-wrap" aria-live="polite" aria-atomic="true">
+      <p class="label">Current value</p>
+      <p class="counter" id="count">0</p>
+    </section>
+
+    <div class="controls">
+      <button class="btn negative" id="decrease" aria-label="Decrease counter">-1</button>
+      <button class="btn primary" id="increase" aria-label="Increase counter">+1</button>
+    </div>
+
+    <button class="btn reset" id="reset">Reset</button>
+    <p class="hint">Tip: press keyboard keys <strong>+</strong>, <strong>-</strong>, or <strong>R</strong>.</p>
+  </main>
+
+  <script>
+    (() => {
+      const countEl = document.getElementById("count");
+      const increaseBtn = document.getElementById("increase");
+      const decreaseBtn = document.getElementById("decrease");
+      const resetBtn = document.getElementById("reset");
+      const card = document.getElementById("card");
+
+      let count = Number(localStorage.getItem("ios_counter_value") || 0);
+      render();
+
+      function render() {
+        countEl.textContent = String(count);
+        countEl.classList.remove("bump");
+        void countEl.offsetWidth;
+        countEl.classList.add("bump");
+        localStorage.setItem("ios_counter_value", String(count));
+      }
+
+      function vibrate(ms) {
+        if (navigator.vibrate) {
+          navigator.vibrate(ms);
+        }
+      }
+
+      function update(delta) {
+        count += delta;
+        render();
+        vibrate(12);
+      }
+
+      increaseBtn.addEventListener("click", () => update(1));
+      decreaseBtn.addEventListener("click", () => update(-1));
+      resetBtn.addEventListener("click", () => {
+        count = 0;
+        render();
+        vibrate(18);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "+" || event.key === "=") {
+          update(1);
+        } else if (event.key === "-" || event.key === "_") {
+          update(-1);
+        } else if (event.key.toLowerCase() === "r") {
+          count = 0;
+          render();
+          vibrate(18);
+        }
+      });
+
+      window.addEventListener("pointermove", (event) => {
+        const x = event.clientX / window.innerWidth;
+        const y = event.clientY / window.innerHeight;
+        const rotateY = (x - 0.5) * 8;
+        const rotateX = (0.5 - y) * 8;
+        card.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+      });
+
+      window.addEventListener("pointerleave", () => {
+        card.style.transform = "rotateX(0deg) rotateY(0deg)";
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -187,9 +187,15 @@ window.PocketPaw.Extensions = {
           });
         }
 
-        // For plugin-type extensions, check install status first
+        // For plugin-type extensions, sync real server status then decide
         if (extension.is_plugin) {
           const ps = this._getPluginState(extension.id);
+
+          // On fresh load (idle), fetch real status from server
+          if (ps.status === 'idle') {
+            await this._syncPluginStatus(extension.id);
+          }
+
           if (!extension.is_installed && ps.status === 'idle') {
             // Not installed — show the install screen (no iframe yet)
             this.extensionsHost.activeTabId = extension.id;
@@ -197,7 +203,7 @@ window.PocketPaw.Extensions = {
             this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
             return;
           }
-          if (ps.status === 'installing' || ps.status === 'starting') {
+          if (ps.status === 'installing' || ps.status === 'starting' || ps.status === 'uninstalling') {
             // Still in progress — show the install screen
             this.extensionsHost.activeTabId = extension.id;
             this.updateHash(`#/apps/${route}`);
@@ -226,6 +232,9 @@ window.PocketPaw.Extensions = {
 
         this.$nextTick(() => {
           if (window.refreshIcons) window.refreshIcons();
+          // Proactively push SDK context once the iframe is mounted.
+          // Alpine renders the iframe async so we poll until it appears.
+          this._pushContextWhenReady(extension.id);
         });
       },
 
@@ -278,9 +287,10 @@ window.PocketPaw.Extensions = {
 
         // Post context to the newly active frame
         this.$nextTick(() => {
-          this.postExtensionContext(false);
+          this.postExtensionContext(false, tabId);
         });
       },
+
 
       /**
        * Switch back to the dial-pad launcher.
@@ -608,24 +618,28 @@ window.PocketPaw.Extensions = {
       async handleExtensionMessage(event) {
         if (event.origin !== window.location.origin) return;
 
-        // Find which iframe sent the message
-        const activeExt = this.getActiveExtension();
-        if (!activeExt) return;
-
-        const frameId = `extensionFrame_${activeExt.id}`;
-        const frame = document.getElementById(frameId);
-        if (!frame || event.source !== frame.contentWindow) return;
+        // Find which open extension tab sent this message by checking
+        // all open frame windows (not just the active one).
+        let sourceExtId = null;
+        for (const tab of this.extensionsHost.openTabs) {
+          const frame = document.getElementById(`extensionFrame_${tab.id}`);
+          if (frame && event.source === frame.contentWindow) {
+            sourceExtId = tab.id;
+            break;
+          }
+        }
+        if (!sourceExtId) return;
 
         const message = event.data || {};
         if (!message.type || typeof message.type !== "string") return;
 
         if (message.type === "pocketpaw-extension:ready") {
-          await this.postExtensionContext(true);
+          await this.postExtensionContext(true, sourceExtId);
           return;
         }
 
         if (message.type === "pocketpaw-extension:refresh-token") {
-          await this.postExtensionContext(true);
+          await this.postExtensionContext(true, sourceExtId);
           return;
         }
 
@@ -639,8 +653,11 @@ window.PocketPaw.Extensions = {
         }
       },
 
-      async postExtensionContext(forceRefresh = false) {
-        const extension = this.getActiveExtension();
+      async postExtensionContext(forceRefresh = false, extensionId = null) {
+        // Use the provided extensionId, or fall back to the active extension.
+        const extension = extensionId
+          ? this.extensionsHost.items.find((i) => i.id === extensionId)
+          : this.getActiveExtension();
         if (!extension) return;
 
         const frameId = `extensionFrame_${extension.id}`;
@@ -672,6 +689,24 @@ window.PocketPaw.Extensions = {
           },
           window.location.origin,
         );
+      },
+
+      /**
+       * After openAppTab(), poll until the iframe element is in the DOM
+       * then push the SDK context. This handles the race where the SDK
+       * fires pocketpaw-extension:ready before Alpine has rendered the
+       * <iframe> element, causing postExtensionContext to silently bail.
+       */
+      _pushContextWhenReady(extensionId, attempts = 0) {
+        const maxAttempts = 40; // up to 4 seconds at 100ms intervals
+        const frame = document.getElementById(`extensionFrame_${extensionId}`);
+        if (frame?.contentWindow) {
+          this.postExtensionContext(false, extensionId);
+          return;
+        }
+        if (attempts < maxAttempts) {
+          setTimeout(() => this._pushContextWhenReady(extensionId, attempts + 1), 100);
+        }
       },
 
       _handleExtensionNavigate(payload) {
@@ -782,6 +817,54 @@ window.PocketPaw.Extensions = {
       },
 
       /**
+       * Fetch the real plugin status from the server and sync local state.
+       * Called on fresh page load to recover state for already-running plugins.
+       */
+      async _syncPluginStatus(pluginId) {
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/status`);
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const ps = this._getPluginState(pluginId);
+
+          if (data.status === 'running' && data.port) {
+            ps.status = 'running';
+            ps.progress = 1;
+            // Also set up the iframe src
+            const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+            if (ext && !this.extensionsHost.frameSrcs[pluginId]) {
+              this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+            }
+          } else if (data.status === 'installing') {
+            ps.status = 'installing';
+            ps.progress = data.install_progress || 0;
+            this._pollPluginStatus(pluginId);
+          } else if (data.status === 'starting') {
+            ps.status = 'starting';
+            this._pollPluginStatus(pluginId);
+          } else if (data.status === 'error') {
+            ps.status = 'error';
+            ps.error = data.error || 'Unknown error';
+          } else if (data.status === 'stopped' && data.is_installed) {
+            // Auto-start the daemon so the iframe doesn't hit 503 errors
+            const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+            if (ext && ext.has_start) {
+              ps.status = 'starting';
+              ps.progress = 1;
+              // Fire-and-forget start, then poll
+              this.startPlugin(pluginId);
+            } else {
+              ps.status = 'installed';
+              ps.progress = 1;
+            }
+          }
+          // else leave as 'idle' (not installed)
+        } catch (e) {
+          console.warn('Failed to sync plugin status:', e);
+        }
+      },
+
+      /**
        * Check if current active tab is a plugin that needs install.
        */
       activeTabNeedsInstall() {
@@ -790,7 +873,9 @@ window.PocketPaw.Extensions = {
         const ext = this.extensionsHost.items.find(i => i.id === tabId);
         if (!ext || !ext.is_plugin) return false;
         const ps = this._getPluginState(tabId);
-        // Show install screen for idle (not installed), installing, uninstalling, error, or installed-but-not-started
+        // If plugin is running, never show install screen
+        if (ps.status === 'running') return false;
+        // Show install screen for not-installed, installing, uninstalling, etc.
         return !ext.is_installed || ['idle', 'installing', 'uninstalling', 'installed', 'starting', 'stopped', 'error'].includes(ps.status);
       },
 

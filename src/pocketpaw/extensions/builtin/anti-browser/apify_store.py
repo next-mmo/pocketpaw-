@@ -141,6 +141,16 @@ class ApifyStoreClient:
             logger.warning("Apify Store request failed: %s", e)
             return {"actors": [], "total": 0, "limit": limit, "offset": offset, "has_more": False, "error": str(e)}
 
+    @staticmethod
+    def _to_api_id(actor_id: str) -> str:
+        """Convert a slash-separated slug to the tilde format the Apify API expects.
+
+        The Apify REST API requires ``username~actorname`` in the URL path,
+        but our UI stores slugs as ``username/actorname``.  A bare ``/``
+        would create an unwanted extra path segment and yield a 404.
+        """
+        return actor_id.replace("/", "~")
+
     async def get_actor_detail(self, actor_id: str) -> dict[str, Any] | None:
         """
         Get detailed information about a specific actor.
@@ -152,10 +162,12 @@ class ApifyStoreClient:
         if cache_key in self._cache and self._is_cache_valid(cache_key):
             return self._cache[cache_key]
 
+        api_id = self._to_api_id(actor_id)
+
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    f"{APIFY_ACTOR_API}/{actor_id}",
+                    f"{APIFY_ACTOR_API}/{api_id}",
                     headers=self._headers(),
                 )
                 resp.raise_for_status()
@@ -173,10 +185,11 @@ class ApifyStoreClient:
 
     async def get_actor_input_schema(self, actor_id: str) -> dict[str, Any]:
         """Get the input schema for an actor."""
+        api_id = self._to_api_id(actor_id)
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
-                    f"{APIFY_ACTOR_API}/{actor_id}/input-schema",
+                    f"{APIFY_ACTOR_API}/{api_id}/input-schema",
                     headers=self._headers(),
                 )
                 if resp.status_code == 200:

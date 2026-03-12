@@ -31,13 +31,26 @@ def _check_crawlee() -> bool:
     return _crawlee_available
 
 
-CrawlerType = Literal["playwright", "beautifulsoup", "http"]
+CrawlerType = Literal[
+    "playwright", "beautifulsoup", "http",
+    "puppeteer", "camoufox", "cheerio", "jsdom", "sitemap",
+]
 
 
 class CrawleeProvider:
     """
     High-level Crawlee provider that wraps PlaywrightCrawler and
     BeautifulSoupCrawler with Anti-Browser's proxy & fingerprint support.
+
+    Supports Apify-style scraper types:
+      - playwright  — Full browser (Playwright)
+      - puppeteer   — Full browser (Puppeteer-style via Playwright)
+      - camoufox    — Anti-detect Firefox via Playwright
+      - cheerio     — Lightweight HTML parser (treated as BeautifulSoup backend)
+      - beautifulsoup — Python HTML parser
+      - jsdom       — Virtual DOM (treated as BeautifulSoup backend)
+      - http        — Raw HTTP requests
+      - sitemap     — Sitemap.xml crawler (HTTP-based)
     """
 
     def __init__(self, data_dir: Path):
@@ -70,14 +83,14 @@ class CrawleeProvider:
 
         Args:
             urls: List of starting URLs.
-            crawler_type: 'playwright' | 'beautifulsoup' | 'http'
+            crawler_type: One of the supported CrawlerType values.
             script: Optional custom handler script (Python code as string).
             proxy_urls: Optional list of proxy URLs for rotation.
             max_requests: Max total requests.
             max_concurrency: Max concurrent requests.
-            headless: Headless mode (Playwright only).
-            browser_type: Browser engine (Playwright only).
-            use_fingerprints: Enable fingerprint generation (Playwright only).
+            headless: Headless mode (browser-based crawlers only).
+            browser_type: Browser engine (browser-based crawlers only).
+            use_fingerprints: Enable fingerprint generation (browser-based only).
             request_handler_timeout_secs: Timeout per request handler.
             input_data: Extra data passed to handler context.
 
@@ -90,8 +103,27 @@ class CrawleeProvider:
         crawl_id = str(uuid.uuid4())[:8]
         started_at = time.time()
 
+        # Map alias types to actual implementations
+        effective_type = crawler_type
+        effective_browser = browser_type
+
+        # Camoufox uses Firefox via Playwright
+        if crawler_type == "camoufox":
+            effective_type = "playwright"
+            effective_browser = "firefox"
+        # Puppeteer is handled via Playwright with Chromium
+        elif crawler_type == "puppeteer":
+            effective_type = "playwright"
+            effective_browser = "chromium"
+        # Cheerio and JSDOM are parsed like BeautifulSoup
+        elif crawler_type in ("cheerio", "jsdom"):
+            effective_type = "beautifulsoup"
+        # Sitemap crawls via HTTP
+        elif crawler_type == "sitemap":
+            effective_type = "http"
+
         try:
-            if crawler_type == "playwright":
+            if effective_type == "playwright":
                 results = await self._run_playwright_crawl(
                     crawl_id=crawl_id,
                     urls=urls,
@@ -100,12 +132,12 @@ class CrawleeProvider:
                     max_requests=max_requests,
                     max_concurrency=max_concurrency,
                     headless=headless,
-                    browser_type=browser_type,
+                    browser_type=effective_browser,
                     use_fingerprints=use_fingerprints,
                     timeout_secs=request_handler_timeout_secs,
                     input_data=input_data or {},
                 )
-            elif crawler_type == "beautifulsoup":
+            elif effective_type == "beautifulsoup":
                 results = await self._run_beautifulsoup_crawl(
                     crawl_id=crawl_id,
                     urls=urls,
@@ -132,6 +164,7 @@ class CrawleeProvider:
                 "success": True,
                 "crawl_id": crawl_id,
                 "crawler_type": crawler_type,
+                "effective_type": effective_type,
                 "urls_requested": len(urls),
                 "results_count": len(results),
                 "results": results,
@@ -410,25 +443,68 @@ async def _custom_handler(context):
         """Return info about available crawler types."""
         crawlers_info = [
             {
-                "type": "beautifulsoup",
-                "name": "BeautifulSoup Crawler",
-                "description": "Lightweight HTML parser. Fast, low-memory. Best for static sites and APIs.",
-                "requires_browser": False,
-                "icon": "🍜",
-            },
-            {
                 "type": "playwright",
                 "name": "Playwright Crawler",
                 "description": "Full browser rendering with Playwright. Handles JS-heavy SPAs, dynamic content, and anti-bot protections.",
                 "requires_browser": True,
+                "headless_capable": True,
                 "icon": "🎭",
+            },
+            {
+                "type": "puppeteer",
+                "name": "Puppeteer Crawler",
+                "description": "Chrome DevTools Protocol automation via Playwright. Fast browser-based scraping.",
+                "requires_browser": True,
+                "headless_capable": True,
+                "icon": "🤖",
+            },
+            {
+                "type": "camoufox",
+                "name": "Camoufox Crawler",
+                "description": "Anti-detect Firefox browser. Bypasses bot protections with stealth fingerprinting.",
+                "requires_browser": True,
+                "headless_capable": True,
+                "icon": "🦊",
+            },
+            {
+                "type": "beautifulsoup",
+                "name": "BeautifulSoup Crawler",
+                "description": "Lightweight Python HTML parser. Fast, low-memory. Best for static sites.",
+                "requires_browser": False,
+                "headless_capable": False,
+                "icon": "🥣",
+            },
+            {
+                "type": "cheerio",
+                "name": "Cheerio Crawler",
+                "description": "Fast jQuery-style HTML parser. Lightweight, no browser needed.",
+                "requires_browser": False,
+                "headless_capable": False,
+                "icon": "🍜",
+            },
+            {
+                "type": "jsdom",
+                "name": "JSDOM Crawler",
+                "description": "Virtual DOM in Node.js. Parses HTML without rendering. Good for simple JS execution.",
+                "requires_browser": False,
+                "headless_capable": False,
+                "icon": "📄",
             },
             {
                 "type": "http",
                 "name": "HTTP Crawler",
                 "description": "Raw HTTP requests, no parsing. Fastest option for APIs and simple downloads.",
                 "requires_browser": False,
+                "headless_capable": False,
                 "icon": "⚡",
+            },
+            {
+                "type": "sitemap",
+                "name": "Sitemap Crawler",
+                "description": "Crawl via sitemap.xml. Automatically discovers all pages on a website.",
+                "requires_browser": False,
+                "headless_capable": False,
+                "icon": "🗺️",
             },
         ]
         return crawlers_info

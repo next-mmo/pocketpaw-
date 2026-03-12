@@ -444,7 +444,7 @@ export default function DiscoveryPage() {
                 </a>
                 {" "}or use built-in templates.
                 {crawleeAvailable !== null && (
-                  <Tooltip title={crawleeAvailable ? "Crawlee Python is installed and ready" : "Install crawlee[all] to enable advanced crawling"}>
+                  <Tooltip title={crawleeAvailable ? "Crawlee Python is installed and ready" : "Click Install to enable advanced crawling providers"}>
                     <Tag
                       color={crawleeAvailable ? "success" : "warning"}
                       style={{ marginLeft: 8, borderRadius: 10, fontSize: 10, cursor: "help" }}
@@ -945,13 +945,42 @@ export default function DiscoveryPage() {
                                 border: "1px solid rgba(250, 173, 20, 0.2)",
                                 fontSize: 12,
                                 color: "#faad14",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
                               }}
                             >
-                              ⚠️ Crawlee is not installed. Run{" "}
-                              <code style={{ background: "rgba(0,0,0,0.3)", padding: "2px 6px", borderRadius: 4 }}>
-                                pip install "crawlee[all]"
-                              </code>{" "}
-                              to enable crawler execution.
+                              <span>⚠️ Crawlee is not installed. Required for crawler execution.</span>
+                              <Button
+                                size="small"
+                                type="primary"
+                                icon={<DownloadOutlined />}
+                                onClick={async () => {
+                                  try {
+                                    message.loading({ content: "Installing Crawlee...", key: "crawlee-install", duration: 0 });
+                                    const result = await api.crawleeInstall();
+                                    if (result.success) {
+                                      message.success({ content: "Crawlee installed!", key: "crawlee-install" });
+                                      setCrawleeAvailable(true);
+                                    } else {
+                                      message.error({ content: result.error || "Install failed", key: "crawlee-install" });
+                                    }
+                                  } catch (e: any) {
+                                    message.error({ content: e.message || "Install failed", key: "crawlee-install" });
+                                  }
+                                }}
+                                style={{
+                                  background: "linear-gradient(135deg, #667eea, #764ba2)",
+                                  border: "none",
+                                  borderRadius: 6,
+                                  fontWeight: 600,
+                                  fontSize: 11,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                Install Crawlee
+                              </Button>
                             </div>
                           )}
                         </div>

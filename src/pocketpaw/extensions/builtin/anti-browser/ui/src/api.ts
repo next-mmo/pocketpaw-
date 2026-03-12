@@ -115,6 +115,7 @@ export const api = {
 
   // ── Crawlee Provider ──────────────────────────────────────────────
   crawleeStatus: () => request("/api/crawlee/status"),
+  crawleeInstall: () => request("/api/crawlee/install", { method: "POST" }),
   crawleeCrawlers: () => request("/api/crawlee/crawlers"),
   crawleeRun: (data: {
     urls: string[];
@@ -151,4 +152,28 @@ export const api = {
   storeCategories: () => request("/api/store/categories"),
   storeInstallActor: (slug: string) =>
     request(`/api/store/install/${slug}`, { method: "POST" }),
+
+  // ── Activity Logs ──────────────────────────────────────────────
+  listActivity: (params?: {
+    limit?: number;
+    offset?: number;
+    type?: string;
+    profile_id?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.offset) qs.set("offset", String(params.offset));
+    if (params?.type) qs.set("type", params.type);
+    if (params?.profile_id) qs.set("profile_id", params.profile_id);
+    const q = qs.toString();
+    return request(`/api/activity${q ? `?${q}` : ""}`);
+  },
+  getProfileActivity: (profileId: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : "";
+    return request(`/api/profiles/${profileId}/activity${qs}`);
+  },
+  clearActivity: (profileId?: string) => {
+    const body = profileId ? JSON.stringify({ profile_id: profileId }) : "{}";
+    return request("/api/activity", { method: "DELETE", body });
+  },
 };

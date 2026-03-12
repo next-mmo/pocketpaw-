@@ -231,7 +231,16 @@ window.PocketPaw.McTasks = {
                     if (res.ok) {
                         this.missionControl.tasks = this.missionControl.tasks.filter(t => t.id !== taskId);
                         this.missionControl.stats.active_tasks = Math.max(0, this.missionControl.stats.active_tasks - 1);
+                        // Clear running state if task was tracked as running
+                        delete this.missionControl.runningTasks[taskId];
+                        // Close detail panel if this task was selected
+                        if (this.missionControl.selectedTask?.id === taskId) {
+                            this.missionControl.selectedTask = null;
+                        }
                         this.showToast('Task deleted', 'info');
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        this.showToast(err.detail || 'Failed to delete task', 'error');
                     }
                 } catch (e) {
                     console.error('Failed to delete task:', e);

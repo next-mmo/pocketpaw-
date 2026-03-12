@@ -54,6 +54,9 @@ class ProfileCreate(BaseModel):
     browser_type: str = "chromium"
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
+    headless: bool = True
+    crawler_type: str = "playwright"  # playwright|puppeteer|camoufox|cheerio|beautifulsoup|jsdom|http|sitemap
+    actor_id: str = ""  # optional actor assignment
 
 
 class ProfileUpdate(BaseModel):
@@ -62,6 +65,9 @@ class ProfileUpdate(BaseModel):
     proxy: ProxyConfig | None = None
     notes: str | None = None
     tags: list[str] | None = None
+    headless: bool | None = None
+    crawler_type: str | None = None
+    actor_id: str | None = None
 
 
 class ActorCreate(BaseModel):
@@ -184,10 +190,20 @@ async def create_profile(body: ProfileCreate):
         "fingerprint": fingerprint,
         "notes": body.notes,
         "tags": body.tags,
+        "headless": body.headless,
+        "crawler_type": body.crawler_type,
+        "actor_id": body.actor_id,
         "created_at": time.time(),
         "last_used": None,
     }
     await db.save_profile(profile)
+    await db.log_activity(
+        "profile_created",
+        f'Profile "{body.name}" created',
+        resource=body.name,
+        profile_id=profile_id,
+        meta={"os_type": body.os_type, "crawler_type": body.crawler_type, "headless": body.headless},
+    )
     return {"profile": profile}
 
 
@@ -212,17 +228,48 @@ async def update_profile(profile_id: str, body: ProfileUpdate):
     updates = body.model_dump(exclude_none=True)
     if "proxy" in updates:
         updates["proxy"] = updates["proxy"]
+
+    # Build human-readable change descriptions for activity log
+    changes = []
+    if "headless" in updates:
+        changes.append(f'headless → {"on" if updates["headless"] else "off"}')
+    if "crawler_type" in updates:
+        changes.append(f'provider → {updates["crawler_type"]}')
+    if "actor_id" in updates:
+        changes.append(f'actor → {updates["actor_id"] or "none"}')
+    if "name" in updates:
+        changes.append(f'name → {updates["name"]}')
+    if "group" in updates:
+        changes.append(f'group → {updates["group"]}')
+
     profile.update(updates)
     await db.save_profile(profile)
+
+    if changes:
+        await db.log_activity(
+            "profile_updated",
+            f'Profile "{profile.get("name", profile_id)}" updated: {", ".join(changes)}',
+            resource=profile.get("name", profile_id),
+            profile_id=profile_id,
+            meta={"changes": updates},
+        )
     return {"profile": profile}
 
 
 @app.delete("/api/profiles/{profile_id}")
 async def delete_profile(profile_id: str):
     db = get_db()
+    profile = await db.get_profile(profile_id)
+    profile_name = profile.get("name", profile_id) if profile else profile_id
     bm = get_bm()
     await bm.close_profile(profile_id)
     await db.delete_profile(profile_id)
+    await db.log_activity(
+        "profile_deleted",
+        f'Profile "{profile_name}" deleted',
+        resource=profile_name,
+        profile_id=profile_id,
+    )
     return {"ok": True}
 
 
@@ -240,6 +287,12 @@ async def regenerate_fingerprint(profile_id: str):
         browser_type=profile.get("browser_type", "chromium"),
     )
     await db.save_profile(profile)
+    await db.log_activity(
+        "fingerprint_regen",
+        f'Fingerprint regenerated for "{profile.get("name", profile_id)}"',
+        resource=profile.get("name", profile_id),
+        profile_id=profile_id,
+    )
     return {"fingerprint": profile["fingerprint"]}
 
 
@@ -258,26 +311,88 @@ async def launch_profile(profile_id: str):
 
     profile["last_used"] = time.time()
     await db.save_profile(profile)
+    await db.log_activity(
+        "profile_launched",
+        f'Browser launched for "{profile.get("name", profile_id)}"',
+        resource=profile.get("name", profile_id),
+        profile_id=profile_id,
+        meta={"headless": profile.get("headless", True), "crawler_type": profile.get("crawler_type", "playwright")},
+    )
 
     return {"status": "launched", "cdp_url": result.get("cdp_url", "")}
 
 
 @app.post("/api/profiles/{profile_id}/stop")
 async def stop_profile(profile_id: str):
+    db = get_db()
     bm = get_bm()
+    profile = await db.get_profile(profile_id)
     await bm.close_profile(profile_id)
+    await db.log_activity(
+        "profile_stopped",
+        f'Browser stopped for "{profile.get("name", profile_id) if profile else profile_id}"',
+        resource=profile.get("name", profile_id) if profile else profile_id,
+        profile_id=profile_id,
+    )
     return {"status": "stopped"}
 
 
 @app.post("/api/profiles/{profile_id}/screenshot")
 async def screenshot_profile(profile_id: str):
     """Take a screenshot of the running browser for a profile."""
+    db = get_db()
     bm = get_bm()
     data = await bm.screenshot(profile_id)
     if not data:
         raise HTTPException(400, "Profile not running")
+    profile = await db.get_profile(profile_id)
+    await db.log_activity(
+        "screenshot_taken",
+        f'Screenshot captured for "{profile.get("name", profile_id) if profile else profile_id}"',
+        resource=profile.get("name", profile_id) if profile else profile_id,
+        profile_id=profile_id,
+    )
     return {"image": data}
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# ACTIVITY LOGS
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/activity")
+async def list_activity(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    type: str | None = None,
+    profile_id: str | None = None,
+):
+    """List activity logs, optionally filtered by type or profile."""
+    db = get_db()
+    events = await db.list_activity(
+        limit=limit, offset=offset, event_type=type, profile_id=profile_id,
+    )
+    total = await db.count_activity(profile_id=profile_id)
+    return {"events": events, "total": total}
+
+
+@app.get("/api/profiles/{profile_id}/activity")
+async def get_profile_activity(
+    profile_id: str,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List activity for a specific profile."""
+    db = get_db()
+    events = await db.list_profile_activity(profile_id, limit=limit)
+    total = await db.count_activity(profile_id=profile_id)
+    return {"events": events, "total": total, "profile_id": profile_id}
+
+
+@app.delete("/api/activity")
+async def clear_activity(profile_id: str | None = None):
+    """Clear activity logs, optionally for a specific profile."""
+    db = get_db()
+    await db.clear_activity(profile_id=profile_id)
+    return {"ok": True}
 
 # ═══════════════════════════════════════════════════════════════════════
 # GROUPS
@@ -612,12 +727,53 @@ async def crawlee_status():
     }
 
 
+@app.post("/api/crawlee/install")
+async def crawlee_install():
+    """Install crawlee[all] inside the extension's sandbox venv."""
+    import shutil
+    import subprocess as _sp
+
+    uv = shutil.which("uv")
+    if not uv:
+        raise HTTPException(500, "uv not found on PATH")
+
+    # We're running inside the sandbox venv — use sys.executable to locate it
+    venv_python = sys.executable
+    logger.info("Installing crawlee[all] using uv, python=%s", venv_python)
+
+    try:
+        result = await asyncio.to_thread(
+            _sp.run,
+            [uv, "pip", "install", "crawlee[all]", "--python", venv_python],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0:
+            logger.error("crawlee install failed: %s", output)
+            return {
+                "success": False,
+                "error": output[-1000:] if len(output) > 1000 else output,
+            }
+
+        # Reset the availability flag so next check picks up the new install
+        import crawlee_provider
+        crawlee_provider._crawlee_available = None
+
+        logger.info("crawlee[all] installed successfully")
+        return {"success": True, "output": output[-500:] if len(output) > 500 else output}
+    except Exception as e:
+        logger.exception("crawlee install error")
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/crawlee/crawl")
 async def crawlee_crawl(body: CrawlRequest):
     """Run a crawl job using Crawlee."""
     crawlee = get_crawlee()
     if not crawlee.available:
-        raise HTTPException(503, "Crawlee is not installed. Install with: pip install 'crawlee[all]'")
+        raise HTTPException(503, "Crawlee is not installed. Install with: uv pip install 'crawlee[all]'")
 
     result = await crawlee.run_crawl(
         urls=body.urls,

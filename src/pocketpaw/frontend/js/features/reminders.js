@@ -70,7 +70,10 @@ window.PocketPaw.Reminders = {
              * Handle reminder triggered (notification)
              */
             handleReminderTriggered(data) {
-                const reminder = data.reminder;
+                // ws_adapter.broadcast sends {type, content: reminder}
+                // legacy broadcast sends {type, reminder: reminder}
+                const reminder = data.reminder || data.content;
+                if (!reminder || !reminder.text) return;
                 this.showToast(`Reminder: ${reminder.text}`, 'info');
                 this.addMessage('assistant', `Reminder: ${reminder.text}`);
 

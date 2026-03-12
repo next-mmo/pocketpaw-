@@ -1237,6 +1237,27 @@ async def delete_session(session_id: str):
     raise HTTPException(status_code=501, detail="Store does not support session deletion")
 
 
+@app.delete("/api/sessions")
+async def clear_all_sessions():
+    """Delete all sessions."""
+    manager = get_memory_manager()
+    store = manager._store
+
+    if not hasattr(store, "_load_session_index") or not hasattr(store, "delete_session"):
+        raise HTTPException(status_code=501, detail="Store does not support session deletion")
+
+    index = store._load_session_index()
+    deleted = 0
+    for session_key in list(index.keys()):
+        try:
+            await store.delete_session(session_key)
+            deleted += 1
+        except Exception as e:
+            logger.warning("Failed to delete session %s: %s", session_key, e)
+
+    return {"status": "ok", "deleted": deleted}
+
+
 @app.post("/api/sessions/{session_id}/title")
 async def update_session_title(session_id: str, request: Request):
     """Update the title of a session."""

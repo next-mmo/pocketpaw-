@@ -20,7 +20,8 @@ window.PocketPaw.Sessions = {
             sessionSearch: '',
             sessionsCollapsed: false,
             editingSessionId: null,
-            editingSessionTitle: ''
+            editingSessionTitle: '',
+            confirmClearAll: false
         };
     },
 
@@ -118,6 +119,44 @@ window.PocketPaw.Sessions = {
                     }
                 } catch (e) {
                     console.error('[Sessions] Delete failed:', e);
+                }
+            },
+
+            /**
+             * Clear all sessions
+             */
+            async clearAllSessions() {
+                // Two-click safety: first click arms, second click fires
+                if (!this.confirmClearAll) {
+                    this.confirmClearAll = true;
+                    // Auto-reset after 3 seconds
+                    setTimeout(() => { this.confirmClearAll = false; }, 3000);
+                    return;
+                }
+                this.confirmClearAll = false;
+
+                try {
+                    const res = await fetch('/api/sessions', { method: 'DELETE' });
+                    if (res.ok) {
+                        const data = await res.json();
+                        console.log(`[Sessions] Cleared ${data.deleted} sessions`);
+
+                        // Clear local state
+                        this.sessions = [];
+                        this.sessionsTotal = 0;
+
+                        // Invalidate all cached sessions
+                        if (StateManager.clearAllSessions) {
+                            StateManager.clearAllSessions();
+                        }
+
+                        // Start fresh
+                        this.createNewChat();
+                        this.showToast(`Cleared ${data.deleted} conversations`, 'success');
+                    }
+                } catch (e) {
+                    console.error('[Sessions] Clear all failed:', e);
+                    this.showToast('Failed to clear sessions', 'error');
                 }
             },
 

@@ -1,0 +1,20 @@
+# Python sandbox
+env/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# State file (runtime)
+counter_state.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env (local config)
+.env
