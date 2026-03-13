@@ -176,7 +176,7 @@ async def security_headers_middleware(request: Request, call_next):
             "media-src 'self' blob:; "
             "connect-src 'self' ws: wss: blob: https://cdn.jsdelivr.net "
             "https://unpkg.com https://esm.sh; "
-            "frame-src 'self'; "
+            "frame-src 'self' https: http:; "
             "frame-ancestors 'self'"
         )
     else:
