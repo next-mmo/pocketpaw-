@@ -298,25 +298,98 @@ async def regenerate_fingerprint(profile_id: str):
 
 # ── Profile launch / stop ──
 
+
+class LaunchOptions(BaseModel):
+    """Per-session overrides for launching a profile (all optional)."""
+    start_url: str = ""
+    headless: bool | None = None
+    crawler_type: str | None = None
+    proxy_id: str | None = None
+    actor_id: str | None = None
+    viewport: str | None = None  # e.g. "1920x1080"
+    clean_session: bool = False
+    session_label: str = ""
+
+
 @app.post("/api/profiles/{profile_id}/launch")
-async def launch_profile(profile_id: str):
-    """Launch a browser instance for this profile with spoofed fingerprint."""
+async def launch_profile(profile_id: str, opts: LaunchOptions | None = None):
+    """Launch a browser instance for this profile with spoofed fingerprint.
+
+    Accepts optional per-session overrides that are applied transiently —
+    the stored profile data is NOT mutated.
+    """
     db = get_db()
     profile = await db.get_profile(profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
 
-    bm = get_bm()
-    result = await bm.launch_profile(profile)
+    # ── Apply transient per-launch overrides ──
+    launch_profile_data = dict(profile)  # shallow copy — don't mutate stored profile
 
+    if opts:
+        if opts.headless is not None:
+            launch_profile_data["headless"] = opts.headless
+        if opts.crawler_type:
+            launch_profile_data["crawler_type"] = opts.crawler_type
+        if opts.actor_id is not None:
+            launch_profile_data["actor_id"] = opts.actor_id
+        if opts.viewport:
+            try:
+                w, h = opts.viewport.lower().split("x")
+                launch_profile_data.setdefault("fingerprint", {}).setdefault("screen", {})
+                launch_profile_data["fingerprint"]["screen"]["width"] = int(w)
+                launch_profile_data["fingerprint"]["screen"]["height"] = int(h)
+            except ValueError:
+                pass
+        if opts.proxy_id:
+            proxy = await db.get_proxy(opts.proxy_id)
+            if proxy:
+                launch_profile_data["proxy"] = {
+                    "type": proxy.get("type", "none"),
+                    "host": proxy.get("host", ""),
+                    "port": proxy.get("port", 0),
+                    "username": proxy.get("username", ""),
+                    "password": proxy.get("password", ""),
+                }
+        if opts.clean_session:
+            # Remove stored state so the browser starts fresh
+            state_file = Path(get_bm()._profile_storage_dir(profile_id)) / "state.json"
+            if state_file.exists():
+                state_file.unlink()
+
+    bm = get_bm()
+    result = await bm.launch_profile(launch_profile_data)
+
+    # Navigate to start URL if provided
+    if opts and opts.start_url:
+        page = bm._pages.get(profile_id)
+        if page:
+            try:
+                await page.goto(opts.start_url, wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                logger.warning("Failed to navigate to start_url %s: %s", opts.start_url, e)
+
+    # Persist last_used timestamp (but not the transient overrides)
     profile["last_used"] = time.time()
     await db.save_profile(profile)
+
+    meta: dict[str, Any] = {
+        "headless": launch_profile_data.get("headless", True),
+        "crawler_type": launch_profile_data.get("crawler_type", "playwright"),
+    }
+    if opts and opts.start_url:
+        meta["start_url"] = opts.start_url
+    if opts and opts.session_label:
+        meta["session_label"] = opts.session_label
+    if opts and opts.clean_session:
+        meta["clean_session"] = True
+
     await db.log_activity(
         "profile_launched",
         f'Browser launched for "{profile.get("name", profile_id)}"',
         resource=profile.get("name", profile_id),
         profile_id=profile_id,
-        meta={"headless": profile.get("headless", True), "crawler_type": profile.get("crawler_type", "playwright")},
+        meta=meta,
     )
 
     return {"status": "launched", "cdp_url": result.get("cdp_url", "")}

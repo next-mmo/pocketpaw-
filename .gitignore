@@ -76,3 +76,4 @@ client/bun.lock
 .agent
 # Playwright MCP output
 .playwright-mcp/
+nul

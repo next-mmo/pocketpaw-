@@ -20,6 +20,8 @@ import {
   Badge,
   Dropdown,
   Checkbox,
+  Divider,
+  Radio,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -47,6 +49,9 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   LoadingOutlined,
+  RocketOutlined,
+  ThunderboltOutlined,
+  GlobalOutlined,
 } from "@ant-design/icons";
 
 const OS_ICONS: Record<string, React.ReactNode> = {
@@ -285,6 +290,11 @@ export default function ProfilesPage() {
   const loading = useStore((s) => s.loadingProfiles);
   const fetchProfiles = useStore((s) => s.fetchProfiles);
   const fetchStats = useStore((s) => s.fetchStats);
+  const proxies = useStore((s) => s.proxies);
+  const fetchProxies = useStore((s) => s.fetchProxies);
+
+  // Fetch proxies on mount for the launch dialog
+  useEffect(() => { fetchProxies(); }, []);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -298,6 +308,19 @@ export default function ProfilesPage() {
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [crawleeAvailable, setCrawleeAvailable] = useState<boolean | null>(null);
   const [installingCrawlee, setInstallingCrawlee] = useState(false);
+
+  // ── Launch Options Dialog state ──
+  const [launchOpen, setLaunchOpen] = useState(false);
+  const [launchProfileRecord, setLaunchProfileRecord] = useState<any>(null);
+  const [launchStartUrl, setLaunchStartUrl] = useState("");
+  const [launchHeadless, setLaunchHeadless] = useState<boolean | undefined>(undefined);
+  const [launchCrawlerType, setLaunchCrawlerType] = useState<string | undefined>(undefined);
+  const [launchProxyId, setLaunchProxyId] = useState<string | undefined>(undefined);
+  const [launchActorId, setLaunchActorId] = useState<string | undefined>(undefined);
+  const [launchViewport, setLaunchViewport] = useState<string | undefined>(undefined);
+  const [launchCleanSession, setLaunchCleanSession] = useState(false);
+  const [launchSessionLabel, setLaunchSessionLabel] = useState("");
+  const [launching, setLaunching] = useState(false);
 
   // Check crawlee availability on mount
   useEffect(() => {
@@ -403,14 +426,58 @@ export default function ProfilesPage() {
     }
   };
 
-  const handleLaunch = async (id: string) => {
+  const openLaunchDialog = (record: any) => {
+    setLaunchProfileRecord(record);
+    // Pre-populate from profile defaults
+    setLaunchStartUrl("");
+    setLaunchHeadless(record.headless !== false);
+    setLaunchCrawlerType(record.crawler_type || "playwright");
+    setLaunchProxyId(undefined);
+    setLaunchActorId(record.actor_id || undefined);
+    setLaunchViewport(undefined);
+    setLaunchCleanSession(false);
+    setLaunchSessionLabel("");
+    setLaunchOpen(true);
+  };
+
+  const handleConfirmLaunch = async () => {
+    if (!launchProfileRecord) return;
+    setLaunching(true);
     try {
-      await api.launchProfile(id);
+      const opts: any = {};
+      if (launchStartUrl.trim()) opts.start_url = launchStartUrl.trim();
+      if (launchHeadless !== undefined) opts.headless = launchHeadless;
+      if (launchCrawlerType) opts.crawler_type = launchCrawlerType;
+      if (launchProxyId) opts.proxy_id = launchProxyId;
+      if (launchActorId) opts.actor_id = launchActorId;
+      if (launchViewport) opts.viewport = launchViewport;
+      if (launchCleanSession) opts.clean_session = true;
+      if (launchSessionLabel.trim()) opts.session_label = launchSessionLabel.trim();
+      await api.launchProfile(launchProfileRecord.id, Object.keys(opts).length > 0 ? opts : undefined);
       message.success("Browser launched");
+      setLaunchOpen(false);
       fetchProfiles();
       fetchStats();
     } catch (e: any) {
       message.error(e.message);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  const handleQuickLaunch = async () => {
+    if (!launchProfileRecord) return;
+    setLaunching(true);
+    try {
+      await api.launchProfile(launchProfileRecord.id);
+      message.success("Browser launched");
+      setLaunchOpen(false);
+      fetchProfiles();
+      fetchStats();
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setLaunching(false);
     }
   };
 
@@ -800,7 +867,7 @@ export default function ProfilesPage() {
                 icon={<PlayCircleOutlined />}
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleLaunch(record.id);
+                  openLaunchDialog(record);
                 }}
                 style={{ color: "#52c41a" }}
               />
@@ -1349,6 +1416,309 @@ export default function ProfilesPage() {
             alt="Browser screenshot"
             style={{ width: "100%", borderRadius: 8 }}
           />
+        )}
+      </Modal>
+
+      {/* ══ Launch Options Modal ══ */}
+      <Modal
+        title={null}
+        open={launchOpen}
+        onCancel={() => setLaunchOpen(false)}
+        width={560}
+        footer={null}
+        destroyOnClose
+        styles={{
+          body: { padding: 0 },
+          mask: { backdropFilter: "blur(4px)" },
+        }}
+      >
+        {launchProfileRecord && (
+          <div style={{ padding: "0" }}>
+            {/* ── Header ── */}
+            <div
+              style={{
+                padding: "24px 28px 16px",
+                background: "linear-gradient(135deg, rgba(102,126,234,0.12) 0%, rgba(118,75,162,0.08) 100%)",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                <div
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    background: "linear-gradient(135deg, #667eea, #764ba2)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 18,
+                    fontWeight: 700,
+                    color: "#fff",
+                  }}
+                >
+                  {launchProfileRecord.name?.[0]?.toUpperCase() || "?"}
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#e0e0e0" }}>
+                    <RocketOutlined style={{ marginRight: 8, color: "#667eea" }} />
+                    Launch Browser
+                  </div>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+                    {launchProfileRecord.name} • {launchProfileRecord.id}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "20px 28px 24px" }}>
+              {/* ── Section: Navigation ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>
+                  <GlobalOutlined style={{ marginRight: 6 }} /> Navigation
+                </div>
+                <Input
+                  placeholder="https://example.com (leave empty for blank page)"
+                  value={launchStartUrl}
+                  onChange={(e) => setLaunchStartUrl(e.target.value)}
+                  prefix={<LinkOutlined style={{ color: "#555" }} />}
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    borderColor: "rgba(255,255,255,0.08)",
+                    borderRadius: 8,
+                  }}
+                />
+              </div>
+
+              <Divider style={{ margin: "0 0 16px", borderColor: "rgba(255,255,255,0.06)" }} />
+
+              {/* ── Section: Engine ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
+                  <SettingOutlined style={{ marginRight: 6 }} /> Engine
+                </div>
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Provider</div>
+                    <Select
+                      value={launchCrawlerType}
+                      onChange={setLaunchCrawlerType}
+                      style={{ width: "100%" }}
+                      popupMatchSelectWidth={280}
+                      size="middle"
+                      optionLabelProp="label"
+                      options={CRAWLER_PROVIDERS.map((p) => ({
+                        value: p.key,
+                        label: (
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span>{p.icon}</span>
+                            <span style={{ color: p.color, fontWeight: 600, fontSize: 12 }}>{p.name}</span>
+                          </span>
+                        ),
+                      }))}
+                    />
+                  </div>
+                  <div style={{ minWidth: 120 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Visibility</div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <Switch
+                        size="small"
+                        checked={launchHeadless}
+                        onChange={setLaunchHeadless}
+                        checkedChildren={<EyeInvisibleOutlined />}
+                        unCheckedChildren={<EyeOutlined />}
+                      />
+                      <span style={{ fontSize: 12, color: "#aaa" }}>
+                        {launchHeadless ? "Headless" : "Visible"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Divider style={{ margin: "0 0 16px", borderColor: "rgba(255,255,255,0.06)" }} />
+
+              {/* ── Section: Network ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
+                  🌐 Network
+                </div>
+                <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Proxy</div>
+                <Select
+                  value={launchProxyId}
+                  onChange={setLaunchProxyId}
+                  placeholder="Profile default (no proxy override)"
+                  allowClear
+                  style={{ width: "100%" }}
+                  size="middle"
+                  options={[
+                    ...(proxies || []).map((px: any) => ({
+                      value: px.id,
+                      label: (
+                        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <Badge
+                            status={px.status === "alive" ? "success" : px.status === "dead" ? "error" : "default"}
+                          />
+                          <span style={{ fontSize: 12 }}>
+                            {px.type}://{px.host}:{px.port}
+                          </span>
+                          {px.latency_ms && (
+                            <span style={{ fontSize: 10, color: "#52c41a" }}>{px.latency_ms}ms</span>
+                          )}
+                        </span>
+                      ),
+                    })),
+                  ]}
+                />
+              </div>
+
+              <Divider style={{ margin: "0 0 16px", borderColor: "rgba(255,255,255,0.06)" }} />
+
+              {/* ── Section: Automation & Session ── */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 }}>
+                  <RobotOutlined style={{ marginRight: 6 }} /> Automation & Session
+                </div>
+
+                <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Run Actor on Startup</div>
+                    <Select
+                      value={launchActorId}
+                      onChange={setLaunchActorId}
+                      placeholder="None"
+                      allowClear
+                      style={{ width: "100%" }}
+                      size="middle"
+                      options={actors.map((a: any) => ({
+                        value: a.id,
+                        label: (
+                          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <RobotOutlined style={{ color: "#667eea" }} />
+                            <span style={{ fontSize: 12 }}>{a.name}</span>
+                          </span>
+                        ),
+                      }))}
+                    />
+                  </div>
+
+                  <div style={{ minWidth: 160 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Viewport</div>
+                    <Select
+                      value={launchViewport}
+                      onChange={setLaunchViewport}
+                      placeholder="Profile default"
+                      allowClear
+                      style={{ width: "100%" }}
+                      size="middle"
+                      options={[
+                        { value: "1920x1080", label: "1920×1080 (Full HD)" },
+                        { value: "1366x768", label: "1366×768 (Common)" },
+                        { value: "1280x720", label: "1280×720 (HD)" },
+                        { value: "1440x900", label: "1440×900 (Laptop)" },
+                        { value: "2560x1440", label: "2560×1440 (2K)" },
+                        { value: "375x812", label: "375×812 (Mobile)" },
+                        { value: "768x1024", label: "768×1024 (Tablet)" },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      background: launchCleanSession ? "rgba(255,77,79,0.08)" : "rgba(255,255,255,0.02)",
+                      border: `1px solid ${launchCleanSession ? "rgba(255,77,79,0.2)" : "rgba(255,255,255,0.06)"}`,
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                    }}
+                    onClick={() => setLaunchCleanSession(!launchCleanSession)}
+                  >
+                    <Checkbox checked={launchCleanSession} onChange={(e) => setLaunchCleanSession(e.target.checked)} />
+                    <div>
+                      <div style={{ fontSize: 12, color: launchCleanSession ? "#ff7875" : "#aaa", fontWeight: 500 }}>Clean Session</div>
+                      <div style={{ fontSize: 10, color: "#555" }}>Ignore saved cookies & storage</div>
+                    </div>
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Session Label</div>
+                    <Input
+                      placeholder="Optional tag…"
+                      value={launchSessionLabel}
+                      onChange={(e) => setLaunchSessionLabel(e.target.value)}
+                      size="small"
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        borderColor: "rgba(255,255,255,0.08)",
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Footer ── */}
+            <div
+              style={{
+                padding: "16px 28px",
+                borderTop: "1px solid rgba(255,255,255,0.06)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <Button
+                size="middle"
+                icon={<ThunderboltOutlined />}
+                onClick={handleQuickLaunch}
+                loading={launching}
+                style={{
+                  borderRadius: 8,
+                  borderColor: "rgba(255,255,255,0.1)",
+                  color: "#aaa",
+                }}
+              >
+                Quick Launch
+              </Button>
+              <Space>
+                <Button onClick={() => setLaunchOpen(false)} style={{ borderRadius: 8 }}>
+                  Cancel
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<RocketOutlined />}
+                  onClick={handleConfirmLaunch}
+                  loading={launching}
+                  style={{
+                    background: "linear-gradient(135deg, #52c41a 0%, #237804 100%)",
+                    border: "none",
+                    borderRadius: 8,
+                    fontWeight: 600,
+                    boxShadow: "0 2px 12px rgba(82,196,26,0.3)",
+                  }}
+                >
+                  Launch
+                </Button>
+              </Space>
+            </div>
+          </div>
         )}
       </Modal>
     </div>

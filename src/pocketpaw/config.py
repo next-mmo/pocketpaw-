@@ -154,11 +154,36 @@ def validate_api_keys(settings: "Settings") -> list[str]:
     and returns a list of human-readable warnings.  Designed for advisory use
     (e.g. ``Settings.save()`` logs warnings) — callers must **never** block a
     save based on these results.
+
+    Only validates keys **relevant to the currently selected backend+provider**.
+    Backends that manage their own credentials (codex_cli, opencode, copilot_sdk)
+    never trigger API key format warnings.
     """
     warnings: list[str] = []
-    if settings.anthropic_api_key and not settings.anthropic_api_key.startswith("sk-ant-"):
+    backend = getattr(settings, "agent_backend", "")
+
+    # Backends that handle their own auth — no key validation needed
+    if backend in ("codex_cli", "opencode", "copilot_sdk"):
+        return warnings
+
+    # Determine which keys are relevant for the current backend + provider
+    check_anthropic = False
+    check_openai = False
+
+    if backend == "claude_agent_sdk":
+        provider = getattr(settings, "claude_sdk_provider", None) or "anthropic"
+        if provider == "anthropic":
+            check_anthropic = True
+    elif backend == "openai_agents":
+        provider = getattr(settings, "openai_agents_provider", None) or "openai"
+        if provider == "openai":
+            check_openai = True
+    elif backend == "google_adk":
+        pass  # Google key doesn't have a simple prefix check here
+
+    if check_anthropic and settings.anthropic_api_key and not settings.anthropic_api_key.startswith("sk-ant-"):
         warnings.append("Anthropic API key may be invalid: expected to start with sk-ant-")
-    if settings.openai_api_key and not settings.openai_api_key.startswith("sk-"):
+    if check_openai and settings.openai_api_key and not settings.openai_api_key.startswith("sk-"):
         warnings.append("OpenAI API key may be invalid: expected to start with sk-")
     if settings.telegram_bot_token and not _TELEGRAM_BOT_TOKEN_RE.fullmatch(
         settings.telegram_bot_token.strip()

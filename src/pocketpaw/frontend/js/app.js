@@ -85,6 +85,9 @@ function app() {
             opencodeBaseUrl: 'http://localhost:4096',
             opencodeModel: '',
             opencodeMaxTurns: 0,
+            copilotSdkProvider: 'copilot',
+            copilotSdkModel: '',
+            copilotSdkMaxTurns: 0,
             claudeSdkProvider: 'anthropic',
             openaiAgentsProvider: 'openai',
             llmProvider: 'auto',
@@ -484,7 +487,11 @@ function app() {
             // Data-driven settings sync: map server keys to local settings
             const SETTINGS_MAP = [
                 'agentBackend', 'claudeSdkProvider', 'claudeSdkModel', 'claudeSdkMaxTurns',
-                'openaiAgentsProvider',
+                'openaiAgentsProvider', 'openaiAgentsModel', 'openaiAgentsMaxTurns',
+                'googleAdkModel', 'googleAdkMaxTurns',
+                'codexCliModel', 'codexCliMaxTurns',
+                'copilotSdkProvider', 'copilotSdkModel', 'copilotSdkMaxTurns',
+                'opencodeBaseUrl', 'opencodeModel', 'opencodeMaxTurns',
                 'llmProvider', 'ollamaHost', 'ollamaModel', 'anthropicModel',
                 'openaiCompatibleBaseUrl', 'openaiCompatibleModel', 'openaiCompatibleMaxTokens',
                 'geminiModel',

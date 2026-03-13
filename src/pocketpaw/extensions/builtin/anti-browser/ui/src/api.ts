@@ -62,8 +62,20 @@ export const api = {
     request(`/api/profiles/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteProfile: (id: string) =>
     request(`/api/profiles/${id}`, { method: "DELETE" }),
-  launchProfile: (id: string) =>
-    request(`/api/profiles/${id}/launch`, { method: "POST" }),
+  launchProfile: (id: string, opts?: {
+    start_url?: string;
+    headless?: boolean;
+    crawler_type?: string;
+    proxy_id?: string;
+    actor_id?: string;
+    viewport?: string;
+    clean_session?: boolean;
+    session_label?: string;
+  }) =>
+    request(`/api/profiles/${id}/launch`, {
+      method: "POST",
+      body: opts ? JSON.stringify(opts) : undefined,
+    }),
   stopProfile: (id: string) =>
     request(`/api/profiles/${id}/stop`, { method: "POST" }),
   screenshotProfile: (id: string) =>
