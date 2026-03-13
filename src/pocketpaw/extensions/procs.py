@@ -178,7 +178,11 @@ class PluginProcessManager:
                         cwd = sandbox.root
                         if hasattr(step, "path") and step.path:
                             cwd = sandbox.root / step.path
-                        await sandbox.run_command(step.run, cwd=cwd, on_output=output_queue)
+                        rc = await sandbox.run_command(step.run, cwd=cwd, on_output=output_queue)
+                        if rc != 0:
+                            raise RuntimeError(
+                                f"Install step failed (exit code {rc}): {step.run}"
+                            )
                     elif hasattr(step, "pip") and step.pip:
                         cwd = sandbox.root
                         if hasattr(step, "path") and step.path:

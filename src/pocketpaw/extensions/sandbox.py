@@ -266,7 +266,7 @@ class SandboxManager:
         if on_output:
             await on_output.put(f"Installing requirements from {req_file}...\n")
 
-        await self._run_in_venv(
+        returncode = await self._run_in_venv(
             [
                 self._uv, "pip", "install",
                 "-r", str(req_path),
@@ -275,6 +275,12 @@ class SandboxManager:
             cwd=work_dir,
             on_output=on_output,
         )
+
+        if returncode != 0:
+            msg = f"pip install failed (exit code {returncode}) for {req_file}"
+            if on_output:
+                await on_output.put(f"❌ {msg}\n")
+            raise RuntimeError(msg)
 
         if on_output:
             await on_output.put("✓ Requirements installed\n")
@@ -301,7 +307,7 @@ class SandboxManager:
                 f"Installing PyTorch {torch_cfg.version} ({torch_cfg.cuda})...\n"
             )
 
-        await self._run_in_venv(
+        returncode = await self._run_in_venv(
             [
                 self._uv, "pip", "install",
                 *packages,
@@ -311,6 +317,12 @@ class SandboxManager:
             cwd=self.root,
             on_output=on_output,
         )
+
+        if returncode != 0:
+            msg = f"PyTorch install failed (exit code {returncode})"
+            if on_output:
+                await on_output.put(f"❌ {msg}\n")
+            raise RuntimeError(msg)
 
         if on_output:
             await on_output.put(f"✓ PyTorch {torch_cfg.version} installed\n")
