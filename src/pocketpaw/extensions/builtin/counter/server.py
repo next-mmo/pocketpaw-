@@ -1,17 +1,15 @@
 """
-Counter Extension — server.py
+Counter Extension — Official Demo
 
-Full-stack Python counter with:
+Full-stack PocketPaw plugin demonstrating:
   - FastAPI REST API at /api/*
   - Gradio UI mounted at / (dark-themed, matches PocketPaw design)
-  - In-memory state with optional PocketPaw SDK persistence
+  - In-memory state with persistent JSON storage
+  - PocketPaw Python SDK integration
 
-Shared Python SDK:
-    src/pocketpaw/extensions/python_sdk.py
-    Import with: sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-                 from python_sdk import PocketPawSDK
+For a simpler starting point, see templates/starter/ (pure HTML/JS, no backend).
 
-Run:
+Run standalone:
     python server.py --host 127.0.0.1 --port 7860
 """
 

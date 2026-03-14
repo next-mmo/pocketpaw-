@@ -540,6 +540,77 @@
             },
         },
 
+        // ── Downloads (global download center) ─────────────────────
+        // Scopes: downloads.read, downloads.write
+        //
+        // Extensions can register downloads they create, query existing
+        // downloads, and update their status. All records show up in the
+        // dashboard's global Download Center.
+        //
+        // Examples:
+        //   const dl = await sdk.downloads.create({
+        //     filename: 'model.gguf',
+        //     url: 'https://example.com/model.gguf',
+        //     size: 4_000_000_000,
+        //     source: 'extension',
+        //     source_label: 'Llama.cpp',
+        //     status: 'downloading',
+        //     progress: 0,
+        //   });
+        //   await sdk.downloads.update(dl.id, { progress: 50 });
+        //   await sdk.downloads.update(dl.id, { status: 'completed', progress: 100 });
+        //   const list = await sdk.downloads.list();
+        //   await sdk.downloads.delete(dl.id);
+
+        downloads: {
+            async list(params = {}) {
+                const qs = new URLSearchParams(params).toString();
+                const resp = await request(`/downloads${qs ? '?' + qs : ''}`);
+                return resp.json();
+            },
+
+            async get(id) {
+                const resp = await request(`/downloads/${encodeURIComponent(id)}`);
+                return resp.json();
+            },
+
+            async create(data) {
+                const resp = await request('/downloads', {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                });
+                return resp.json();
+            },
+
+            async update(id, data) {
+                const resp = await request(`/downloads/${encodeURIComponent(id)}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(data),
+                });
+                return resp.json();
+            },
+
+            async delete(id) {
+                const resp = await request(`/downloads/${encodeURIComponent(id)}`, {
+                    method: 'DELETE',
+                });
+                return resp.json();
+            },
+
+            async stats() {
+                const resp = await request('/downloads/stats');
+                return resp.json();
+            },
+
+            async clear(status) {
+                const resp = await request('/downloads/clear', {
+                    method: 'POST',
+                    body: JSON.stringify(status ? { status } : {}),
+                });
+                return resp.json();
+            },
+        },
+
         // ── Host Actions ───────────────────────────────────────────
         // Scopes: host.navigate, host.open_chat
 

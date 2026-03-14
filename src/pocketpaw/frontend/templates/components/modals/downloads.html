@@ -1,0 +1,360 @@
+<!--
+  PocketPaw Dashboard - Download Center Modal
+
+  Created: 2026-03-14
+  Global download manager that tracks all downloads across the platform.
+  Supports filtering, sorting, search, detail view with screenshots.
+-->
+<!-- Download Center Modal -->
+<div
+class="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-md p-4"
+x-show="showDownloads"
+x-transition.opacity
+@click.self="showDownloads = false"
+>
+<div class="w-full max-w-[780px] flex flex-col bg-[#1c1c1e]/95 backdrop-blur-xl border border-[var(--glass-border)] rounded-[20px] shadow-2xl animate-[modalPop_0.25s_ease-out] overflow-hidden max-h-[90vh]" @click.stop>
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-5 border-b border-[var(--glass-border)] shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-xl">
+                <i data-lucide="download" class="w-5 h-5 text-blue-400"></i>
+            </div>
+            <div>
+                <h2 class="text-[17px] font-semibold">Download Center</h2>
+                <p class="text-[11px] text-white/40 mt-0.5">
+                    <span x-text="downloadStats.total"></span> downloads
+                    <span x-show="downloadStats.total_size > 0" class="ml-1">
+                        · <span x-text="formatDownloadSize(downloadStats.total_size)"></span>
+                    </span>
+                    <span x-show="downloadStats.active > 0" class="ml-1 text-blue-400">
+                        · <span x-text="downloadStats.active"></span> active
+                    </span>
+                </p>
+            </div>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- Clear History -->
+            <div class="relative" x-data="{ clearOpen: false }">
+                <button
+                    class="p-2 text-white/30 hover:text-white/60 hover:bg-white/5 rounded-lg transition-colors"
+                    @click="clearOpen = !clearOpen"
+                    title="Clear downloads"
+                >
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+                <div
+                    x-show="clearOpen"
+                    @click.away="clearOpen = false"
+                    x-transition
+                    class="absolute right-0 mt-1 w-44 bg-[#2c2c2e] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden"
+                >
+                    <button
+                        @click="clearDownloads('completed'); clearOpen = false"
+                        class="w-full px-4 py-2.5 text-sm text-left text-white/80 hover:bg-white/10 transition-colors flex items-center gap-2"
+                    >
+                        <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-green-400"></i>
+                        Clear completed
+                    </button>
+                    <button
+                        @click="clearDownloads('failed'); clearOpen = false"
+                        class="w-full px-4 py-2.5 text-sm text-left text-white/80 hover:bg-white/10 transition-colors flex items-center gap-2"
+                    >
+                        <i data-lucide="x-circle" class="w-3.5 h-3.5 text-red-400"></i>
+                        Clear failed
+                    </button>
+                    <div class="border-t border-white/5"></div>
+                    <button
+                        @click="if (confirm('Clear ALL download history?')) { clearDownloads(); clearOpen = false; }"
+                        class="w-full px-4 py-2.5 text-sm text-left text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+                    >
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        Clear all history
+                    </button>
+                </div>
+            </div>
+
+            <!-- Refresh -->
+            <button
+                class="p-2 text-white/30 hover:text-white/60 hover:bg-white/5 rounded-lg transition-colors"
+                @click="loadDownloads(); loadDownloadStats()"
+                title="Refresh"
+            >
+                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Close -->
+            <button class="p-2 -mr-2 text-[var(--text-secondary)] hover:text-white hover:bg-white/10 rounded-lg transition-colors" @click="closeDownloads()">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Toolbar: Filter + Search + Sort -->
+    <div class="px-6 pt-4 pb-2 flex flex-col md:flex-row gap-3 shrink-0">
+        <!-- Status Filters -->
+        <div class="flex items-center gap-1 flex-wrap">
+            <template x-for="filter in [
+                {id: 'all', label: 'All', icon: 'layers'},
+                {id: 'completed', label: 'Completed', icon: 'check-circle-2'},
+                {id: 'downloading', label: 'Active', icon: 'loader-2'},
+                {id: 'failed', label: 'Failed', icon: 'x-circle'},
+            ]" :key="filter.id">
+                <button
+                    class="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-lg transition-all"
+                    :class="downloadsFilter === filter.id
+                        ? 'bg-[var(--accent-color)] text-white shadow-sm'
+                        : 'text-white/40 hover:text-white/70 hover:bg-white/5'"
+                    @click="downloadsFilter = filter.id; loadDownloads()"
+                >
+                    <i :data-lucide="filter.icon" class="w-3 h-3" :class="filter.id === 'downloading' && downloadsFilter === filter.id ? 'animate-spin' : ''"></i>
+                    <span x-text="filter.label"></span>
+                    <span
+                        x-show="filter.id !== 'all' && (downloadStats.by_status || {})[filter.id] > 0"
+                        x-text="(downloadStats.by_status || {})[filter.id]"
+                        class="text-[10px] bg-white/10 px-1.5 rounded-full"
+                    ></span>
+                </button>
+            </template>
+        </div>
+
+        <!-- Search + Sort -->
+        <div class="flex items-center gap-2 md:ml-auto flex-1 md:flex-none">
+            <div class="relative flex-1 md:w-48">
+                <i data-lucide="search" class="w-3.5 h-3.5 text-white/30 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                <input
+                    type="text"
+                    x-model="downloadSearch"
+                    placeholder="Search downloads..."
+                    class="w-full pl-9 pr-3 py-2 bg-black/30 border border-white/10 rounded-xl text-[12px] text-white placeholder-white/40 focus:border-[var(--accent-color)] focus:outline-none transition-colors"
+                />
+            </div>
+            <select
+                x-model="downloadsSortBy"
+                class="bg-black/30 border border-white/10 rounded-xl text-[12px] text-white/70 px-3 py-2 focus:outline-none focus:border-[var(--accent-color)] appearance-none cursor-pointer"
+            >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="largest">Largest</option>
+                <option value="smallest">Smallest</option>
+                <option value="name">Name</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Download List -->
+    <div class="flex-1 overflow-y-auto px-6 pb-6 pt-2" style="scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;">
+        <!-- Loading -->
+        <template x-if="downloadsLoading && downloads.length === 0">
+            <div class="p-8 text-center text-white/60 flex flex-col items-center gap-3">
+                <i data-lucide="loader-2" class="w-8 h-8 animate-spin text-blue-400/60"></i>
+                <span class="text-sm">Loading downloads...</span>
+            </div>
+        </template>
+
+        <!-- Empty State -->
+        <template x-if="!downloadsLoading && getFilteredDownloads().length === 0">
+            <div class="p-16 text-center flex flex-col items-center gap-4">
+                <div class="p-4 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 rounded-2xl">
+                    <i data-lucide="download-cloud" class="w-10 h-10 text-blue-400/40"></i>
+                </div>
+                <div>
+                    <p class="text-white/50 font-medium text-sm">No downloads yet</p>
+                    <p class="text-white/30 text-[12px] mt-1 max-w-[280px]">
+                        Downloads from agents, extensions, and browser sessions will appear here.
+                    </p>
+                </div>
+            </div>
+        </template>
+
+        <!-- Download Items -->
+        <template x-if="!downloadsLoading || downloads.length > 0">
+            <div class="flex flex-col gap-1.5">
+                <template x-for="dl in getFilteredDownloads()" :key="dl.id">
+                    <div class="group rounded-xl border border-white/5 hover:border-white/10 bg-white/[0.02] hover:bg-white/[0.04] transition-all overflow-hidden">
+                        <!-- Main row -->
+                        <div class="flex items-center gap-3 px-4 py-3 cursor-pointer" @click="toggleDownloadDetail(dl.id)">
+                            <!-- File type icon -->
+                            <div class="p-2 rounded-lg shrink-0 transition-colors"
+                                :class="{
+                                    'bg-green-500/10': dl.status === 'completed',
+                                    'bg-blue-500/10': dl.status === 'downloading',
+                                    'bg-amber-500/10': dl.status === 'pending',
+                                    'bg-red-500/10': dl.status === 'failed',
+                                    'bg-white/5': dl.status === 'cancelled'
+                                }"
+                            >
+                                <i :data-lucide="getDownloadIcon(dl)" class="w-4 h-4" :class="getDownloadStatusColor(dl.status)"></i>
+                            </div>
+
+                            <!-- File info -->
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[13px] font-medium text-white truncate" x-text="dl.filename"></span>
+                                    <span x-show="dl.tags && dl.tags.length > 0" class="shrink-0">
+                                        <template x-for="tag in (dl.tags || []).slice(0, 2)" :key="tag">
+                                            <span class="inline-block text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-white/5 text-white/30 mr-0.5" x-text="tag"></span>
+                                        </template>
+                                    </span>
+                                </div>
+                                <div class="flex items-center gap-2 mt-0.5 text-[11px] text-white/35">
+                                    <!-- Source -->
+                                    <span class="flex items-center gap-1">
+                                        <i :data-lucide="getDownloadSourceIcon(dl.source)" class="w-2.5 h-2.5"></i>
+                                        <span x-text="dl.source_label || dl.source || 'Unknown'"></span>
+                                    </span>
+                                    <!-- Size -->
+                                    <span x-show="dl.size > 0" x-text="formatDownloadSize(dl.size)"></span>
+                                    <!-- Time -->
+                                    <span x-text="getTimeAgo(dl.created_at)"></span>
+                                </div>
+
+                                <!-- Progress bar (for active downloads) -->
+                                <div x-show="dl.status === 'downloading'" class="mt-2 h-1 bg-white/5 rounded-full overflow-hidden">
+                                    <div
+                                        class="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-500"
+                                        :style="'width:' + (dl.progress || 0) + '%'"
+                                    ></div>
+                                </div>
+                            </div>
+
+                            <!-- Right side actions -->
+                            <div class="flex items-center gap-2 shrink-0">
+                                <!-- Status chip -->
+                                <div class="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium"
+                                    :class="{
+                                        'bg-green-500/10 text-green-400': dl.status === 'completed',
+                                        'bg-blue-500/10 text-blue-400': dl.status === 'downloading',
+                                        'bg-amber-500/10 text-amber-400': dl.status === 'pending',
+                                        'bg-red-500/10 text-red-400': dl.status === 'failed',
+                                        'bg-white/5 text-white/30': dl.status === 'cancelled'
+                                    }"
+                                >
+                                    <i :data-lucide="getDownloadStatusIcon(dl.status)" class="w-2.5 h-2.5" :class="dl.status === 'downloading' ? 'animate-spin' : ''"></i>
+                                    <span x-text="dl.status === 'downloading' ? (dl.progress || 0) + '%' : dl.status" class="capitalize"></span>
+                                </div>
+
+                                <!-- Screenshot indicator -->
+                                <button
+                                    x-show="dl.screenshot"
+                                    @click.stop="viewDownloadScreenshot(dl)"
+                                    class="p-1.5 text-white/20 hover:text-amber-400 hover:bg-amber-500/10 rounded-lg transition-colors"
+                                    title="View screenshot"
+                                >
+                                    <i data-lucide="image" class="w-3.5 h-3.5"></i>
+                                </button>
+
+                                <!-- Open file / URL -->
+                                <button
+                                    x-show="dl.file_path || dl.url"
+                                    @click.stop="openDownloadFile(dl)"
+                                    class="p-1.5 text-white/20 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                    title="Open"
+                                >
+                                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                                </button>
+
+                                <!-- Delete -->
+                                <button
+                                    @click.stop="deleteDownload(dl.id)"
+                                    class="p-1.5 text-white/10 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+                                    title="Remove from history"
+                                >
+                                    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                                </button>
+
+                                <!-- Expand chevron -->
+                                <i
+                                    :data-lucide="downloadDetailId === dl.id ? 'chevron-up' : 'chevron-down'"
+                                    class="w-3.5 h-3.5 text-white/15 transition-transform"
+                                ></i>
+                            </div>
+                        </div>
+
+                        <!-- Detail panel (expanded) -->
+                        <div x-show="downloadDetailId === dl.id" x-transition class="px-4 pb-4 border-t border-white/5">
+                            <div class="mt-3 grid grid-cols-2 gap-3 text-[11px]">
+                                <!-- URL -->
+                                <div x-show="dl.url" class="col-span-2">
+                                    <span class="text-white/30 block mb-0.5">URL</span>
+                                    <div class="bg-black/30 rounded-lg px-3 py-2 text-white/50 truncate font-mono text-[10px]" x-text="dl.url"></div>
+                                </div>
+
+                                <!-- File Path -->
+                                <div x-show="dl.file_path" class="col-span-2">
+                                    <span class="text-white/30 block mb-0.5">File Path</span>
+                                    <div class="bg-black/30 rounded-lg px-3 py-2 text-white/50 truncate font-mono text-[10px]" x-text="dl.file_path"></div>
+                                </div>
+
+                                <!-- MIME Type -->
+                                <div>
+                                    <span class="text-white/30 block mb-0.5">Type</span>
+                                    <span class="text-white/60" x-text="dl.mime_type || '—'"></span>
+                                </div>
+
+                                <!-- Size -->
+                                <div>
+                                    <span class="text-white/30 block mb-0.5">Size</span>
+                                    <span class="text-white/60" x-text="formatDownloadSize(dl.size)"></span>
+                                </div>
+
+                                <!-- Source -->
+                                <div>
+                                    <span class="text-white/30 block mb-0.5">Source</span>
+                                    <span class="text-white/60 flex items-center gap-1">
+                                        <i :data-lucide="getDownloadSourceIcon(dl.source)" class="w-3 h-3"></i>
+                                        <span x-text="dl.source_label || dl.source || '—'"></span>
+                                    </span>
+                                </div>
+
+                                <!-- Created -->
+                                <div>
+                                    <span class="text-white/30 block mb-0.5">Created</span>
+                                    <span class="text-white/60" x-text="dl.created_at ? new Date(dl.created_at * 1000).toLocaleString() : '—'"></span>
+                                </div>
+
+                                <!-- Screenshot Preview -->
+                                <div x-show="dl.screenshot || dl.thumbnail" class="col-span-2">
+                                    <span class="text-white/30 block mb-1">Screenshot</span>
+                                    <img
+                                        :src="dl.thumbnail || dl.screenshot"
+                                        class="w-full max-h-48 object-cover rounded-lg border border-white/10 cursor-pointer hover:opacity-80 transition-opacity"
+                                        @click="viewDownloadScreenshot(dl)"
+                                    />
+                                </div>
+
+                                <!-- Tags -->
+                                <div x-show="dl.tags && dl.tags.length > 0" class="col-span-2">
+                                    <span class="text-white/30 block mb-1">Tags</span>
+                                    <div class="flex flex-wrap gap-1">
+                                        <template x-for="tag in (dl.tags || [])" :key="tag">
+                                            <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 text-white/40" x-text="tag"></span>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Metadata -->
+                                <div x-show="dl.metadata && Object.keys(dl.metadata).length > 0" class="col-span-2">
+                                    <span class="text-white/30 block mb-0.5">Metadata</span>
+                                    <pre class="bg-black/30 rounded-lg px-3 py-2 text-white/40 text-[10px] font-mono overflow-x-auto" x-text="JSON.stringify(dl.metadata, null, 2)"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Refresh icons after render -->
+                <div x-effect="downloads.length; downloadDetailId; $nextTick(() => { if (window.refreshIcons) window.refreshIcons(); })"></div>
+            </div>
+        </template>
+    </div>
+
+    <!-- Footer Info -->
+    <div class="px-6 py-3 border-t border-white/5 bg-black/20 shrink-0 flex items-center justify-between text-[11px] text-white/30">
+        <div class="flex items-center gap-2">
+            <i data-lucide="info" class="w-3 h-3"></i>
+            <span>Downloads from agents, extensions, and browser sessions are tracked here.</span>
+        </div>
+        <span x-show="downloads.length > 0" x-text="getFilteredDownloads().length + ' shown'"></span>
+    </div>
+</div>
+</div>

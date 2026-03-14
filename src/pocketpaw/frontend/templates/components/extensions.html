@@ -5,7 +5,266 @@
   - Tab bar at the top with closable tabs and a "+" (home/launcher) button
   - Dial-pad launcher grid when no tab is active
   - Iframe content area per open tab
+
+  DRY macros: upload_buttons, download_sample_link, section_heading,
+              extension_card, plugin_primary_button, plugin_management_buttons,
+              plugin_status_badge, frame_loading_overlay, frame_error_overlay
 -->
+
+{#- ─── Reusable Macros ─────────────────────────────────────────────── -#}
+
+{#- Upload .zip + Install Folder button pair -#}
+{% macro upload_buttons(size="sm") %}
+  {% if size == "sm" %}
+  <button
+    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
+    style="background: color-mix(in srgb, var(--accent-color) 10%, transparent); color: var(--accent-color);"
+    @click="triggerExtensionUpload()"
+    :disabled="extensionsHost.uploadingExtension"
+  >
+    <i data-lucide="upload" class="w-3 h-3"></i>
+    Upload .zip
+  </button>
+  <button
+    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
+    style="background: var(--surface-hover); color: var(--text-secondary);"
+    @click="triggerFolderUpload()"
+    :disabled="extensionsHost.uploadingExtension"
+  >
+    <i data-lucide="folder-open" class="w-3 h-3"></i>
+    Install Folder
+  </button>
+  {% else %}
+  <button
+    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+    style="background: color-mix(in srgb, var(--accent-color) 12%, transparent); color: var(--accent-color);"
+    @click="triggerExtensionUpload()"
+  >
+    <i data-lucide="upload" class="w-4 h-4"></i>
+    Upload .zip
+  </button>
+  <button
+    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+    style="background: var(--surface-hover); color: var(--text-secondary);"
+    @click="triggerFolderUpload()"
+  >
+    <i data-lucide="folder-open" class="w-4 h-4"></i>
+    Install Folder
+  </button>
+  {% endif %}
+{% endmacro %}
+
+{#- Extension app card — works for both enabled and disabled states -#}
+{% macro extension_card() %}
+  <div
+    class="group relative flex flex-col items-center gap-2.5 p-4 rounded-2xl transition-all"
+    :class="ext.enabled
+      ? 'cursor-pointer hover:opacity-80 active:scale-[0.97]'
+      : 'opacity-55'"
+    :style="(ext.enabled
+      ? 'border: 1px solid var(--glass-border);'
+      : 'border: 1px dashed var(--glass-border);')
+      + ' background: var(--surface-hover);'"
+    @click="ext.enabled && openAppTab(ext)"
+  >
+    <!-- Source badge -->
+    <span
+      class="absolute top-2 left-2 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md"
+      :style="ext.source === 'builtin'
+        ? 'background: var(--surface-hover); color: var(--text-tertiary);'
+        : 'background: rgba(48, 209, 88, 0.12); color: var(--success-color);'"
+      x-text="ext.source === 'builtin' ? 'Built-in' : 'Uploaded'"
+    ></span>
+
+    <!-- Icon -->
+    <div
+      class="w-12 h-12 rounded-xl flex items-center justify-center mt-3"
+      style="background: var(--surface-hover); border: 1px solid var(--glass-border);"
+    >
+      <i
+        :data-lucide="ext.icon || 'app-window'"
+        class="w-6 h-6"
+        style="color: var(--text-tertiary)"
+      ></i>
+    </div>
+
+    <!-- Name & action links -->
+    <div class="text-center min-w-0 w-full">
+      <div
+        class="text-[13px] font-medium truncate"
+        style="color: var(--text-secondary)"
+        x-text="ext.name || ext.id"
+      ></div>
+      <div class="mt-1.5 text-center text-[10px]">
+        <button
+          class="transition-colors"
+          style="color: var(--accent-color)"
+          @click="setExtensionEnabled(ext, !ext.enabled, $event)"
+          x-text="ext.enabled ? 'Disable' : 'Enable'"
+        ></button><template x-if="ext.is_removable"
+          ><span
+            ><span style="color: var(--text-tertiary)"> · </span
+            ><button
+              class="transition-colors hover:underline"
+              style="color: var(--danger-color)"
+              @click="deleteExtension(ext, $event)"
+            >
+              Uninstall
+            </button></span
+          ></template
+        >
+      </div>
+    </div>
+
+    <!-- Open indicator dot (enabled only) -->
+    <div
+      x-show="ext.enabled && extensionsHost.openTabs.some(t => t.id === ext.id)"
+      class="w-1.5 h-1.5 rounded-full absolute bottom-2 right-2"
+      style="background: var(--accent-color)"
+    ></div>
+  </div>
+{% endmacro %}
+
+{#- Reinstall + Uninstall button pair for plugin management -#}
+{% macro plugin_management_buttons() %}
+  <button
+    class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
+    style="background: var(--surface-hover); color: var(--text-secondary);"
+    @click="reinstallPlugin(tab.id)"
+    title="Clean and re-install (keeps venv)"
+  >
+    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+    Reinstall
+  </button>
+  <button
+    class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
+    style="background: rgba(255, 69, 58, 0.08); color: var(--danger-color);"
+    @click="uninstallPlugin(tab.id)"
+    title="Delete environment, source, and built assets"
+  >
+    <i data-lucide="trash-2" class="w-4 h-4"></i>
+    Uninstall
+  </button>
+{% endmacro %}
+
+{#- Download Sample link — used in empty state and developer section -#}
+{% macro download_sample_link(size="sm") %}
+  <a
+    href="/api/v1/extensions/download-sample/starter"
+    download="starter.zip"
+    class="inline-flex items-center gap-{{ '1.5' if size == 'sm' else '2' }} px-{{ '3' if size == 'sm' else '4' }} py-{{ '1.5' if size == 'sm' else '2' }} rounded-{{ 'lg' if size == 'sm' else 'xl' }} text-{{ '[11px]' if size == 'sm' else 'sm' }} font-medium transition-colors no-underline"
+    style="background: rgba(48, 209, 88, 0.1); color: var(--success-color);"
+  >
+    <i data-lucide="download" class="w-{{ '3' if size == 'sm' else '4' }} h-{{ '3' if size == 'sm' else '4' }}"></i>
+    Download Sample
+  </a>
+{% endmacro %}
+
+{#- Section heading — uppercase label used for grid sections -#}
+{% macro section_heading(text) %}
+  <p
+    class="text-[11px] uppercase tracking-[0.18em] font-semibold"
+    style="color: var(--text-tertiary)"
+  >{{ text }}</p>
+{% endmacro %}
+
+{#- Plugin primary action button (Install, Start, Restart, Retry) -#}
+{% macro plugin_primary_button(icon, label, action) %}
+  <button
+    class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.97]"
+    style="background: var(--accent-color); color: white;"
+    @click="{{ action }}"
+  >
+    <i data-lucide="{{ icon }}" class="w-4 h-4"></i>
+    {{ label }}
+  </button>
+{% endmacro %}
+
+{#- Plugin status badge (Installation complete, Service stopped, etc.) -#}
+{% macro plugin_status_badge(icon, label, bg, color) %}
+  <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl mb-4 text-sm"
+       style="background: {{ bg }}; color: {{ color }};">
+    <i data-lucide="{{ icon }}" class="w-4 h-4"></i>
+    {{ label }}
+  </div>
+{% endmacro %}
+
+{#- Unified frame loading overlay — shown while iframe is loading for ALL extension types -#}
+{% macro frame_loading_overlay() %}
+  <div
+    x-show="getFrameState(tab.id).status === 'loading'"
+    x-transition:leave="transition ease-in duration-300"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="absolute inset-0 z-10 flex items-center justify-center flex-col gap-5"
+    style="background: var(--bg-color);"
+  >
+    <!-- Icon -->
+    <div
+      class="w-16 h-16 rounded-2xl flex items-center justify-center"
+      style="background: var(--surface-hover); border: 1px solid var(--glass-border); animation: ext-float 3s ease-in-out infinite;"
+    >
+      <i :data-lucide="tab.icon || 'app-window'" class="w-8 h-8" style="color: var(--text-tertiary)"></i>
+    </div>
+    <!-- Name -->
+    <div class="text-center">
+      <div class="text-base font-semibold" style="color: var(--text-primary)" x-text="tab.name"></div>
+      <div class="text-xs mt-1" style="color: var(--text-tertiary)">Opening…</div>
+    </div>
+    <!-- Progress bar -->
+    <div class="w-44 h-0.5 rounded-full overflow-hidden" style="background: var(--surface-hover);">
+      <div class="h-full rounded-full" style="background: var(--accent-color); animation: ext-progress 2.5s ease-in-out forwards;"></div>
+    </div>
+  </div>
+{% endmacro %}
+
+{#- Unified frame error overlay — shown when iframe fails to load -#}
+{% macro frame_error_overlay() %}
+  <div
+    x-show="getFrameState(tab.id).status === 'error'"
+    x-transition
+    class="absolute inset-0 z-10 flex items-center justify-center flex-col gap-4"
+    style="background: var(--bg-color);"
+  >
+    <div
+      class="w-13 h-13 rounded-full flex items-center justify-center"
+      style="background: rgba(255, 69, 58, 0.1);"
+    >
+      <i data-lucide="alert-triangle" class="w-6 h-6" style="color: var(--danger-color)"></i>
+    </div>
+    <div class="text-sm font-semibold" style="color: var(--text-primary)">
+      Unable to load <span x-text="tab.name"></span>
+    </div>
+    <p class="text-xs text-center max-w-xs" style="color: var(--text-tertiary)"
+       x-text="getFrameState(tab.id).error || 'The extension may be temporarily unavailable.'"></p>
+    <button
+      class="mt-1 px-4 py-2 rounded-xl text-xs font-medium transition-all hover:brightness-110"
+      style="background: var(--surface-hover); color: var(--text-primary); border: 1px solid var(--glass-border);"
+      @click="retryFrame(tab.id)"
+    >
+      <i data-lucide="refresh-cw" class="w-3 h-3 inline mr-1"></i>
+      Retry
+    </button>
+  </div>
+{% endmacro %}
+
+{#- ─── CSS Keyframes for frame loading animation ─── -#}
+<style>
+  @keyframes ext-float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+  @keyframes ext-progress {
+    0%   { width: 0%;   }
+    30%  { width: 40%;  }
+    60%  { width: 65%;  }
+    80%  { width: 85%;  }
+    100% { width: 100%; }
+  }
+</style>
+
+{#- ─── Main Template ───────────────────────────────────────────────── -#}
+
 <section
   x-show="view === 'extensions'"
   x-cloak
@@ -84,7 +343,7 @@
         x-transition:enter-end="opacity-100 scale-100"
         class="h-full overflow-y-auto p-6"
       >
-        <!-- Hidden file input for ZIP upload -->
+        <!-- Hidden inputs for upload -->
         <input
           type="file"
           id="extensionUploadInput"
@@ -92,7 +351,6 @@
           class="hidden"
           @change="uploadExtension($event)"
         />
-        <!-- Hidden folder input for folder upload -->
         <input
           type="file"
           id="extensionFolderInput"
@@ -197,44 +455,8 @@
                 and click Reload.
               </p>
               <div class="flex items-center gap-3 mt-4">
-                <a
-                  href="/api/v1/extensions/download-sample/counter"
-                  download="counter-sample.zip"
-                  class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors no-underline"
-                  style="
-                    background: rgba(48, 209, 88, 0.1);
-                    color: var(--success-color);
-                  "
-                >
-                  <i data-lucide="download" class="w-4 h-4"></i>
-                  Download Sample
-                </a>
-                <button
-                  class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style="
-                    background: color-mix(
-                      in srgb,
-                      var(--accent-color) 12%,
-                      transparent
-                    );
-                    color: var(--accent-color);
-                  "
-                  @click="triggerExtensionUpload()"
-                >
-                  <i data-lucide="upload" class="w-4 h-4"></i>
-                  Upload .zip
-                </button>
-                <button
-                  class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style="
-                    background: var(--surface-hover);
-                    color: var(--text-secondary);
-                  "
-                  @click="triggerFolderUpload()"
-                >
-                  <i data-lucide="folder-open" class="w-4 h-4"></i>
-                  Install Folder
-                </button>
+                {{ download_sample_link("lg") }}
+                {{ upload_buttons("lg") }}
               </div>
             </div>
           </div>
@@ -249,116 +471,16 @@
             <template x-if="getEnabledExtensions().length > 0">
               <div class="mb-8">
                 <div class="flex items-center justify-between mb-4 px-1">
-                  <p
-                    class="text-[11px] uppercase tracking-[0.18em] font-semibold"
-                    style="color: var(--text-tertiary)"
-                  >
-                    Installed Apps
-                  </p>
+                  {{ section_heading("Installed Apps") }}
                   <div class="flex items-center gap-1.5">
-                    <button
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
-                      style="
-                        background: color-mix(
-                          in srgb,
-                          var(--accent-color) 10%,
-                          transparent
-                        );
-                        color: var(--accent-color);
-                      "
-                      @click="triggerExtensionUpload()"
-                      :disabled="extensionsHost.uploadingExtension"
-                    >
-                      <i data-lucide="upload" class="w-3 h-3"></i>
-                      Upload .zip
-                    </button>
-                    <button
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
-                      style="
-                        background: var(--surface-hover);
-                        color: var(--text-secondary);
-                      "
-                      @click="triggerFolderUpload()"
-                      :disabled="extensionsHost.uploadingExtension"
-                    >
-                      <i data-lucide="folder-open" class="w-3 h-3"></i>
-                      Install Folder
-                    </button>
+                    {{ upload_buttons("sm") }}
                   </div>
                 </div>
                 <div
                   class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
                 >
                   <template x-for="ext in getEnabledExtensions()" :key="ext.id">
-                    <div
-                      class="group relative flex flex-col items-center gap-2.5 p-4 rounded-2xl cursor-pointer transition-all hover:opacity-80 active:scale-[0.97]"
-                      style="
-                        border: 1px solid var(--glass-border);
-                        background: var(--surface-hover);
-                      "
-                      @click="openAppTab(ext)"
-                    >
-                      <!-- Source badge -->
-                      <span
-                        class="absolute top-2 left-2 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md"
-                        :style="ext.source === 'builtin'
-                          ? 'background: var(--surface-hover); color: var(--text-tertiary);'
-                          : 'background: rgba(48, 209, 88, 0.12); color: var(--success-color);'"
-                        x-text="ext.source === 'builtin' ? 'Built-in' : 'Uploaded'"
-                      ></span>
-
-                      <!-- Icon -->
-                      <div
-                        class="w-12 h-12 rounded-xl flex items-center justify-center mt-3"
-                        style="
-                          background: var(--surface-hover);
-                          border: 1px solid var(--glass-border);
-                        "
-                      >
-                        <i
-                          :data-lucide="ext.icon || 'app-window'"
-                          class="w-6 h-6"
-                          style="color: var(--text-tertiary)"
-                        ></i>
-                      </div>
-
-                      <!-- Name & action links -->
-                      <div class="text-center min-w-0 w-full">
-                        <div
-                          class="text-[13px] font-medium truncate"
-                          style="color: var(--text-secondary)"
-                          x-text="ext.name || ext.id"
-                        ></div>
-                        <div class="mt-1.5 text-center text-[10px]">
-                          <button
-                            class="transition-colors"
-                            style="color: var(--accent-color)"
-                            @click="setExtensionEnabled(ext, false, $event)"
-                          >
-                            Disable</button
-                          ><template x-if="ext.is_removable"
-                            ><span
-                              ><span style="color: var(--text-tertiary)">
-                                · </span
-                              ><button
-                                class="transition-colors hover:underline"
-                                style="color: var(--danger-color)"
-                                @click="deleteExtension(ext, $event)"
-                              >
-                                Uninstall
-                              </button></span
-                            ></template
-                          >
-                        </div>
-                      </div>
-
-                      <!-- Open indicator dot -->
-                      <div
-                        x-show="extensionsHost.openTabs.some(t => t.id === ext.id)"
-                        class="w-1.5 h-1.5 rounded-full absolute bottom-2 right-2"
-                        style="background: var(--accent-color)"
-                      ></div>
-                    </div>
+                    {{ extension_card() }}
                   </template>
                 </div>
               </div>
@@ -367,12 +489,7 @@
             <!-- Disabled apps section -->
             <template x-if="getDisabledExtensions().length > 0">
               <div>
-                <p
-                  class="text-[11px] uppercase tracking-[0.18em] font-semibold mb-4 px-1"
-                  style="color: var(--text-tertiary)"
-                >
-                  Disabled
-                </p>
+                <div class="mb-4 px-1">{{ section_heading("Disabled") }}</div>
                 <div
                   class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"
                 >
@@ -380,68 +497,7 @@
                     x-for="ext in getDisabledExtensions()"
                     :key="ext.id"
                   >
-                    <div
-                      class="group relative flex flex-col items-center gap-2.5 p-4 rounded-2xl opacity-55"
-                      style="
-                        border: 1px dashed var(--glass-border);
-                        background: var(--surface-hover);
-                      "
-                    >
-                      <!-- Source badge -->
-                      <span
-                        class="absolute top-2 left-2 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded-md"
-                        style="
-                          background: var(--surface-hover);
-                          color: var(--text-tertiary);
-                        "
-                        x-text="ext.source === 'builtin' ? 'Built-in' : 'Uploaded'"
-                      ></span>
-
-                      <!-- Icon -->
-                      <div
-                        class="w-12 h-12 rounded-xl flex items-center justify-center mt-3"
-                        style="
-                          background: var(--surface-hover);
-                          border: 1px solid var(--glass-border);
-                        "
-                      >
-                        <i
-                          :data-lucide="ext.icon || 'app-window'"
-                          class="w-6 h-6"
-                          style="color: var(--text-tertiary)"
-                        ></i>
-                      </div>
-
-                      <!-- Name & action links -->
-                      <div class="text-center min-w-0 w-full">
-                        <div
-                          class="text-[13px] font-medium truncate"
-                          style="color: var(--text-secondary)"
-                          x-text="ext.name || ext.id"
-                        ></div>
-                        <div class="mt-1.5 text-center text-[10px]">
-                          <button
-                            class="transition-colors"
-                            style="color: var(--accent-color)"
-                            @click="setExtensionEnabled(ext, true, $event)"
-                          >
-                            Enable</button
-                          ><template x-if="ext.is_removable"
-                            ><span
-                              ><span style="color: var(--text-tertiary)">
-                                · </span
-                              ><button
-                                class="transition-colors hover:underline"
-                                style="color: var(--danger-color)"
-                                @click="deleteExtension(ext, $event)"
-                              >
-                                Uninstall
-                              </button></span
-                            ></template
-                          >
-                        </div>
-                      </div>
-                    </div>
+                    {{ extension_card() }}
                   </template>
                 </div>
               </div>
@@ -453,12 +509,7 @@
               style="border-top: 1px solid var(--glass-border)"
             >
               <div class="flex items-center justify-between mb-3 px-1">
-                <p
-                  class="text-[11px] uppercase tracking-[0.18em] font-semibold"
-                  style="color: var(--text-tertiary)"
-                >
-                  Build Your Own
-                </p>
+                {{ section_heading("Build Your Own") }}
               </div>
               <div
                 class="rounded-2xl p-5"
@@ -487,46 +538,8 @@
                     </p>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <a
-                      href="/api/v1/extensions/download-sample/counter"
-                      download="counter-sample.zip"
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors no-underline"
-                      style="
-                        background: rgba(48, 209, 88, 0.1);
-                        color: var(--success-color);
-                      "
-                    >
-                      <i data-lucide="download" class="w-3 h-3"></i>
-                      Download Sample
-                    </a>
-                    <button
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
-                      style="
-                        background: color-mix(
-                          in srgb,
-                          var(--accent-color) 10%,
-                          transparent
-                        );
-                        color: var(--accent-color);
-                      "
-                      @click="triggerExtensionUpload()"
-                      :disabled="extensionsHost.uploadingExtension"
-                    >
-                      <i data-lucide="upload" class="w-3 h-3"></i>
-                      Upload .zip
-                    </button>
-                    <button
-                      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
-                      style="
-                        background: var(--surface-hover);
-                        color: var(--text-secondary);
-                      "
-                      @click="triggerFolderUpload()"
-                      :disabled="extensionsHost.uploadingExtension"
-                    >
-                      <i data-lucide="folder-open" class="w-3 h-3"></i>
-                      Install Folder
-                    </button>
+                    {{ download_sample_link("sm") }}
+                    {{ upload_buttons("sm") }}
                   </div>
                 </div>
               </div>
@@ -609,14 +622,7 @@
                     <p class="text-[13px] mb-4" style="color: var(--text-secondary)">
                       This app needs to be installed before first use. This will set up its environment, dependencies, and build assets.
                     </p>
-                    <button
-                      class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.97]"
-                      style="background: var(--accent-color); color: white;"
-                      @click="installPlugin(tab.id)"
-                    >
-                      <i data-lucide="download" class="w-4 h-4"></i>
-                      Install
-                    </button>
+                    {{ plugin_primary_button("download", "Install", "installPlugin(tab.id)") }}
                   </div>
                 </template>
 
@@ -660,41 +666,13 @@
                 <!-- State: Installed (ready to start daemon) -->
                 <template x-if="activePluginState()?.status === 'installed'">
                   <div class="text-center">
-                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl mb-4 text-sm"
-                         style="background: rgba(48, 209, 88, 0.1); color: var(--success-color);">
-                      <i data-lucide="check-circle-2" class="w-4 h-4"></i>
-                      Installation complete
-                    </div>
+                    {{ plugin_status_badge("check-circle-2", "Installation complete", "rgba(48, 209, 88, 0.1)", "var(--success-color)") }}
                     <p class="text-[13px] mb-4" style="color: var(--text-secondary)">
                       Start the backend service to begin using this app.
                     </p>
                     <div class="flex items-center justify-center gap-3">
-                      <button
-                        class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.97]"
-                        style="background: var(--accent-color); color: white;"
-                        @click="startPlugin(tab.id)"
-                      >
-                        <i data-lucide="play" class="w-4 h-4"></i>
-                        Start
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
-                        style="background: var(--surface-hover); color: var(--text-secondary);"
-                        @click="reinstallPlugin(tab.id)"
-                        title="Clean and re-install (keeps venv)"
-                      >
-                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        Reinstall
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
-                        style="background: rgba(255, 69, 58, 0.08); color: var(--danger-color);"
-                        @click="uninstallPlugin(tab.id)"
-                        title="Delete environment, source, and built assets"
-                      >
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        Uninstall
-                      </button>
+                      {{ plugin_primary_button("play", "Start", "startPlugin(tab.id)") }}
+                      {{ plugin_management_buttons() }}
                     </div>
                   </div>
                 </template>
@@ -715,41 +693,13 @@
                 <!-- State: Stopped (was running, now stopped) -->
                 <template x-if="activePluginState()?.status === 'stopped'">
                   <div class="text-center">
-                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl mb-4 text-sm"
-                         style="background: var(--surface-hover); color: var(--text-secondary);">
-                      <i data-lucide="circle-stop" class="w-4 h-4"></i>
-                      Service stopped
-                    </div>
+                    {{ plugin_status_badge("circle-stop", "Service stopped", "var(--surface-hover)", "var(--text-secondary)") }}
                     <p class="text-[13px] mb-4" style="color: var(--text-secondary)">
                       Restart the backend service to continue using this app.
                     </p>
                     <div class="flex items-center justify-center gap-3">
-                      <button
-                        class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.97]"
-                        style="background: var(--accent-color); color: white;"
-                        @click="startPlugin(tab.id)"
-                      >
-                        <i data-lucide="play" class="w-4 h-4"></i>
-                        Restart
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
-                        style="background: var(--surface-hover); color: var(--text-secondary);"
-                        @click="reinstallPlugin(tab.id)"
-                        title="Clean and re-install (keeps venv)"
-                      >
-                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        Reinstall
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
-                        style="background: rgba(255, 69, 58, 0.08); color: var(--danger-color);"
-                        @click="uninstallPlugin(tab.id)"
-                        title="Delete environment, source, and built assets"
-                      >
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        Uninstall
-                      </button>
+                      {{ plugin_primary_button("play", "Restart", "startPlugin(tab.id)") }}
+                      {{ plugin_management_buttons() }}
                     </div>
                   </div>
                 </template>
@@ -770,32 +720,13 @@
                 <!-- State: Error -->
                 <template x-if="activePluginState()?.status === 'error'">
                   <div class="text-center">
-                    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-xl mb-3 text-sm"
-                         style="background: rgba(255, 69, 58, 0.1); color: var(--danger-color);">
-                      <i data-lucide="alert-triangle" class="w-4 h-4"></i>
-                      Installation failed
-                    </div>
+                    {{ plugin_status_badge("alert-triangle", "Installation failed", "rgba(255, 69, 58, 0.1)", "var(--danger-color)") }}
                     <p class="text-[12px] mb-4 px-4 rounded-lg py-2 text-left font-mono break-all"
                        style="background: rgba(255,69,58,0.05); color: var(--danger-color); border: 1px solid rgba(255,69,58,0.15);"
                        x-text="activePluginState()?.error || 'Unknown error'"></p>
                     <div class="flex items-center justify-center gap-3">
-                      <button
-                        class="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:brightness-110 active:scale-[0.97]"
-                        style="background: var(--accent-color); color: white;"
-                        @click="installPlugin(tab.id)"
-                      >
-                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        Retry Install
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all hover:brightness-110"
-                        style="background: rgba(255, 69, 58, 0.08); color: var(--danger-color);"
-                        @click="uninstallPlugin(tab.id)"
-                        title="Delete environment and start over"
-                      >
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        Uninstall
-                      </button>
+                      {{ plugin_primary_button("refresh-cw", "Retry Install", "installPlugin(tab.id)") }}
+                      {{ plugin_management_buttons() }}
                     </div>
                   </div>
                 </template>
@@ -803,14 +734,27 @@
             </div>
           </template>
 
+          {# ── Unified Loading Overlay (all extension types) ── #}
+          {{ frame_loading_overlay() }}
+
+          {# ── Unified Error Overlay (all extension types) ── #}
+          {{ frame_error_overlay() }}
+
           <!-- Extension iframe (only shown when plugin is running or non-plugin) -->
           <iframe
             x-show="!tab.isPlugin || !activeTabNeedsInstall() || extensionsHost.activeTabId !== tab.id"
             :id="'extensionFrame_' + tab.id"
             title="PocketPaw Extension"
             class="w-full flex-1 bg-black/20"
-            sandbox="allow-downloads allow-forms allow-same-origin allow-scripts"
+            :sandbox="tab.isUrlWrapper
+              ? 'allow-downloads allow-forms allow-same-origin allow-scripts allow-popups allow-modals allow-popups-to-escape-sandbox'
+              : 'allow-downloads allow-forms allow-same-origin allow-scripts'"
+            :allow="tab.isUrlWrapper
+              ? 'autoplay; fullscreen; clipboard-write; encrypted-media'
+              : ''"
             :src="extensionsHost.frameSrcs[tab.id] || ''"
+            @load="onFrameLoad(tab.id)"
+            @error="onFrameError(tab.id, 'Unable to reach the extension')"
           ></iframe>
         </div>
       </template>

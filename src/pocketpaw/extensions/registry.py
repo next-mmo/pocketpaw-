@@ -69,15 +69,22 @@ class ExtensionManifest(BaseModel):
     description: str = Field(default="", max_length=280)
     icon: str | None = Field(default=None, max_length=64)
     route: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,63}$")
-    entry: str = Field(min_length=1, max_length=256)
+    entry: str = Field(default="index.html", min_length=1, max_length=256)
+    url: str | None = Field(
+        default=None,
+        description="Target URL for 'url'-type extensions — the global wrapper iframe points here",
+    )
     scopes: list[str] = Field(default_factory=list)
     autostart: bool = Field(
         default=True,
         description="If false, the extension is disabled by default and must be manually enabled",
     )
-    type: Literal["spa", "plugin"] = Field(
+    type: Literal["spa", "plugin", "url"] = Field(
         default="spa",
-        description="Extension type: 'spa' for frontend-only, 'plugin' for sandboxed Python+CUDA",
+        description=(
+            "Extension type: 'spa' for frontend-only, 'plugin' for sandboxed Python+CUDA, "
+            "'url' for a global iframe wrapper around an external URL"
+        ),
     )
     sandbox: SandboxConfig | None = Field(
         default=None,
@@ -101,6 +108,15 @@ class ExtensionManifest(BaseModel):
         if ".." in path.parts:
             raise ValueError("entry may not traverse outside the extension root")
         return value.replace("\\", "/")
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("url must start with http:// or https://")
+        return value
 
     @field_validator("scopes")
     @classmethod
@@ -140,6 +156,11 @@ class ExtensionRecord:
         return self.manifest.type == "plugin"
 
     @property
+    def is_url_wrapper(self) -> bool:
+        """Whether this extension is a URL wrapper (no local entry file)."""
+        return self.manifest.type == "url"
+
+    @property
     def is_removable(self) -> bool:
         """External (uploaded) extensions can be removed; built-ins cannot."""
         return self.source == "external"
@@ -148,7 +169,7 @@ class ExtensionRecord:
     def is_installed(self) -> bool:
         """For plugins, check if the sandbox venv exists."""
         if not self.is_plugin:
-            return True  # SPAs are always "installed"
+            return True  # SPAs and URL wrappers are always "installed"
         mgr = self.get_sandbox_manager()
         return mgr.is_installed if mgr else True
 
@@ -180,8 +201,13 @@ class ExtensionRecord:
             "asset_base": f"/extensions/{self.manifest.id}/",
             "type": self.manifest.type,
             "is_plugin": self.is_plugin,
+            "is_url_wrapper": self.is_url_wrapper,
             "is_installed": self.is_installed,
         }
+        # Expose the target URL for url-type extensions so the parent
+        # container can point the iframe directly (no double-nesting).
+        if self.is_url_wrapper and self.manifest.url:
+            summary["url"] = self.manifest.url
         if self.manifest.sandbox:
             summary["sandbox"] = {
                 "python": self.manifest.sandbox.python,
@@ -352,10 +378,13 @@ class ExtensionRegistry:
 
         # For SPA extensions, the entry file MUST exist.
         # For plugins, the entry file may not exist yet (built during install).
+        # For url-type extensions, no entry file is needed at all.
         entry_exists = entry_path.exists() and entry_path.is_file()
-        is_plugin = raw.get("type") == "plugin"
+        ext_type = raw.get("type", "spa")
+        is_plugin = ext_type == "plugin"
+        is_url = ext_type == "url"
 
-        if not entry_exists and not is_plugin:
+        if not entry_exists and not is_plugin and not is_url:
             self.errors.append(
                 ExtensionLoadError(
                     str(manifest_path), f"entry file does not exist: {manifest.entry}"

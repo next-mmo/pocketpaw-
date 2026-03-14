@@ -35,6 +35,14 @@ window.PocketPaw.Extensions = {
         sessions: {},
         frameSrcs: {},
         initialized: false,
+        // Unified iframe lifecycle state per extension (all types)
+        frameStates: {},
+        // frameStates[id] = {
+        //   status: 'loading'|'loaded'|'error',
+        //   error: null|string,
+        //   timeout: null  (timer ID)
+        // }
+
         // Plugin install/start state per plugin_id
         pluginStates: {},
         // pluginStates[id] = {
@@ -74,9 +82,7 @@ window.PocketPaw.Extensions = {
           const data = await resp.json();
           this.extensionsHost.items = data.extensions || [];
           this.extensionsHost.errors = data.errors || [];
-          this.$nextTick(() => {
-            if (window.refreshIcons) window.refreshIcons();
-          });
+          this._refreshIcons();
         } catch (error) {
           console.error("Failed to load extensions:", error);
           this.extensionsHost.errors = [
@@ -100,9 +106,7 @@ window.PocketPaw.Extensions = {
           const data = await resp.json();
           this.extensionsHost.items = data.extensions || [];
           this.extensionsHost.errors = data.errors || [];
-          this.$nextTick(() => {
-            if (window.refreshIcons) window.refreshIcons();
-          });
+          this._refreshIcons();
         } catch (error) {
           console.error("Failed to reload extensions:", error);
           this.showToast("Failed to reload extensions", "error");
@@ -184,6 +188,7 @@ window.PocketPaw.Extensions = {
             name: extension.name,
             icon: extension.icon || "app-window",
             isPlugin: extension.is_plugin || false,
+            isUrlWrapper: extension.is_url_wrapper || false,
           });
         }
 
@@ -200,22 +205,27 @@ window.PocketPaw.Extensions = {
             // Not installed — show the install screen (no iframe yet)
             this.extensionsHost.activeTabId = extension.id;
             this.updateHash(`#/apps/${route}`);
-            this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+            this._refreshIcons();
             return;
           }
           if (ps.status === 'installing' || ps.status === 'starting' || ps.status === 'uninstalling') {
             // Still in progress — show the install screen
             this.extensionsHost.activeTabId = extension.id;
             this.updateHash(`#/apps/${route}`);
-            this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+            this._refreshIcons();
             return;
           }
         }
 
-        // Prepare iframe src
+        // Prepare iframe src and start loading state.
+        // For URL-type extensions, point iframe directly at the target URL
+        // (no need for the webview.html passthrough — parent container handles lifecycle).
         if (!this.extensionsHost.frameSrcs[extension.id]) {
-          this.extensionsHost.frameSrcs[extension.id] =
-            `${extension.asset_base}?host=dashboard`;
+          const frameSrc = extension.is_url_wrapper && extension.url
+            ? extension.url
+            : `${extension.asset_base}?host=dashboard`;
+          this.extensionsHost.frameSrcs[extension.id] = frameSrc;
+          this._initFrameState(extension.id);
         }
 
         // Create session
@@ -231,7 +241,7 @@ window.PocketPaw.Extensions = {
         this.updateHash(`#/apps/${route}`);
 
         this.$nextTick(() => {
-          if (window.refreshIcons) window.refreshIcons();
+          this._refreshIcons();
           // Proactively push SDK context once the iframe is mounted.
           // Alpine renders the iframe async so we poll until it appears.
           this._pushContextWhenReady(extension.id);
@@ -271,9 +281,7 @@ window.PocketPaw.Extensions = {
           }
         }
 
-        this.$nextTick(() => {
-          if (window.refreshIcons) window.refreshIcons();
-        });
+        this._refreshIcons();
       },
 
       /**
@@ -355,7 +363,139 @@ window.PocketPaw.Extensions = {
         );
       },
 
+      // ── Iframe Lifecycle (unified for all extension types) ──
+
+      /**
+       * Initialize frame loading state for an extension.
+       */
+      _initFrameState(extId) {
+        const existing = this.extensionsHost.frameStates[extId];
+        if (existing?.timeout) clearTimeout(existing.timeout);
+        this.extensionsHost.frameStates[extId] = {
+          status: 'loading',
+          error: null,
+          timeout: null,
+        };
+        this._startFrameTimeout(extId);
+      },
+
+      /**
+       * Get the frame state for an extension, initializing if needed.
+       */
+      getFrameState(extId) {
+        return this.extensionsHost.frameStates[extId] || { status: 'loading', error: null };
+      },
+
+      /**
+       * Called when an extension iframe fires its 'load' event.
+       */
+      onFrameLoad(extId) {
+        const fs = this.extensionsHost.frameStates[extId];
+        if (!fs) return;
+        if (fs.timeout) clearTimeout(fs.timeout);
+        fs.status = 'loaded';
+        fs.timeout = null;
+      },
+
+      /**
+       * Called when an extension iframe fails to load.
+       */
+      onFrameError(extId, errorMsg) {
+        const fs = this.extensionsHost.frameStates[extId];
+        if (!fs) return;
+        if (fs.timeout) clearTimeout(fs.timeout);
+        fs.status = 'error';
+        fs.error = errorMsg || 'Failed to load extension';
+        fs.timeout = null;
+      },
+
+      /**
+       * Retry loading an extension iframe.
+       */
+      retryFrame(extId) {
+        const frame = document.getElementById(`extensionFrame_${extId}`);
+        const currentSrc = this.extensionsHost.frameSrcs[extId];
+        if (frame && currentSrc) {
+          this._initFrameState(extId);
+          // Force reload by clearing and re-setting src
+          frame.src = '';
+          this.$nextTick(() => { frame.src = currentSrc; });
+        }
+      },
+
+      /**
+       * Start a timeout that marks the frame as loaded after 15s.
+       * Optimistic: if iframe never fires load or error (e.g. cross-origin),
+       * we reveal it anyway.
+       */
+      _startFrameTimeout(extId) {
+        const fs = this.extensionsHost.frameStates[extId];
+        if (!fs) return;
+        fs.timeout = setTimeout(() => {
+          if (fs.status === 'loading') {
+            fs.status = 'loaded';
+          }
+        }, 15000);
+      },
+
+      /**
+       * Activate a plugin's iframe — unified Mini Program Container activation.
+       * Finds the extension, sets iframe src, inits frame state, creates session.
+       */
+      async _activatePluginFrame(pluginId) {
+        const ext = this.extensionsHost.items.find(i => i.id === pluginId);
+        if (!ext) return;
+        this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+        this._initFrameState(pluginId);
+        try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
+        this._refreshIcons();
+      },
+
+      /**
+       * Schedule a Lucide icon refresh on the next Alpine tick.
+       */
+      _refreshIcons() {
+        this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+      },
+
       // ── Upload / Delete ───────────────────────────────────
+
+      /**
+       * Shared 409-conflict handler for extension uploads.
+       * Returns true if the user confirmed the overwrite, false otherwise.
+       */
+      _handleUploadConflict(detail) {
+        let extName = "";
+        let promptMsg = "";
+
+        if (detail.startsWith("overwrite_builtin_required:")) {
+          extName = detail.replace("overwrite_builtin_required:", "");
+          promptMsg =
+            `"${extName}" is a built-in extension.\n\n` +
+            `Uploading will override the built-in version with your custom one. ` +
+            `You can restore the original by deleting the uploaded version later.\n\n` +
+            `Continue?`;
+        } else if (detail.startsWith("overwrite_required:")) {
+          extName = detail.replace("overwrite_required:", "");
+          promptMsg =
+            `"${extName}" is already installed.\n\n` +
+            `Do you want to replace it with the uploaded version?`;
+        } else {
+          throw new Error(detail || "Upload conflict");
+        }
+
+        return confirm(promptMsg);
+      },
+
+      /**
+       * Shared post-upload handler — updates list and shows toast.
+       */
+      _handleUploadSuccess(data) {
+        this.extensionsHost.items = data.extensions || [];
+        this.extensionsHost.errors = data.errors || [];
+        this.showToast("Extension installed successfully!", "success");
+        this._refreshIcons();
+      },
 
       triggerExtensionUpload() {
         const input = document.getElementById("extensionUploadInput");
@@ -400,30 +540,7 @@ window.PocketPaw.Extensions = {
 
         if (resp.status === 409) {
           const err = await resp.json().catch(() => ({}));
-          const detail = err.detail || "";
-
-          let extName = "";
-          let promptMsg = "";
-
-          if (detail.startsWith("overwrite_builtin_required:")) {
-            extName = detail.replace("overwrite_builtin_required:", "");
-            promptMsg =
-              `"${extName}" is a built-in extension.\n\n` +
-              `Uploading will override the built-in version with your custom one. ` +
-              `You can restore the original by deleting the uploaded version later.\n\n` +
-              `Continue?`;
-          } else if (detail.startsWith("overwrite_required:")) {
-            extName = detail.replace("overwrite_required:", "");
-            promptMsg =
-              `"${extName}" is already installed.\n\n` +
-              `Do you want to replace it with the uploaded version?`;
-          } else {
-            throw new Error(detail || "Upload conflict");
-          }
-
-          if (!confirm(promptMsg)) return;
-
-          // Retry with force
+          if (!this._handleUploadConflict(err.detail || "")) return;
           await this._doUploadExtension(file, true);
           return;
         }
@@ -433,13 +550,7 @@ window.PocketPaw.Extensions = {
           throw new Error(err.detail || "Upload failed");
         }
 
-        const data = await resp.json();
-        this.extensionsHost.items = data.extensions || [];
-        this.extensionsHost.errors = data.errors || [];
-        this.showToast("Extension installed successfully!", "success");
-        this.$nextTick(() => {
-          if (window.refreshIcons) window.refreshIcons();
-        });
+        this._handleUploadSuccess(await resp.json());
       },
 
       triggerFolderUpload() {
@@ -507,30 +618,7 @@ window.PocketPaw.Extensions = {
 
         if (resp.status === 409) {
           const err = await resp.json().catch(() => ({}));
-          const detail = err.detail || "";
-
-          let extName = "";
-          let promptMsg = "";
-
-          if (detail.startsWith("overwrite_builtin_required:")) {
-            extName = detail.replace("overwrite_builtin_required:", "");
-            promptMsg =
-              `"${extName}" is a built-in extension.\n\n` +
-              `Uploading will override the built-in version with your custom one. ` +
-              `You can restore the original by deleting the uploaded version later.\n\n` +
-              `Continue?`;
-          } else if (detail.startsWith("overwrite_required:")) {
-            extName = detail.replace("overwrite_required:", "");
-            promptMsg =
-              `"${extName}" is already installed.\n\n` +
-              `Do you want to replace it with the uploaded version?`;
-          } else {
-            throw new Error(detail || "Upload conflict");
-          }
-
-          if (!confirm(promptMsg)) return;
-
-          // Retry with force
+          if (!this._handleUploadConflict(err.detail || "")) return;
           await this._doUploadFolder(fileList, topFolder, true);
           return;
         }
@@ -540,13 +628,7 @@ window.PocketPaw.Extensions = {
           throw new Error(err.detail || "Upload failed");
         }
 
-        const data = await resp.json();
-        this.extensionsHost.items = data.extensions || [];
-        this.extensionsHost.errors = data.errors || [];
-        this.showToast("Extension installed successfully!", "success");
-        this.$nextTick(() => {
-          if (window.refreshIcons) window.refreshIcons();
-        });
+        this._handleUploadSuccess(await resp.json());
       },
 
       async deleteExtension(extension, event) {
@@ -831,9 +913,8 @@ window.PocketPaw.Extensions = {
             ps.status = 'running';
             ps.progress = 1;
             // Also set up the iframe src
-            const ext = this.extensionsHost.items.find(i => i.id === pluginId);
-            if (ext && !this.extensionsHost.frameSrcs[pluginId]) {
-              this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+            if (!this.extensionsHost.frameSrcs[pluginId]) {
+              await this._activatePluginFrame(pluginId);
             }
           } else if (data.status === 'installing') {
             ps.status = 'installing';
@@ -951,12 +1032,7 @@ window.PocketPaw.Extensions = {
                 // Reload extensions list (is_installed may have changed)
                 await this.loadExtensions(true);
                 // Now load the iframe
-                const ext = this.extensionsHost.items.find(i => i.id === pluginId);
-                if (ext) {
-                  this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
-                  try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
-                }
-                this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+                await this._activatePluginFrame(pluginId);
               } else if (data.status === 'stopped') {
                 // Install finished (stopped = completed install, not yet started)
                 ps.progress = 1;
@@ -969,12 +1045,11 @@ window.PocketPaw.Extensions = {
                 if (ext && !ext.has_start) {
                   // No daemon needed — skip straight to iframe
                   ps.status = 'running';
-                  this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
-                  try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
+                  await this._activatePluginFrame(pluginId);
                 } else {
                   ps.status = 'installed';
+                  this._refreshIcons();
                 }
-                this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
               } else if (data.status === 'error') {
                 ps.status = 'error';
                 ps.error = data.error || 'Unknown error';
@@ -1029,12 +1104,8 @@ window.PocketPaw.Extensions = {
       async skipPluginInstall(pluginId) {
         const ps = this._getPluginState(pluginId);
         ps.status = 'running';
-        const ext = this.extensionsHost.items.find(i => i.id === pluginId);
-        if (ext) {
-          this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
-          try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
-        }
-        this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+        await this._activatePluginFrame(pluginId);
+
       },
 
       /**
@@ -1072,7 +1143,7 @@ window.PocketPaw.Extensions = {
 
           const removed = data.removed || [];
           this.showToast(`Uninstalled: ${removed.join(', ') || 'done'}`, 'success');
-          this.$nextTick(() => { if (window.refreshIcons) window.refreshIcons(); });
+          this._refreshIcons();
         } catch (error) {
           console.error('Plugin uninstall failed:', error);
           ps.status = 'error';

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Counter — PocketPaw Extension</title>
+
+    <!-- PocketPaw Extension SDK — gives you storage, chat, notifications, etc. -->
+    <script src="/static/js/extensions-sdk.js"></script>
+
+    <style>
+      /* ── Reset ─────────────────────────────────────────── */
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        height: 100%; width: 100%;
+        background: #0a0a0a;
+        color: #e8e8e8;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        overflow: hidden;
+      }
+
+      /* ── Layout ────────────────────────────────────────── */
+      .app {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        gap: 32px;
+        padding: 24px;
+      }
+
+      /* ── Header ────────────────────────────────────────── */
+      .header {
+        text-align: center;
+      }
+      .header .badge {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        color: rgba(255,255,255,0.35);
+        font-weight: 600;
+      }
+      .header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-top: 4px;
+      }
+      .header p {
+        font-size: 13px;
+        color: rgba(255,255,255,0.45);
+        margin-top: 6px;
+      }
+
+      /* ── Counter Display ───────────────────────────────── */
+      .counter-value {
+        font-size: 96px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        font-variant-numeric: tabular-nums;
+        background: linear-gradient(135deg, #007aff, #5ac8fa);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        line-height: 1.1;
+        transition: transform 0.15s ease;
+        user-select: none;
+        min-width: 160px;
+        text-align: center;
+      }
+      .counter-value:hover {
+        transform: scale(1.05);
+      }
+
+      /* ── Controls ───────────────────────────────────────── */
+      .controls {
+        display: flex;
+        gap: 12px;
+      }
+
+      .btn {
+        border: none;
+        border-radius: 12px;
+        font-size: 18px;
+        font-weight: 600;
+        padding: 14px 28px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        font-family: inherit;
+        outline: none;
+      }
+      .btn:active { transform: scale(0.95); }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #007aff, #0056d6);
+        color: #fff;
+      }
+      .btn-primary:hover { filter: brightness(1.15); }
+
+      .btn-secondary {
+        background: rgba(255,255,255,0.08);
+        color: rgba(255,255,255,0.8);
+        border: 1px solid rgba(255,255,255,0.12);
+      }
+      .btn-secondary:hover { background: rgba(255,255,255,0.12); }
+
+      .btn-danger {
+        background: linear-gradient(135deg, #ff3b30, #cc2d25);
+        color: #fff;
+        font-size: 14px;
+        padding: 12px 24px;
+      }
+      .btn-danger:hover { filter: brightness(1.15); }
+
+      /* ── Step Size ──────────────────────────────────────── */
+      .step-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 13px;
+        color: rgba(255,255,255,0.5);
+      }
+      .step-row input[type="range"] {
+        width: 160px;
+        accent-color: #007aff;
+      }
+      .step-label {
+        min-width: 24px;
+        text-align: center;
+        color: #007aff;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Status ─────────────────────────────────────────── */
+      .status {
+        font-size: 11px;
+        padding: 6px 16px;
+        border-radius: 20px;
+        background: rgba(40, 167, 69, 0.12);
+        color: #28a745;
+      }
+      .status.loading {
+        background: rgba(255, 193, 7, 0.12);
+        color: #ffc107;
+      }
+
+      /* ── Animation ──────────────────────────────────────── */
+      @keyframes pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
+      .pop {
+        animation: pop 0.2s ease;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="app">
+      <!-- Header -->
+      <div class="header">
+        <div class="badge">PocketPaw Extension</div>
+        <h1>⚡ My Counter</h1>
+        <p>Edit this starter template to build your own extension</p>
+      </div>
+
+      <!-- Counter -->
+      <div id="counter" class="counter-value">0</div>
+
+      <!-- +/- Buttons -->
+      <div class="controls">
+        <button class="btn btn-secondary" id="btn-dec" title="Decrement">−</button>
+        <button class="btn btn-danger"    id="btn-reset" title="Reset">Reset</button>
+        <button class="btn btn-primary"   id="btn-inc" title="Increment">+</button>
+      </div>
+
+      <!-- Step slider -->
+      <div class="step-row">
+        <span>Step:</span>
+        <input type="range" id="step" min="1" max="100" value="1" />
+        <span class="step-label" id="step-label">1</span>
+      </div>
+
+      <!-- SDK status -->
+      <div class="status loading" id="status">Connecting to PocketPaw…</div>
+    </div>
+
+    <script>
+      /**
+       * ── PocketPaw Starter Extension ─────────────────────────────
+       *
+       * This is a minimal counter app that demonstrates:
+       *   1. Using the PocketPaw Extension SDK
+       *   2. Persisting state via sdk.storage
+       *   3. Clean dark-themed UI
+       *
+       * The SDK is loaded from /static/js/extensions-sdk.js (line 10).
+       * It exposes window.PocketPawExtensionSDK with:
+       *   - sdk.storage.get(key) / sdk.storage.set(key, value)
+       *   - sdk.chat.send(message)
+       *   - sdk.notifications.send(title, body, level)
+       *   - sdk.host.navigate(route) / sdk.host.openChat(text)
+       *   - ... and more (see the full SDK reference)
+       *
+       * ── How to customize ─────────────────────────────────────────
+       *
+       * 1. Edit extension.json to change the id, name, icon, scopes
+       * 2. Edit this file (index.html) to build your own UI
+       * 3. Upload .zip or Install Folder in the PocketPaw dashboard
+       *
+       * Need a Python backend? Change type to "plugin" in extension.json
+       * and add sandbox/install/start fields. See the Counter demo for an
+       * example of a full-stack plugin with FastAPI + Gradio.
+       */
+
+      const sdk = window.PocketPawExtensionSDK;
+
+      // ── State ──────────────────────────────────────────────────
+      let count = 0;
+      let step = 1;
+
+      // ── DOM refs ───────────────────────────────────────────────
+      const $counter   = document.getElementById('counter');
+      const $btnInc    = document.getElementById('btn-inc');
+      const $btnDec    = document.getElementById('btn-dec');
+      const $btnReset  = document.getElementById('btn-reset');
+      const $step      = document.getElementById('step');
+      const $stepLabel = document.getElementById('step-label');
+      const $status    = document.getElementById('status');
+
+      // ── Render ─────────────────────────────────────────────────
+      function render() {
+        $counter.textContent = count;
+        // Pop animation on change
+        $counter.classList.remove('pop');
+        void $counter.offsetWidth; // reflow to retrigger
+        $counter.classList.add('pop');
+      }
+
+      // ── Event handlers ─────────────────────────────────────────
+      $btnInc.addEventListener('click', () => {
+        count += step;
+        render();
+        save();
+      });
+
+      $btnDec.addEventListener('click', () => {
+        count -= step;
+        render();
+        save();
+      });
+
+      $btnReset.addEventListener('click', () => {
+        count = 0;
+        render();
+        save();
+      });
+
+      $step.addEventListener('input', () => {
+        step = parseInt($step.value, 10);
+        $stepLabel.textContent = step;
+      });
+
+      // ── Persistence via PocketPaw SDK ──────────────────────────
+      async function save() {
+        try {
+          await sdk.storage.set('counter_value', count);
+        } catch (e) {
+          console.warn('[Counter] Failed to save:', e);
+        }
+      }
+
+      async function load() {
+        try {
+          const saved = await sdk.storage.get('counter_value');
+          if (saved !== null && saved !== undefined) {
+            count = Number(saved);
+            render();
+          }
+        } catch (e) {
+          console.warn('[Counter] Failed to load:', e);
+        }
+      }
+
+      // ── Initialize ─────────────────────────────────────────────
+      (async () => {
+        try {
+          const ctx = await sdk.ready();
+          $status.textContent = `✅ Connected — ${ctx.extensionId}`;
+          $status.classList.remove('loading');
+          await load();
+        } catch (e) {
+          $status.textContent = '⚠ SDK unavailable — running standalone';
+          $status.classList.remove('loading');
+          console.warn('[Counter] SDK init failed:', e);
+        }
+      })();
+    </script>
+  </body>
+</html>

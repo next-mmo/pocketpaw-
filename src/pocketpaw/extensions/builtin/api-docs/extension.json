@@ -6,14 +6,5 @@
   "icon": "book-open",
   "route": "api-docs",
   "entry": "index.html",
-  "type": "plugin",
-  "autostart": true,
-  "scopes": [],
-  "sandbox": {
-    "python": "3.11",
-    "venv": "env"
-  },
-  "install": {
-    "steps": [{ "run": "python build.py" }]
-  }
+  "scopes": []
 }

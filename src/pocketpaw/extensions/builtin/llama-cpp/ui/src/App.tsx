@@ -5,12 +5,15 @@ import {
   SettingOutlined,
   UnorderedListOutlined,
   CompassOutlined,
+  ApiOutlined,
 } from "@ant-design/icons";
 import ChatPanel from "./components/ChatPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import ConversationList from "./components/ConversationList";
 import DiscoverPanel from "./components/DiscoverPanel";
+import ProvidersPanel from "./components/ProvidersPanel";
 import { useServerStore, API_BASE, PLUGIN_ID } from "./stores/serverStore";
+import { useProviderStore } from "./stores/providerStore";
 
 const { Sider, Content } = Layout;
 
@@ -19,6 +22,23 @@ export default function App() {
   const [siderCollapsed, setSiderCollapsed] = useState(false);
   const { status, setServerInfo, setModels, selectedModel, setSelectedModel } =
     useServerStore();
+  const { activeProviderId, providers } = useProviderStore();
+
+  const activeProvider = providers.find((p) => p.id === activeProviderId);
+
+  // Status indicator: show provider-aware status
+  const statusIndicator = (() => {
+    if (activeProvider?.type === "local") {
+      return status; // local server status
+    }
+    if (activeProvider?.enabled && activeProvider.apiKey) {
+      return "running"; // cloud provider configured
+    }
+    if (activeProvider?.enabled && activeProvider.type === "codex") {
+      return "running"; // codex uses OAuth
+    }
+    return "stopped";
+  })();
 
   // Poll server status at app level (always runs)
   useEffect(() => {
@@ -145,6 +165,11 @@ export default function App() {
                     icon: <MessageOutlined />,
                   },
                   {
+                    label: "Providers",
+                    value: "providers",
+                    icon: <ApiOutlined />,
+                  },
+                  {
                     label: "Discover",
                     value: "discover",
                     icon: <CompassOutlined />,
@@ -164,20 +189,24 @@ export default function App() {
                 height: 8,
                 borderRadius: "50%",
                 background:
-                  status === "running"
+                  statusIndicator === "running"
                     ? "#52c41a"
-                    : status === "starting" || status === "installing"
+                    : statusIndicator === "starting" ||
+                        statusIndicator === "installing"
                       ? "#faad14"
                       : "#ff4d4f",
-                boxShadow: status === "running" ? "0 0 6px #52c41a" : "none",
+                boxShadow:
+                  statusIndicator === "running" ? "0 0 6px #52c41a" : "none",
               }}
-              title={`Server: ${status}`}
+              title={`Status: ${statusIndicator} (${activeProvider?.name || "none"})`}
             />
           </div>
 
           <Content style={{ overflow: "hidden" }}>
             {activeTab === "chat" ? (
               <ChatPanel />
+            ) : activeTab === "providers" ? (
+              <ProvidersPanel />
             ) : activeTab === "discover" ? (
               <DiscoverPanel />
             ) : (

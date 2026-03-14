@@ -1,8 +1,8 @@
 {
   "id": "counter",
-  "name": "Counter",
+  "name": "Counter (Demo)",
   "version": "2.0.0",
-  "description": "A full-stack Python counter app with Gradio UI, FastAPI backend, and PocketPaw SDK integration.",
+  "description": "Official demo — full-stack plugin with Python backend, Gradio UI, FastAPI REST API, and persistent state.",
   "icon": "hash",
   "route": "counter",
   "entry": "index.html",

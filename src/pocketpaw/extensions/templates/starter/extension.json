@@ -1,0 +1,11 @@
+{
+  "id": "my-counter",
+  "name": "My Counter",
+  "version": "1.0.0",
+  "description": "A simple counter app — starter template for PocketPaw extensions.",
+  "icon": "hash",
+  "route": "my-counter",
+  "entry": "index.html",
+  "type": "spa",
+  "scopes": ["storage.read", "storage.write"]
+}

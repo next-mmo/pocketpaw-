@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bubble, Sender } from "@ant-design/x";
-import { Typography, Space, Button, Tooltip } from "antd";
+import { Typography, Space, Button, Tooltip, Tag } from "antd";
 import {
   DeleteOutlined,
   ClearOutlined,
@@ -9,7 +9,12 @@ import {
 } from "@ant-design/icons";
 import { Avatar } from "antd";
 import { useChatStore, type Message } from "../stores/chatStore";
-import { useServerStore, API_BASE, PLUGIN_ID } from "../stores/serverStore";
+import { useServerStore } from "../stores/serverStore";
+import {
+  useProviderStore,
+  getCompletionEndpoint,
+} from "../stores/providerStore";
+import ModelSwitcher from "./ModelSwitcher";
 
 const { Text } = Typography;
 
@@ -23,7 +28,8 @@ export default function ChatPanel() {
     setMessageLoading,
     deleteConversation,
   } = useChatStore();
-  const { status, url, selectedModel } = useServerStore();
+  const { status: localStatus } = useServerStore();
+  const { providers, activeProviderId, activeModelId } = useProviderStore();
 
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -32,6 +38,7 @@ export default function ChatPanel() {
 
   const activeConv = conversations.find((c) => c.id === activeConversationId);
   const messages = activeConv?.messages ?? [];
+  const activeProvider = providers.find((p) => p.id === activeProviderId);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -40,14 +47,31 @@ export default function ChatPanel() {
     }
   }, [messages]);
 
+  // Determine if sending is possible
+  const canSend = (() => {
+    if (!activeProvider?.enabled) return false;
+    if (activeProvider.type === "local" && localStatus !== "running")
+      return false;
+    if (!activeModelId) return false;
+    return true;
+  })();
+
+  const getPlaceholder = () => {
+    if (!activeProvider?.enabled) return "Enable a provider first...";
+    if (activeProvider.type === "local" && localStatus !== "running")
+      return "Start the local server first...";
+    if (!activeModelId) return "Select a model first...";
+    return "Type a message...";
+  };
+
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!content.trim() || isStreaming) return;
-      if (status !== "running" || !url) return;
+      if (!content.trim() || isStreaming || !canSend || !activeProvider) return;
 
+      const modelLabel = activeModelId;
       let convId = activeConversationId;
       if (!convId) {
-        convId = createConversation(selectedModel || "default");
+        convId = createConversation(modelLabel);
       }
 
       // Add user message
@@ -77,19 +101,21 @@ export default function ChatPanel() {
       abortRef.current = controller;
 
       try {
-        // Build message history for context
+        // Build message history
         const store = useChatStore.getState();
         const conv = store.conversations.find((c) => c.id === convId);
         const history = (conv?.messages ?? [])
           .filter((m) => !m.loading)
           .map((m) => ({ role: m.role, content: m.content }));
 
-        // Use proxy endpoint to avoid CORS issues
-        const proxyUrl = `${API_BASE}/api/v1/plugins/${PLUGIN_ID}/proxy/v1/chat/completions`;
-        const res = await fetch(proxyUrl, {
+        // Get provider-specific endpoint
+        const { url, headers } = getCompletionEndpoint(activeProvider);
+
+        const res = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
+            model: activeModelId,
             messages: history,
             stream: true,
             max_tokens: 1024,
@@ -98,7 +124,10 @@ export default function ChatPanel() {
         });
 
         if (!res.ok) {
-          throw new Error(`Server error: ${res.status}`);
+          const errBody = await res.text().catch(() => "");
+          throw new Error(
+            `${activeProvider.name} error (${res.status}): ${errBody.slice(0, 200)}`,
+          );
         }
 
         const reader = res.body?.getReader();
@@ -148,9 +177,9 @@ export default function ChatPanel() {
     },
     [
       activeConversationId,
-      status,
-      url,
-      selectedModel,
+      canSend,
+      activeProvider,
+      activeModelId,
       isStreaming,
       createConversation,
       addMessage,
@@ -162,8 +191,6 @@ export default function ChatPanel() {
   const handleStop = () => {
     abortRef.current?.abort();
   };
-
-  const serverNotReady = status !== "running";
 
   // Convert messages to Bubble.List items
   const bubbleItems = messages.map((msg) => ({
@@ -185,21 +212,45 @@ export default function ChatPanel() {
       {/* Header */}
       <div
         style={{
-          padding: "12px 16px",
+          padding: "8px 16px",
           borderBottom: "1px solid #303030",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          gap: 8,
         }}
       >
-        <Space>
-          <RobotOutlined style={{ fontSize: 18, color: "#1677ff" }} />
-          <Text strong style={{ color: "#e0e0e0", fontSize: 15 }}>
-            {activeConv?.title ?? "Llama Chat"}
+        <Space style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <RobotOutlined style={{ fontSize: 16, color: "#1677ff", flexShrink: 0 }} />
+          <Text
+            strong
+            style={{
+              color: "#e0e0e0",
+              fontSize: 13,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            {activeConv?.title ?? "New Chat"}
           </Text>
+          {activeConv && activeProvider && (
+            <Tag
+              color={
+                activeProvider.type === "local"
+                  ? "green"
+                  : activeProvider.type === "openrouter"
+                    ? "purple"
+                    : "blue"
+              }
+              style={{ fontSize: 10, lineHeight: "16px" }}
+            >
+              {activeProvider.name}
+            </Tag>
+          )}
         </Space>
-        <Space>
+        <Space size={4}>
+          <ModelSwitcher />
           {activeConversationId && (
             <Tooltip title="Delete conversation">
               <Button
@@ -234,7 +285,7 @@ export default function ChatPanel() {
           padding: "16px",
         }}
       >
-        {messages.length === 0 && !serverNotReady && (
+        {messages.length === 0 && canSend && (
           <div
             style={{
               display: "flex",
@@ -250,10 +301,15 @@ export default function ChatPanel() {
             <Text style={{ color: "#888", fontSize: 16 }}>
               Start a conversation
             </Text>
+            {activeProvider && (
+              <Text style={{ color: "#555", fontSize: 12 }}>
+                Using {activeProvider.name} · {activeModelId}
+              </Text>
+            )}
           </div>
         )}
 
-        {serverNotReady && (
+        {!canSend && (
           <div
             style={{
               display: "flex",
@@ -267,7 +323,11 @@ export default function ChatPanel() {
           >
             <RobotOutlined style={{ fontSize: 48, color: "#faad14" }} />
             <Text style={{ color: "#faad14", fontSize: 14 }}>
-              Server is not running. Go to Settings tab to start the server.
+              {!activeProvider?.enabled
+                ? "No provider enabled. Go to the Providers tab to set one up."
+                : activeProvider.type === "local" && localStatus !== "running"
+                  ? "Local server is not running. Go to Settings to start it."
+                  : "Select a model from the dropdown above."}
             </Text>
           </div>
         )}
@@ -275,6 +335,7 @@ export default function ChatPanel() {
         <Bubble.List
           items={bubbleItems.map((item) => ({
             key: item.key,
+            role: item.role as "user" | "assistant",
             loading: item.loading,
             content: item.content,
             placement:
@@ -318,10 +379,8 @@ export default function ChatPanel() {
           onSubmit={sendMessage}
           onCancel={handleStop}
           loading={isStreaming}
-          disabled={serverNotReady}
-          placeholder={
-            serverNotReady ? "Start the server first..." : "Type a message..."
-          }
+          disabled={!canSend}
+          placeholder={getPlaceholder()}
         />
       </div>
     </div>

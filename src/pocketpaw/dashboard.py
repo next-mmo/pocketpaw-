@@ -190,7 +190,7 @@ async def security_headers_middleware(request: Request, call_next):
             "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             "img-src 'self' data: blob:; "
             "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://unpkg.com; "
-            "frame-src 'self'; "
+            "frame-src 'self' https: http:; "
             "frame-ancestors 'none'"
         )
     # HSTS only when accessed via HTTPS (tunnel or reverse proxy)
@@ -924,6 +924,9 @@ async def serve_extension_asset(extension_id: str, asset_path: str = ""):
     The extension registry maps ``/extensions/{id}/`` to the extension's
     ``entry`` file (usually index.html) and resolves sub-paths to files
     within the extension root directory.
+
+    URL-type extensions are loaded directly by the parent dashboard's
+    Mini Program Container — they never hit this endpoint.
     """
     import mimetypes
 
@@ -932,6 +935,10 @@ async def serve_extension_asset(extension_id: str, asset_path: str = ""):
     from pocketpaw.extensions import get_extension_registry
 
     registry = get_extension_registry()
+    record = registry.get_enabled(extension_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Extension not found or disabled")
+
     try:
         file_path = registry.resolve_asset_path(extension_id, asset_path or None)
     except FileNotFoundError:
@@ -939,6 +946,8 @@ async def serve_extension_asset(extension_id: str, asset_path: str = ""):
 
     mime, _ = mimetypes.guess_type(str(file_path))
     return FileResponse(str(file_path), media_type=mime or "application/octet-stream")
+
+
 
 
 @app.get("/")

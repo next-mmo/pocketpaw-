@@ -160,10 +160,11 @@ _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 @router.get("/extensions/download-sample/{extension_id}")
 async def download_sample_extension(extension_id: str, request: Request):
-    """Download a built-in extension as a .zip file (starter template).
+    """Download an extension template as a .zip file.
 
-    Community developers can download sample extensions like "counter"
-    and use them as a starting point for their own extensions.
+    Looks in ``extensions/templates/`` first (community starter kits),
+    then falls back to ``extensions/builtin/`` for official demos.
+    The default "starter" template is a clean, zero-dependency counter app.
     """
     import io
     import zipfile
@@ -171,10 +172,12 @@ async def download_sample_extension(extension_id: str, request: Request):
 
     _require_admin_or_full_access(request)
 
-    # Only allow downloading built-in extensions as samples
-    builtin_dir = Path(__file__).resolve().parents[2] / "extensions" / "builtin"
-    ext_dir = builtin_dir / extension_id
+    ext_root = Path(__file__).resolve().parents[2] / "extensions"
 
+    # Look in templates/ first, then fall back to builtin/
+    ext_dir = ext_root / "templates" / extension_id
+    if not ext_dir.is_dir():
+        ext_dir = ext_root / "builtin" / extension_id
     if not ext_dir.is_dir():
         raise HTTPException(status_code=404, detail=f"Sample '{extension_id}' not found")
 
@@ -191,7 +194,7 @@ async def download_sample_extension(extension_id: str, request: Request):
         buf,
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{extension_id}-sample.zip"'
+            "Content-Disposition": f'attachment; filename="{extension_id}-starter.zip"'
         },
     )
 

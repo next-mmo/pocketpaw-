@@ -29,7 +29,9 @@ class ExtensionSummary(APIResponse):
     # Plugin fields
     type: str = "spa"
     is_plugin: bool = False
+    is_url_wrapper: bool = False
     is_installed: bool = True
+    url: str | None = None
     sandbox: dict | None = None
     has_start: bool = False
     daemon: bool = False

@@ -347,6 +347,11 @@ function app() {
             // Initialize hash-based URL routing
             this.initHashRouter();
 
+            // Load download stats for sidebar badge
+            if (this.loadDownloadStats) {
+                this.loadDownloadStats();
+            }
+
             // Refresh Lucide icons after initial render
             this.$nextTick(() => {
                 if (window.refreshIcons) window.refreshIcons();

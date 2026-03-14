@@ -5,6 +5,7 @@
   "description": "Privacy-focused music streaming client — search, stream, and manage your library from inside PocketPaw.",
   "icon": "music",
   "route": "monochrome",
-  "entry": "index.html",
+  "type": "url",
+  "url": "https://monochrome.samidy.com/",
   "scopes": []
 }
