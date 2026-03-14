@@ -22,6 +22,7 @@ import logging
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -30,6 +31,10 @@ from pocketpaw.agents.protocol import AgentEvent
 from pocketpaw.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Quota-exhaustion circuit-breaker settings.
+_QUOTA_MAX_RETRIES = 3
+_QUOTA_COOLDOWN_SECONDS = 30 * 60  # 30 minutes
 
 
 class CodexCLIBackend:
@@ -68,6 +73,9 @@ class CodexCLIBackend:
         self._cli_available = shutil.which("codex") is not None
         self._process: asyncio.subprocess.Process | None = None
         self._sync_process: subprocess.Popen | None = None
+        # Quota circuit-breaker state
+        self._quota_retries = 0
+        self._quota_paused_until: float = 0.0
         if self._cli_available:
             logger.info("Codex CLI found on PATH")
         else:
@@ -216,6 +224,14 @@ class CodexCLIBackend:
             if "Reconnecting" in error_msg or "Falling back" in error_msg:
                 logger.debug("Codex CLI transient: %s", error_msg)
                 return None
+            # Check for quota / billing errors — these are non-retryable
+            if self._is_quota_error(error_msg):
+                self._record_quota_error()
+                return AgentEvent(
+                    type="error",
+                    content=error_msg,
+                    metadata={"fatal": True, "error_kind": "quota_exhausted"},
+                )
             return AgentEvent(type="error", content=error_msg)
 
         return None
@@ -247,6 +263,19 @@ class CodexCLIBackend:
         ])
         return cmd, full_prompt
 
+    def _record_quota_error(self) -> None:
+        """Increment quota-error counter; enter cooldown after max retries."""
+        self._quota_retries += 1
+        if self._quota_retries >= _QUOTA_MAX_RETRIES:
+            self._quota_paused_until = (
+                time.monotonic() + _QUOTA_COOLDOWN_SECONDS
+            )
+            logger.warning(
+                "Codex CLI paused for %d min after %d quota errors",
+                _QUOTA_COOLDOWN_SECONDS // 60,
+                self._quota_retries,
+            )
+
     async def run(
         self,
         message: str,
@@ -259,9 +288,31 @@ class CodexCLIBackend:
             yield AgentEvent(
                 type="error",
                 content=(
-                    "Codex CLI not found on PATH.\n\nInstall with: npm install -g @openai/codex"
+                    "Codex CLI not found on PATH.\n\n"
+                    "Install with: npm install -g @openai/codex"
                 ),
             )
+            return
+
+        # Quota circuit-breaker: reject immediately while paused
+        if self._quota_paused_until > time.monotonic():
+            remaining = int(
+                self._quota_paused_until - time.monotonic()
+            )
+            mins = remaining // 60
+            yield AgentEvent(
+                type="error",
+                content=(
+                    f"⏸️ Codex CLI paused — quota exhausted after "
+                    f"{_QUOTA_MAX_RETRIES} retries. "
+                    f"Will resume in ~{mins} min."
+                ),
+                metadata={
+                    "fatal": True,
+                    "error_kind": "quota_exhausted",
+                },
+            )
+            yield AgentEvent(type="done", content="")
             return
 
         self._stop_flag = False
@@ -322,7 +373,15 @@ class CodexCLIBackend:
                 base_msg = f"Codex CLI exited with code {exit_code}"
                 if stderr_output:
                     base_msg += f": {stderr_output[:200]}"
-                yield AgentEvent(type="error", content=base_msg)
+                # Check for quota / billing errors in stderr
+                meta: dict = {}
+                if self._is_quota_error(stderr_output) or self._is_quota_error(base_msg):
+                    self._record_quota_error()
+                    meta = {"fatal": True, "error_kind": "quota_exhausted"}
+                yield AgentEvent(type="error", content=base_msg, metadata=meta)
+            else:
+                # Successful exit — reset quota counter
+                self._quota_retries = 0
 
             self._process = None
             yield AgentEvent(type="done", content="")
@@ -411,9 +470,37 @@ class CodexCLIBackend:
             base_msg = f"Codex CLI exited with code {exit_code}"
             if stderr_output:
                 base_msg += f": {stderr_output[:200]}"
-            yield AgentEvent(type="error", content=base_msg)
+            # Check for quota / billing errors in stderr
+            meta: dict = {}
+            if self._is_quota_error(stderr_output) or self._is_quota_error(base_msg):
+                self._record_quota_error()
+                meta = {"fatal": True, "error_kind": "quota_exhausted"}
+            yield AgentEvent(type="error", content=base_msg, metadata=meta)
+        else:
+            # Successful exit — reset quota counter
+            self._quota_retries = 0
 
         yield AgentEvent(type="done", content="")
+
+    @staticmethod
+    def _is_quota_error(text: str) -> bool:
+        """Check if an error message indicates a quota/billing issue."""
+        if not text:
+            return False
+        lower = text.lower()
+        return any(
+            phrase in lower
+            for phrase in (
+                "usage limit",
+                "rate limit",
+                "quota exceeded",
+                "billing",
+                "insufficient_quota",
+                "exceeded your current quota",
+                "upgrade to pro",
+                "purchase more credits",
+            )
+        )
 
     async def stop(self) -> None:
         self._stop_flag = True

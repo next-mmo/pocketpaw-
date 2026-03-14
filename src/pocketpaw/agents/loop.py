@@ -619,6 +619,20 @@ class AgentLoop:
                                 },
                             )
                         )
+
+                        # Quota-exhaustion alert — surface to dashboard
+                        if meta.get("fatal") and meta.get("error_kind") == "quota_exhausted":
+                            await self.bus.publish_system(
+                                SystemEvent(
+                                    event_type="quota_alert",
+                                    data={
+                                        "message": econtent,
+                                        "backend": self.settings.agent_backend,
+                                        "session_key": session_key,
+                                    },
+                                )
+                            )
+
                         # Apply output redaction to error messages too
                         redacted_content = redact_output(econtent)
                         await self.bus.publish_outbound(

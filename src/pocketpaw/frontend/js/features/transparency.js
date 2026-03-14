@@ -424,6 +424,22 @@ window.PocketPaw.Transparency = {
                     return;
                 }
 
+                // Quota-exhaustion alert — show prominent toast
+                if (eventType === 'quota_alert') {
+                    const d = data.data || {};
+                    const backend = (d.backend || 'Backend').replace(/_/g, ' ');
+                    this.showToast(
+                        `⚠️ ${backend} quota exhausted — requests paused. Check your billing or wait for reset.`,
+                        'error'
+                    );
+                    this.activityLog.push({
+                        time: Tools.formatTime(),
+                        message: `<b>⚠️ Quota Alert</b> ${(d.message || '').substring(0, 120).replace(/&/g, '&amp;').replace(/</g, '&lt;')}`,
+                        level: 'error',
+                    });
+                    return;
+                }
+
                 // AskUserQuestion — show interactive question in chat
                 if (eventType === 'ask_user_question') {
                     const d = data.data || {};

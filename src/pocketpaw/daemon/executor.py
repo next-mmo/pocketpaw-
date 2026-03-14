@@ -1,11 +1,19 @@
 """
 IntentionExecutor - Executes intentions by invoking the agent.
 
+Updated: 2026-03-14 — Added circuit-breaker: auto-disable intentions after
+consecutive fatal errors (e.g. quota exhaustion) to prevent resource waste.
+
 When an intention triggers:
 1. Gather context from configured sources
 2. Apply context to prompt template
 3. Invoke AgentRouter with the prepared prompt
 4. Stream results to callback (WebSocket/Telegram)
+
+If the agent yields a fatal error (metadata.fatal == True), the executor
+increments a per-intention failure counter.  After _MAX_CONSECUTIVE_FAILURES
+(default 3) consecutive fatal errors the intention is auto-disabled to stop
+burning API credits in a loop.
 """
 
 import logging
@@ -19,6 +27,9 @@ from .intentions import IntentionStore, get_intention_store
 
 logger = logging.getLogger(__name__)
 
+# Maximum consecutive fatal errors before an intention is auto-disabled.
+_MAX_CONSECUTIVE_FAILURES = 3
+
 
 class IntentionExecutor:
     """
@@ -29,6 +40,10 @@ class IntentionExecutor:
     - Prompt preparation
     - Agent invocation
     - Result streaming
+
+    Includes a circuit-breaker: after ``_MAX_CONSECUTIVE_FAILURES`` fatal
+    errors (e.g. quota exhaustion), the offending intention is automatically
+    disabled so it stops burning API credits in a loop.
     """
 
     def __init__(
@@ -54,6 +69,9 @@ class IntentionExecutor:
 
         # Agent router (created lazily)
         self._agent_router: AgentRouter | None = None
+
+        # Circuit-breaker: track consecutive fatal errors per intention.
+        self._consecutive_failures: dict[str, int] = {}
 
     def _get_agent_router(self) -> AgentRouter:
         """Get or create the agent router."""
@@ -94,6 +112,8 @@ class IntentionExecutor:
             "timestamp": datetime.now(tz=UTC).isoformat(),
         }
 
+        hit_fatal = False
+
         try:
             # 1. Gather context
             context_sources = intention.get("context_sources", [])
@@ -114,16 +134,54 @@ class IntentionExecutor:
 
             async for chunk in agent.run(prepared_prompt):
                 if hasattr(chunk, "type") and hasattr(chunk, "content"):
-                    yield {
+                    chunk_meta = getattr(chunk, "metadata", {}) or {}
+                    chunk_dict = {
                         "type": getattr(chunk, "type"),
                         "content": getattr(chunk, "content"),
-                        "metadata": getattr(chunk, "metadata", {})
+                        "metadata": chunk_meta,
                     }
+                    yield chunk_dict
+                    # Detect fatal errors (e.g. quota exhausted) from the agent
+                    if getattr(chunk, "type") == "error" and chunk_meta.get("fatal"):
+                        hit_fatal = True
                 else:
                     # pyre-ignore[7]
                     yield chunk
 
-            # 4. Mark intention as run
+            # 4. Handle circuit-breaker bookkeeping
+            if hit_fatal:
+                count = self._consecutive_failures.get(intention_id, 0) + 1
+                self._consecutive_failures[intention_id] = count
+                logger.warning(
+                    "Intention '%s' hit fatal error (%d/%d)",
+                    intention_name,
+                    count,
+                    _MAX_CONSECUTIVE_FAILURES,
+                )
+                if count >= _MAX_CONSECUTIVE_FAILURES:
+                    logger.warning(
+                        "Auto-disabling intention '%s' after %d consecutive fatal errors",
+                        intention_name,
+                        count,
+                    )
+                    self.intention_store.update(intention_id, {"enabled": False})
+                    self._consecutive_failures.pop(intention_id, None)
+                    yield {
+                        "type": "intention_error",
+                        "intention_id": intention_id,
+                        "intention_name": intention_name,
+                        "error": (
+                            f"Intention auto-disabled after {count} consecutive fatal errors. "
+                            f"Re-enable it manually once the backend issue is resolved."
+                        ),
+                        "auto_disabled": True,
+                        "timestamp": datetime.now(tz=UTC).isoformat(),
+                    }
+            else:
+                # Success — reset the failure counter
+                self._consecutive_failures.pop(intention_id, None)
+
+            # 5. Mark intention as run
             self.intention_store.mark_run(intention_id)
 
             # Notify completion
