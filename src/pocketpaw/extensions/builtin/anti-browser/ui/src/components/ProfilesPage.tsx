@@ -433,7 +433,7 @@ export default function ProfilesPage() {
     setLaunchHeadless(record.headless !== false);
     setLaunchCrawlerType(record.crawler_type || "playwright");
     setLaunchProxyId(undefined);
-    setLaunchActorId(record.actor_id || undefined);
+    setLaunchActorId(undefined); // Actor is optional, default to no selection
     setLaunchViewport(undefined);
     setLaunchCleanSession(false);
     setLaunchSessionLabel("");
@@ -1419,13 +1419,13 @@ export default function ProfilesPage() {
         )}
       </Modal>
 
-      {/* ══ Launch Options Modal ══ */}
-      <Modal
+      {/* ══ Launch Options Drawer ══ */}
+      <Drawer
         title={null}
         open={launchOpen}
-        onCancel={() => setLaunchOpen(false)}
-        width={560}
-        footer={null}
+        onClose={() => setLaunchOpen(false)}
+        width="60%"
+        placement="right"
         destroyOnClose
         styles={{
           body: { padding: 0 },
@@ -1720,7 +1720,7 @@ export default function ProfilesPage() {
             </div>
           </div>
         )}
-      </Modal>
+      </Drawer>
     </div>
   );
 }

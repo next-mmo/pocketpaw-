@@ -113,7 +113,15 @@ class IntentionExecutor:
             agent = self._get_agent_router()
 
             async for chunk in agent.run(prepared_prompt):
-                yield chunk
+                if hasattr(chunk, "type") and hasattr(chunk, "content"):
+                    yield {
+                        "type": getattr(chunk, "type"),
+                        "content": getattr(chunk, "content"),
+                        "metadata": getattr(chunk, "metadata", {})
+                    }
+                else:
+                    # pyre-ignore[7]
+                    yield chunk
 
             # 4. Mark intention as run
             self.intention_store.mark_run(intention_id)
