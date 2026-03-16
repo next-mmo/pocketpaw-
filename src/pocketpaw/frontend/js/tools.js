@@ -94,6 +94,8 @@ const Tools = {
         toast.appendChild(iconSpan);
         toast.appendChild(msgSpan);
         
+        container = container || document.querySelector('.toast-container');
+        if (!container) return;
         container.appendChild(toast);
         
         // Auto remove after 3s

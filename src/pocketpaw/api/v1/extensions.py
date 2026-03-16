@@ -39,6 +39,23 @@ from pocketpaw.extensions.storage import get_extension_storage
 
 logger = logging.getLogger(__name__)
 
+
+def _robust_rmtree(path) -> None:
+    """Remove a directory tree, handling Windows read-only files (e.g. .git pack files)."""
+    import os
+    import shutil
+    import stat
+
+    def _on_error(_func, _path, _exc_info):
+        """Clear read-only flag and retry."""
+        try:
+            os.chmod(_path, stat.S_IWRITE)
+            os.unlink(_path)
+        except Exception:
+            pass
+
+    shutil.rmtree(path, onexc=_on_error)
+
 router = APIRouter(tags=["Extensions"])
 
 
@@ -531,7 +548,7 @@ async def delete_extension(extension_id: str, request: Request):
 
     # Remove from disk
     try:
-        shutil.rmtree(record.root_dir)
+        _robust_rmtree(record.root_dir)
     except Exception as exc:
         logger.exception("Failed to delete extension '%s'", extension_id)
         raise HTTPException(status_code=500, detail=f"Failed to delete: {exc}")
@@ -2056,6 +2073,160 @@ async def update_plugin(plugin_id: str, request: Request):
         install_progress=proc.install_progress,
         is_installed=record.is_installed,
     )
+
+
+class _InstallFromPinokioRequest(BaseModel):
+    url: str  # GitHub URL e.g. https://github.com/pinokiofactory/whisper-webui
+    force: bool = False  # Overwrite existing extension with same ID
+
+
+@router.post("/extensions/install-from-pinokio")
+async def install_from_pinokio(
+    request: Request,
+    body: _InstallFromPinokioRequest,
+):
+    """Install an extension from a Pinokio-format GitHub repository.
+
+    This endpoint:
+      1. Clones the Pinokio repo into ``~/.pocketpaw/extensions/<slug>/``
+      2. Runs the Pinokio→PocketPaw adapter to synthesize ``extension.json``
+      3. Reloads the registry so the new extension appears
+      4. Returns the extension summary
+
+    If the extension has a ``sandbox`` config, you'll still need to call
+    ``POST /plugins/{id}/install`` afterward to create the venv and
+    install dependencies.
+    """
+    import re as _re
+    import shutil
+    from pathlib import Path
+
+    _require_admin_or_full_access(request)
+
+    url = body.url.strip().rstrip("/")
+
+    # Validate URL format
+    gh_match = _re.match(
+        r"https?://github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)", url
+    )
+    if not gh_match:
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a GitHub repository (https://github.com/owner/repo)",
+        )
+
+    repo_name = gh_match.group(2).removesuffix(".git")
+
+    # Determine target directory
+    external_dir = get_external_extensions_dir()
+    target_dir = external_dir / repo_name
+
+    if target_dir.exists():
+        if not body.force:
+            # Check if it's already registered
+            registry = get_extension_registry(force_reload=True)
+            # Look for any extension in that directory
+            for ext in registry.list_extensions():
+                if ext.root_dir == target_dir.resolve():
+                    return {
+                        "status": "already_exists",
+                        "extension": _summary(ext).model_dump(),
+                        "message": f"Extension already installed. Use force=true to re-clone.",
+                    }
+            raise HTTPException(
+                status_code=409,
+                detail=f"Directory {repo_name} already exists. Use force=true to overwrite.",
+            )
+        else:
+            # Remove existing directory for re-clone
+            shutil.rmtree(target_dir, ignore_errors=True)
+
+    # Clone the repository
+    import subprocess as _sp
+
+    git = shutil.which("git")
+    if not git:
+        raise HTTPException(
+            status_code=500,
+            detail="git is not installed or not in PATH",
+        )
+
+    logger.info("Cloning Pinokio repo %s → %s", url, target_dir)
+
+    try:
+        result = _sp.run(
+            [git, "clone", "--depth", "1", url, str(target_dir)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git clone failed (exit {result.returncode}): {result.stderr}"
+            )
+    except _sp.TimeoutExpired:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=504, detail="git clone timed out")
+    except RuntimeError as exc:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception as exc:
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Clone failed: {exc}")
+
+    # Check if it's a Pinokio project and convert
+    pinokio_js = target_dir / "pinokio.js"
+    extension_json = target_dir / "extension.json"
+
+    if pinokio_js.exists() and not extension_json.exists():
+        try:
+            from pocketpaw.extensions.pinokio_adapter import (
+                synthesize_extension_json,
+            )
+
+            synthesize_extension_json(target_dir, overwrite=False)
+            logger.info("Converted Pinokio repo '%s' to PocketPaw extension", repo_name)
+        except Exception as exc:
+            logger.exception("Failed to convert Pinokio project '%s'", repo_name)
+            _robust_rmtree(target_dir)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Pinokio conversion failed: {exc}",
+            )
+    elif not extension_json.exists():
+        _robust_rmtree(target_dir)
+        raise HTTPException(
+            status_code=400,
+            detail="Repository has neither pinokio.js nor extension.json",
+        )
+
+    # Reload registry to pick up the new extension
+    registry = get_extension_registry(force_reload=True)
+
+    # Find the newly registered extension
+    new_ext = None
+    for ext in registry.list_extensions():
+        if ext.root_dir == target_dir.resolve():
+            new_ext = ext
+            break
+
+    if new_ext is None:
+        # Check errors
+        errors = [e for e in registry.errors if repo_name in e.source]
+        detail = errors[0].message if errors else "Extension failed to register"
+        raise HTTPException(status_code=500, detail=detail)
+
+    summary = _summary(new_ext)
+    return {
+        "status": "installed",
+        "extension": summary.model_dump(),
+        "message": (
+            f"Installed '{summary.name}'. "
+            + ("Run POST /plugins/{id}/install to set up the environment."
+               if new_ext.is_plugin else "Ready to use.")
+        ),
+        "source": "pinokio" if pinokio_js.exists() else "native",
+    }
 
 
 _MAX_MODEL_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB

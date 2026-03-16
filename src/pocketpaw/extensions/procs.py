@@ -156,34 +156,66 @@ class PluginProcessManager:
         drain_task = asyncio.create_task(_drain_output())
 
         try:
-            # Step 1: Create venv
+            # ── Phase 0: Run shell "run" install steps that set up directories ──
+            # Pinokio-style extensions often need `git clone` to create the
+            # directory where the venv will live, so these must run BEFORE
+            # venv creation.
+            pre_venv_steps: list = []
+            post_venv_steps: list = []
+            if install_steps:
+                for step in install_steps:
+                    if hasattr(step, "run") and step.run:
+                        pre_venv_steps.append(step)
+                    else:
+                        post_venv_steps.append(step)
+
+            if pre_venv_steps:
+                proc.install_progress = 0.05
+                for step in pre_venv_steps:
+                    cwd = sandbox.root
+                    if hasattr(step, "path") and step.path:
+                        cwd = sandbox.root / step.path
+                    cwd.mkdir(parents=True, exist_ok=True)
+
+                    # Idempotent git clone: skip if the target directory
+                    # already exists (e.g. from a previous partial install).
+                    cmd_str = step.run
+                    if cmd_str.startswith("git clone "):
+                        parts = cmd_str.split()
+                        clone_target = cwd / parts[-1]
+                        if clone_target.exists() and any(clone_target.iterdir()):
+                            if output_queue:
+                                await output_queue.put(
+                                    f"✓ Skipping git clone — {parts[-1]}/ already exists\n"
+                                )
+                            continue
+
+                    rc = await sandbox.run_shell(cmd_str, cwd=cwd, on_output=output_queue)
+                    if rc != 0:
+                        raise RuntimeError(
+                            f"Install step failed (exit code {rc}): {cmd_str}"
+                        )
+
+            # ── Phase 1: Create venv ──
             proc.install_progress = 0.1
             await sandbox.ensure_venv(on_output=output_queue)
             proc.install_progress = 0.3
 
-            # Step 2: Install requirements
+            # ── Phase 2: Install requirements from sandbox config ──
             if sandbox.config.requirements:
                 await sandbox.install_requirements(on_output=output_queue)
-            proc.install_progress = 0.6
+            proc.install_progress = 0.5
 
-            # Step 3: Install PyTorch if configured
+            # ── Phase 3: Install PyTorch from sandbox config ──
             if sandbox.config.torch:
                 await sandbox.install_torch(on_output=output_queue)
-            proc.install_progress = 0.9
+            proc.install_progress = 0.7
 
-            # Step 4: Run custom install steps
-            if install_steps:
-                for step in install_steps:
-                    if hasattr(step, "run") and step.run:
-                        cwd = sandbox.root
-                        if hasattr(step, "path") and step.path:
-                            cwd = sandbox.root / step.path
-                        rc = await sandbox.run_command(step.run, cwd=cwd, on_output=output_queue)
-                        if rc != 0:
-                            raise RuntimeError(
-                                f"Install step failed (exit code {rc}): {step.run}"
-                            )
-                    elif hasattr(step, "pip") and step.pip:
+            # ── Phase 4: Run remaining custom install steps (pip, torch, node) ──
+            if post_venv_steps:
+                total = len(post_venv_steps)
+                for i, step in enumerate(post_venv_steps):
+                    if hasattr(step, "pip") and step.pip:
                         cwd = sandbox.root
                         if hasattr(step, "path") and step.path:
                             cwd = sandbox.root / step.path
@@ -197,6 +229,7 @@ class PluginProcessManager:
                     elif hasattr(step, "node") and step.node:
                         from pocketpaw.extensions.nodejs import ensure_node
                         await ensure_node(on_output=output_queue)
+                    proc.install_progress = 0.7 + (0.25 * (i + 1) / total)
 
             proc.install_progress = 1.0
             proc.status = "stopped"

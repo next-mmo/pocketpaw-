@@ -35,6 +35,7 @@ class ExtensionSummary(APIResponse):
     sandbox: dict | None = None
     has_start: bool = False
     daemon: bool = False
+    proxy_frontend: bool = False
 
 
 class ExtensionListResponse(APIResponse):

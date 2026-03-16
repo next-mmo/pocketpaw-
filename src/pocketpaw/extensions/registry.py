@@ -98,6 +98,14 @@ class ExtensionManifest(BaseModel):
         default=None,
         description="Start/daemon configuration for plugin-type extensions",
     )
+    proxy_frontend: bool = Field(
+        default=False,
+        description=(
+            "If true, the plugin's frontend is served by its daemon process "
+            "(e.g. Gradio, Streamlit). The iframe loads from the reverse proxy "
+            "instead of static extension files."
+        ),
+    )
 
     @field_validator("entry")
     @classmethod
@@ -217,6 +225,8 @@ class ExtensionRecord:
         if self.manifest.start:
             summary["has_start"] = True
             summary["daemon"] = self.manifest.start.daemon
+        if self.manifest.proxy_frontend:
+            summary["proxy_frontend"] = True
         return summary
 
 
@@ -306,8 +316,41 @@ class ExtensionRegistry:
 
         for extension_dir in sorted(path for path in root.iterdir() if path.is_dir()):
             manifest_path = extension_dir / "extension.json"
+
+            # ── Pinokio auto-detection ──
+            # If the directory has pinokio.js but no extension.json,
+            # synthesize a PocketPaw manifest from the Pinokio scripts.
+            if not manifest_path.exists():
+                pinokio_js = extension_dir / "pinokio.js"
+                if pinokio_js.exists():
+                    try:
+                        from pocketpaw.extensions.pinokio_adapter import (
+                            synthesize_extension_json,
+                        )
+
+                        synthesize_extension_json(extension_dir, overwrite=False)
+                        logger.info(
+                            "Auto-converted Pinokio project '%s' to PocketPaw extension",
+                            extension_dir.name,
+                        )
+                    except FileExistsError:
+                        pass  # extension.json was created between check and call
+                    except Exception:
+                        logger.exception(
+                            "Failed to convert Pinokio project '%s'",
+                            extension_dir.name,
+                        )
+                        self.errors.append(
+                            ExtensionLoadError(
+                                str(pinokio_js),
+                                "Failed to convert Pinokio project to PocketPaw format",
+                            )
+                        )
+                        continue
+
             if not manifest_path.exists():
                 continue
+
             self._load_manifest(
                 source=source,
                 extension_dir=extension_dir,

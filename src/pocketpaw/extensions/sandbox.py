@@ -266,12 +266,30 @@ class SandboxManager:
         if on_output:
             await on_output.put(f"Installing requirements from {req_file}...\n")
 
+        # Pre-install setuptools if the requirements include git-based
+        # packages (they often use legacy setup.py with pkg_resources).
+        req_content = req_path.read_text(encoding="utf-8", errors="replace")
+        if "git+" in req_content:
+            if on_output:
+                await on_output.put("Pre-installing setuptools for legacy builds...\n")
+            await self._run_in_venv(
+                [self._uv, "pip", "install", "setuptools<71", "wheel"],
+                cwd=work_dir,
+                on_output=on_output,
+            )
+
+        pip_cmd = [
+            self._uv, "pip", "install",
+            "-r", str(req_path),
+            "--index-strategy", "unsafe-best-match",
+        ]
+        # Use --no-build-isolation for requirements with git-based deps
+        # so the build process can use the venv's installed setuptools.
+        if "git+" in req_content:
+            pip_cmd.append("--no-build-isolation")
+
         returncode = await self._run_in_venv(
-            [
-                self._uv, "pip", "install",
-                "-r", str(req_path),
-                "--index-strategy", "unsafe-best-match",
-            ],
+            pip_cmd,
             cwd=work_dir,
             on_output=on_output,
         )
@@ -343,6 +361,26 @@ class SandboxManager:
             cmd_parts = list(command)
 
         return await self._run_in_venv(cmd_parts, cwd=cwd or self.root, on_output=on_output)
+
+    async def run_shell(
+        self,
+        command: str | list[str],
+        cwd: Path | None = None,
+        on_output: asyncio.Queue[str] | None = None,
+    ) -> int:
+        """Run a command WITHOUT venv activation (for pre-venv setup steps).
+
+        Returns the exit code.
+        """
+        if isinstance(command, str):
+            cmd_parts = command.split()
+        else:
+            cmd_parts = list(command)
+
+        if on_output:
+            await on_output.put(f"$ {' '.join(cmd_parts)}\n")
+
+        return await self._run_cmd(cmd_parts, cwd=cwd or self.root, on_output=on_output)
 
     async def delete_venv(self) -> None:
         """Remove the venv directory (reset the plugin environment)."""

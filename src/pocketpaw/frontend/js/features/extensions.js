@@ -30,6 +30,7 @@ window.PocketPaw.Extensions = {
         loading: false,
         reloading: false,
         uploadingExtension: false,
+        installingFromUrl: false,
         openTabs: [],
         activeTabId: "",
         sessions: {},
@@ -383,7 +384,7 @@ window.PocketPaw.Extensions = {
        * Get the frame state for an extension, initializing if needed.
        */
       getFrameState(extId) {
-        return this.extensionsHost.frameStates[extId] || { status: 'loading', error: null };
+        return this.extensionsHost.frameStates[extId] || { status: 'idle', error: null };
       },
 
       /**
@@ -445,7 +446,13 @@ window.PocketPaw.Extensions = {
       async _activatePluginFrame(pluginId) {
         const ext = this.extensionsHost.items.find(i => i.id === pluginId);
         if (!ext) return;
-        this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+        // For proxy_frontend plugins (e.g. Gradio), load from the reverse proxy
+        // instead of static files since the daemon serves the UI.
+        if (ext.proxy_frontend) {
+          this.extensionsHost.frameSrcs[pluginId] = `/api/v1/plugins/${pluginId}/proxy/`;
+        } else {
+          this.extensionsHost.frameSrcs[pluginId] = `${ext.asset_base}?host=dashboard`;
+        }
         this._initFrameState(pluginId);
         try { await this.ensureExtensionSession(pluginId, false); } catch(e) {}
         this._refreshIcons();
@@ -629,6 +636,62 @@ window.PocketPaw.Extensions = {
         }
 
         this._handleUploadSuccess(await resp.json());
+      },
+
+      /**
+       * Install an extension from a GitHub URL (supports Pinokio-format repos).
+       */
+      async installFromUrl() {
+        const url = prompt(
+          'Install from GitHub URL\n\n' +
+          'Paste a GitHub repository URL.\n' +
+          'Pinokio-format repos (with pinokio.js) are automatically converted.\n\n' +
+          'Example: https://github.com/pinokiofactory/whisper-webui'
+        );
+        if (!url || !url.trim()) return;
+
+        const trimmed = url.trim();
+        if (!trimmed.startsWith('https://github.com/')) {
+          this.showToast('Please enter a valid GitHub URL (https://github.com/...)', 'error');
+          return;
+        }
+
+        this.extensionsHost.installingFromUrl = true;
+        try {
+          const resp = await fetch('/api/v1/extensions/install-from-pinokio', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: trimmed, force: false }),
+          });
+
+          if (resp.status === 409) {
+            // Already exists — ask to overwrite
+            const err = await resp.json().catch(() => ({}));
+            if (!confirm((err.detail || 'Extension already exists') + '\n\nOverwrite?')) return;
+            const retryResp = await fetch('/api/v1/extensions/install-from-pinokio', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: trimmed, force: true }),
+            });
+            if (!retryResp.ok) {
+              const retryErr = await retryResp.json().catch(() => ({}));
+              throw new Error(retryErr.detail || 'Install failed');
+            }
+          } else if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Install failed');
+          }
+
+          // Reload extensions list
+          await this.loadExtensions(true);
+          this.showToast('Extension installed from URL!', 'success');
+          this._refreshIcons();
+        } catch (error) {
+          console.error('Install from URL failed:', error);
+          this.showToast(error.message || 'Install from URL failed', 'error');
+        } finally {
+          this.extensionsHost.installingFromUrl = false;
+        }
       },
 
       async deleteExtension(extension, event) {
