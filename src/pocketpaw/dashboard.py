@@ -151,9 +151,14 @@ async def security_headers_middleware(request: Request, call_next):
 
     # Allow the file-content and extension asset endpoints to be embedded
     # in same-origin iframes (extensions run inside iframes in the dashboard).
+    # Extension proxy routes (/api/v1/plugins/.../proxy/) also serve iframe
+    # content for plugin UIs, so they need the same treatment.
     is_file_content = request.url.path.startswith("/api/v1/files/content")
     is_extension_asset = request.url.path.startswith("/extensions/")
-    if is_file_content or is_extension_asset:
+    is_plugin_proxy = (
+        "/plugins/" in request.url.path and "/proxy/" in request.url.path
+    )
+    if is_file_content or is_extension_asset or is_plugin_proxy:
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
     else:
         response.headers["X-Frame-Options"] = "DENY"
@@ -162,20 +167,27 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
 
-    if is_extension_asset:
+    if is_extension_asset or is_plugin_proxy:
         # Extensions need a permissive CSP so their SPAs can load CDN
         # resources, use blob: URLs for media, and be framed by the dashboard.
+        # Gradio-based plugins (e.g. whisper-webui) connect directly to their
+        # daemon port on localhost, so we allow http://localhost:* and
+        # http://127.0.0.1:* across all resource directives.
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
+            "default-src 'self' http://localhost:* http://127.0.0.1:*; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-            "https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; "
+            "https://cdn.jsdelivr.net https://unpkg.com https://esm.sh "
+            "https://cdnjs.cloudflare.com http://localhost:* http://127.0.0.1:*; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
-            "https://fonts.googleapis.com https://esm.sh; "
-            "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-            "img-src 'self' data: blob:; "
-            "media-src 'self' blob:; "
+            "https://fonts.googleapis.com https://esm.sh "
+            "https://cdnjs.cloudflare.com http://localhost:* http://127.0.0.1:*; "
+            "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net "
+            "http://localhost:* http://127.0.0.1:*; "
+            "img-src 'self' data: blob: http://localhost:* http://127.0.0.1:*; "
+            "media-src 'self' blob: http://localhost:* http://127.0.0.1:*; "
             "connect-src 'self' ws: wss: blob: https://cdn.jsdelivr.net "
-            "https://unpkg.com https://esm.sh; "
+            "https://unpkg.com https://esm.sh "
+            "http://localhost:* http://127.0.0.1:*; "
             "frame-src 'self' https: http:; "
             "frame-ancestors 'self'"
         )

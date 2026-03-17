@@ -6,7 +6,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -2396,6 +2396,67 @@ async def download_model_from_hf(
     )
 
 
+@router.websocket("/plugins/{plugin_id}/proxy/{proxy_path:path}")
+async def proxy_plugin_websocket(websocket: WebSocket, plugin_id: str, proxy_path: str):
+    """WebSocket reverse proxy for plugin servers (e.g. Gradio queue system).
+
+    Gradio uses WebSocket connections for ``/queue/join`` and related
+    real-time endpoints.  We accept the WS from the browser, open a
+    matching WS to the daemon, and shuffle frames in both directions.
+    """
+    import websockets  # type: ignore[import-untyped]
+
+    proc = _plugin_processes.get(plugin_id)
+    if proc is None or proc.status != "running" or not proc.port:
+        await websocket.close(code=1013, reason="Plugin not running")
+        return
+
+    target_url = f"ws://127.0.0.1:{proc.port}/{proxy_path}"
+    if websocket.scope.get("query_string"):
+        target_url += f"?{websocket.scope['query_string'].decode()}"
+
+    await websocket.accept()
+
+    try:
+        async with websockets.connect(target_url) as upstream:
+            import asyncio
+
+            async def _client_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream.send(data)
+                except Exception:
+                    pass
+
+            async def _upstream_to_client():
+                try:
+                    async for msg in upstream:
+                        if isinstance(msg, bytes):
+                            await websocket.send_bytes(msg)
+                        else:
+                            await websocket.send_text(msg)
+                except Exception:
+                    pass
+
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.ensure_future(_client_to_upstream()),
+                    asyncio.ensure_future(_upstream_to_client()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+    except Exception:
+        pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @router.api_route("/plugins/{plugin_id}/proxy/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request):
     """Reverse proxy requests to a running plugin server.
@@ -2514,8 +2575,27 @@ async def proxy_plugin_request(plugin_id: str, proxy_path: str, request: Request
             for key, value in resp.headers.items():
                 if key.lower() not in _skip_headers:
                     response_headers[key] = value
+
+            content = resp.content
+            ct = resp.headers.get("content-type", "")
+
+            # Rewrite Gradio's hard-coded root URL in HTML and JSON responses
+            # so the browser JS routes API calls through the proxy instead of
+            # connecting directly to the daemon port.
+            # - HTML: the initial page has "root":"http://127.0.0.1:{port}"
+            # - JSON: the /config endpoint also returns {"root":"http://..."}
+            if proc and proc.port and ("text/html" in ct or "application/json" in ct):
+                proxy_base = f"/api/v1/plugins/{plugin_id}/proxy"
+                daemon_root = f"http://127.0.0.1:{proc.port}"
+                daemon_root_0 = f"http://0.0.0.0:{proc.port}"
+
+                text = content.decode("utf-8", errors="replace")
+                text = text.replace(daemon_root, proxy_base)
+                text = text.replace(daemon_root_0, proxy_base)
+                content = text.encode("utf-8")
+
             return StreamingResponse(
-                content=iter([resp.content]),
+                content=iter([content]),
                 status_code=resp.status_code,
                 headers=response_headers,
                 media_type=resp.headers.get("content-type", "application/octet-stream"),
