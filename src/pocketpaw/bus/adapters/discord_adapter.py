@@ -1,14 +1,15 @@
 """
-Discord Channel Adapter.
-Created: 2026-02-06
-Modified: 2026-03-10 - admin gate on /info, setname sanitization,
-    conversation history char budget, sentinel bot author key.
+Discord Channel Adapter — powered by discli serve.
+
+Spawns `discli serve` as a subprocess, communicates via stdin/stdout JSONL.
+Replaces the direct discord.py adapter with a thin process bridge.
 """
 
 import asyncio
+import json
 import logging
+import shutil
 import time
-from collections import deque
 from typing import Any
 
 from pocketpaw.bus import BaseChannelAdapter, Channel, InboundMessage, OutboundMessage
@@ -17,20 +18,15 @@ from pocketpaw.bus.commands import COMMAND_REGISTRY
 logger = logging.getLogger(__name__)
 
 DISCORD_MSG_LIMIT = 2000
-_CONVERSATION_HISTORY_SIZE = 30
-_CONVERSATION_CHAR_BUDGET = 12_000  # Max total chars in conversation context sent to LLM
 _NO_RESPONSE_MARKER = "[NO_RESPONSE]"
 _BOT_AUTHOR_KEY = "__bot__"
-_MAX_BOT_NAME_LENGTH = 64
-_IDLE_CHANNEL_TTL = 3600  # Evict conversation history for channels idle > 1 hour
-
-# Valid activity types for the /setstatus command
-_ACTIVITY_TYPES = {"playing", "watching", "listening", "competing"}
-_STATUS_TYPES = {"online", "idle", "dnd", "invisible"}
+_CONVERSATION_HISTORY_SIZE = 30
+_CONVERSATION_CHAR_BUDGET = 12_000
+_IDLE_CHANNEL_TTL = 3600
 
 
-class DiscordAdapter(BaseChannelAdapter):
-    """Adapter for Discord Bot API using discord.py."""
+class DiscliAdapter(BaseChannelAdapter):
+    """Discord adapter that delegates to discli serve subprocess."""
 
     def __init__(
         self,
@@ -49,187 +45,693 @@ class DiscordAdapter(BaseChannelAdapter):
         self.allowed_guild_ids = allowed_guild_ids or []
         self.allowed_user_ids = allowed_user_ids or []
         self.allowed_channel_ids = allowed_channel_ids or []
-        self.conversation_channel_ids = conversation_channel_ids or []
+        self.conversation_channel_ids: set[int] = set(conversation_channel_ids or [])
         self.bot_name = bot_name or "Paw"
-        self.status_type = status_type if status_type in _STATUS_TYPES else "online"
-        self.activity_type = activity_type if activity_type in _ACTIVITY_TYPES else ""
-        self.activity_text = activity_text or ""
-        self._client: Any = None
-        self._tree: Any = None
-        self._bot_task: asyncio.Task | None = None
-        self._buffers: dict[str, dict[str, Any]] = {}
-        self._pending_interactions: dict[str, Any] = {}  # chat_id -> interaction
-        self._start_time: float = 0.0
-        # Rolling message history for conversation channels (bounded per channel)
-        self._conversation_history: dict[int, deque[dict[str, str]]] = {}
+        self.status_type = (
+            status_type if status_type in {"online", "idle", "dnd", "invisible"} else "online"
+        )
+        self.activity_type = activity_type
+        self.activity_text = activity_text
+
+        self._proc: asyncio.subprocess.Process | None = None
+        self._slash_config_path: str | None = None
+        self._reader_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
+        self._bot_id: str | None = None
+        self._req_counter = 0
+        self._pending_requests: dict[str, asyncio.Future] = {}
+        self._active_streams: dict[str, str] = {}  # chat_id -> stream_id
+
+        # Conversation history (same as original adapter)
+        self._conversation_history: dict[int, list[dict[str, str]]] = {}
         self._conversation_last_active: dict[int, float] = {}
         self._eviction_task: asyncio.Task | None = None
+        self._start_time: float = 0.0
 
     @property
     def channel(self) -> Channel:
         return Channel.DISCORD
 
-    # ── Presence helpers ────────────────────────────────────────────────
+    # ── Process Management ──────────────────────────────────────────
 
-    def _build_activity(self, discord_module: Any) -> Any | None:
-        """Build a discord.Activity from current settings."""
-        if not self.activity_type or not self.activity_text:
-            return None
-        type_map = {
-            "playing": discord_module.ActivityType.playing,
-            "watching": discord_module.ActivityType.watching,
-            "listening": discord_module.ActivityType.listening,
-            "competing": discord_module.ActivityType.competing,
+    async def _on_start(self) -> None:
+        if not self.token:
+            raise RuntimeError("Discord bot token missing")
+
+        discli_path = shutil.which("discli")
+        if not discli_path:
+            raise RuntimeError(
+                "discli is not installed. Install it with: pip install discord-cli-agent"
+            )
+
+        # Build slash commands config
+        self._slash_config_path = await self._write_slash_config()
+        slash_file = self._slash_config_path
+
+        cmd = [
+            discli_path,
+            "--json",
+            "serve",
+            "--include-self",
+            "--status",
+            self.status_type,
+        ]
+        if self.activity_type:
+            cmd += ["--activity", self.activity_type]
+        if self.activity_text:
+            cmd += ["--activity-text", self.activity_text]
+        if slash_file:
+            cmd += ["--slash-commands", slash_file]
+
+        import os
+
+        # Set token in parent env so DiscordCLITool subprocesses inherit it
+        os.environ["DISCORD_BOT_TOKEN"] = self.token
+
+        env = {
+            "DISCORD_BOT_TOKEN": self.token,
+            "PYTHONUNBUFFERED": "1",
         }
-        activity_enum = type_map.get(self.activity_type)
-        if not activity_enum:
-            return None
-        return discord_module.Activity(type=activity_enum, name=self.activity_text)
+        full_env = {**os.environ, **env}
 
-    def _build_status(self, discord_module: Any) -> Any:
-        """Build a discord.Status from current settings."""
-        status_map = {
-            "online": discord_module.Status.online,
-            "idle": discord_module.Status.idle,
-            "dnd": discord_module.Status.dnd,
-            "invisible": discord_module.Status.invisible,
-        }
-        return status_map.get(self.status_type, discord_module.Status.online)
+        self._proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=full_env,
+        )
 
-    async def _update_presence(self) -> None:
-        """Update bot presence with current status/activity settings."""
-        if not self._client:
+        self._start_time = time.time()
+        self._reader_task = asyncio.create_task(self._read_stdout())
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
+        self._eviction_task = asyncio.create_task(self._eviction_loop())
+
+        # Wait for ready event
+        for _ in range(30):
+            if self._bot_id:
+                break
+            await asyncio.sleep(1)
+
+        if not self._bot_id:
+            # Clean up the spawned process before raising
+            await self._on_stop()
+            raise RuntimeError("discli serve failed to connect — check token and intents")
+
+        logger.info("Discli Adapter started (bot: %s)", self._bot_id)
+
+        # Auto-register Discord MCP server so all backends can use it
+        self._register_discord_mcp()
+
+    @staticmethod
+    def _register_discord_mcp() -> None:
+        """Auto-register the Discord MCP server if not already configured."""
+        try:
+            from pocketpaw.mcp.config import MCPServerConfig, load_mcp_config, save_mcp_config
+
+            configs = load_mcp_config()
+            if any(c.name == "pocketpaw-discord" for c in configs):
+                logger.debug("Discord MCP server already registered")
+                return
+
+            import sys
+
+            python = sys.executable
+            configs.append(
+                MCPServerConfig(
+                    name="pocketpaw-discord",
+                    transport="stdio",
+                    command=python,
+                    args=["-m", "pocketpaw.mcp.discord_server"],
+                    env={},
+                    enabled=True,
+                )
+            )
+            save_mcp_config(configs)
+            logger.info("Auto-registered Discord MCP server")
+        except Exception as e:
+            logger.warning("Failed to register Discord MCP server: %s", e)
+
+    async def _write_slash_config(self) -> str | None:
+        """Write slash command definitions to a temp file."""
+        import tempfile
+
+        commands = [
+            {
+                "name": "paw",
+                "description": "Send a message to PocketPaw",
+                "params": [
+                    {
+                        "name": "message",
+                        "type": "string",
+                        "description": "Your message",
+                    }
+                ],
+            },
+            {"name": "new", "description": "Start a fresh conversation"},
+            {"name": "sessions", "description": "List your conversation sessions"},
+            {
+                "name": "resume",
+                "description": "Resume a previous session",
+                "params": [
+                    {
+                        "name": "target",
+                        "type": "string",
+                        "description": "Session name or number",
+                        "required": False,
+                    }
+                ],
+            },
+            {"name": "clear", "description": "Clear the current session history"},
+            {
+                "name": "rename",
+                "description": "Rename the current session",
+                "params": [
+                    {
+                        "name": "title",
+                        "type": "string",
+                        "description": "New session title",
+                    }
+                ],
+            },
+            {"name": "status", "description": "Show current session info"},
+            {"name": "delete", "description": "Delete the current session"},
+            {
+                "name": "backend",
+                "description": "Show or switch agent backend",
+                "params": [
+                    {
+                        "name": "name",
+                        "type": "string",
+                        "description": "Backend name to switch to",
+                        "required": False,
+                    }
+                ],
+            },
+            {"name": "backends", "description": "List all available backends"},
+            {
+                "name": "model",
+                "description": "Show or switch model for current backend",
+                "params": [
+                    {
+                        "name": "name",
+                        "type": "string",
+                        "description": "Model name to switch to",
+                        "required": False,
+                    }
+                ],
+            },
+            {
+                "name": "tools",
+                "description": "Show or switch tool profile",
+                "params": [
+                    {
+                        "name": "name",
+                        "type": "string",
+                        "description": "Tool profile name",
+                        "required": False,
+                    }
+                ],
+            },
+            {"name": "help", "description": "Show PocketPaw help"},
+            {"name": "kill", "description": "Cancel the current request"},
+            {
+                "name": "converse",
+                "description": "Toggle conversation mode in this channel",
+            },
+        ]
+
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        json.dump(commands, f)
+        f.close()
+        return f.name
+
+    async def _drain_stderr(self) -> None:
+        """Read and log stderr to prevent pipe buffer from blocking the process."""
+        if not self._proc or not self._proc.stderr:
             return
         try:
-            import discord
-
-            activity = self._build_activity(discord)
-            status = self._build_status(discord)
-            await self._client.change_presence(activity=activity, status=status)
-        except Exception as e:
-            logger.warning("Failed to update Discord presence: %s", e)
-
-    # ── Conversation channel helpers ────────────────────────────────────
-
-    def _add_to_conversation_history(self, channel_id: int, author: str, content: str) -> None:
-        """Append a message to the rolling conversation history."""
-        if channel_id not in self._conversation_history:
-            self._conversation_history[channel_id] = deque(maxlen=_CONVERSATION_HISTORY_SIZE)
-        self._conversation_history[channel_id].append({"author": author, "content": content})
-        self._conversation_last_active[channel_id] = time.monotonic()
-
-    def _evict_idle_channels(self) -> None:
-        """Remove conversation history for channels idle longer than the TTL."""
-        now = time.monotonic()
-        stale = [
-            cid
-            for cid, last in self._conversation_last_active.items()
-            if now - last > _IDLE_CHANNEL_TTL
-        ]
-        for cid in stale:
-            self._conversation_history.pop(cid, None)
-            self._conversation_last_active.pop(cid, None)
-        if stale:
-            logger.debug("Evicted conversation history for %d idle channel(s)", len(stale))
-
-    async def _eviction_loop(self) -> None:
-        """Periodically evict idle channel histories."""
-        try:
             while True:
-                await asyncio.sleep(_IDLE_CHANNEL_TTL // 2 or 300)
-                self._evict_idle_channels()
+                line = await self._proc.stderr.readline()
+                if not line:
+                    break
+                text = line.decode().strip()
+                if text:
+                    logger.debug("discli stderr: %s", text)
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            logger.debug("discli stderr reader error: %s", e)
+
+    async def _on_stop(self) -> None:
+        if self._eviction_task and not self._eviction_task.done():
+            self._eviction_task.cancel()
+        if self._stderr_task and not self._stderr_task.done():
+            self._stderr_task.cancel()
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+        if self._proc and self._proc.returncode is None:
+            self._proc.terminate()
+            try:
+                await asyncio.wait_for(self._proc.wait(), timeout=5)
+            except TimeoutError:
+                self._proc.kill()
+        if self._slash_config_path:
+            import os
+
+            try:
+                os.unlink(self._slash_config_path)
+            except OSError:
+                pass
+            self._slash_config_path = None
+        self._conversation_history.clear()
+        self._conversation_last_active.clear()
+        logger.info("Discli Adapter stopped")
+
+    # ── stdin/stdout Communication ──────────────────────────────────
+
+    async def _send_command(self, action: str, **kwargs: Any) -> dict:
+        """Send a command to discli serve via stdin, wait for response."""
+        if not self._proc or not self._proc.stdin:
+            return {"error": "discli process not running"}
+
+        self._req_counter += 1
+        req_id = str(self._req_counter)
+
+        cmd = {"action": action, "req_id": req_id, **kwargs}
+        line = json.dumps(cmd, default=str) + "\n"
+
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._pending_requests[req_id] = future
+
+        try:
+            self._proc.stdin.write(line.encode())
+            await self._proc.stdin.drain()
+        except Exception as e:
+            self._pending_requests.pop(req_id, None)
+            return {"error": str(e)}
+
+        try:
+            return await asyncio.wait_for(future, timeout=30)
+        except TimeoutError:
+            self._pending_requests.pop(req_id, None)
+            return {"error": "Command timed out"}
+
+    async def _read_stdout(self) -> None:
+        """Read JSONL events from discli serve stdout."""
+        if not self._proc or not self._proc.stdout:
+            return
+
+        try:
+            while True:
+                line = await self._proc.stdout.readline()
+                if not line:
+                    logger.warning("discli serve stdout closed")
+                    break
+                try:
+                    data = json.loads(line.decode().strip())
+                except json.JSONDecodeError:
+                    continue
+
+                event = data.get("event")
+
+                # Response to a command we sent
+                if event == "response":
+                    req_id = data.get("req_id")
+                    future = self._pending_requests.pop(req_id, None)
+                    if future and not future.done():
+                        future.set_result(data)
+                    continue
+
+                # Handle events — fire as tasks to avoid deadlocking
+                # the reader (handlers may call _send_command which reads
+                # from the same stdout this loop consumes).
+                if event == "ready":
+                    self._bot_id = data.get("bot_id")
+                elif event == "message":
+                    asyncio.create_task(self._handle_message_event(data))
+                elif event == "slash_command":
+                    asyncio.create_task(self._handle_slash_event(data))
+                elif event == "error":
+                    logger.error("discli serve error: %s", data.get("message"))
+
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("discli stdout reader crashed: %s", e)
+
+    # ── Event Handlers ──────────────────────────────────────────────
+
+    def _check_auth(self, guild_id: str | None, user_id: str, channel_id: str | None) -> bool:
+        if self.allowed_guild_ids and guild_id:
+            if int(guild_id) not in self.allowed_guild_ids:
+                return False
+        if self.allowed_user_ids:
+            if int(user_id) not in self.allowed_user_ids:
+                return False
+        if self.allowed_channel_ids and channel_id:
+            if int(channel_id) not in self.allowed_channel_ids:
+                return False
+        return True
+
+    async def _handle_message_event(self, data: dict) -> None:
+        author_id = data.get("author_id", "")
+        channel_id = data.get("channel_id", "")
+        guild_id = data.get("server_id")
+        is_bot = data.get("is_bot", False)
+        is_dm = data.get("is_dm", False)
+        content = data.get("content", "")
+        mentions_bot = data.get("mentions_bot", False)
+
+        # Track bot's own messages for conversation history
+        if is_bot and author_id == self._bot_id:
+            ch_id = int(channel_id)
+            if ch_id in self.conversation_channel_ids:
+                self._add_to_history(ch_id, _BOT_AUTHOR_KEY, content)
+            return
+
+        # Skip other bots
+        if is_bot:
+            return
+
+        is_conversation = not is_dm and int(channel_id) in self.conversation_channel_ids
+
+        # Track conversation history
+        if is_conversation:
+            author_name = data.get("author", "unknown")
+            self._add_to_history(int(channel_id), author_name, content)
+
+        # Check if bot should respond in conversation channels
+        convo_mode = None
+        if is_conversation and not mentions_bot:
+            convo_mode = self._should_respond(int(channel_id), content)
+            if convo_mode is None:
+                return
+
+        # Only respond to DMs, mentions, or conversation channels
+        if not is_dm and not mentions_bot and not is_conversation:
+            return
+
+        # Auth check
+        ch_for_auth = None if is_conversation else channel_id
+        if not self._check_auth(guild_id, author_id, ch_for_auth):
+            return
+
+        # Strip bot mention
+        if mentions_bot and self._bot_id:
+            content = content.replace(f"<@{self._bot_id}>", "").strip()
+
+        # Format conversation context
+        if convo_mode:
+            ch_name = data.get("channel", "chat")
+            content = self._format_conversation_context(int(channel_id), ch_name, convo_mode)
+
+        # Download attachments
+        media_paths: list[str] = []
+        if data.get("attachments"):
+            try:
+                from pocketpaw.bus.media import build_media_hint, get_media_downloader
+
+                downloader = get_media_downloader()
+                names = []
+                for att in data["attachments"]:
+                    try:
+                        path = await downloader.download_url(att["url"], att["filename"])
+                        media_paths.append(path)
+                        names.append(att["filename"])
+                    except Exception as e:
+                        logger.warning("Failed to download attachment: %s", e)
+                if names:
+                    content += build_media_hint(names)
+            except Exception as e:
+                logger.warning("Media download error: %s", e)
+
+        if not content and not media_paths:
+            return
+
+        metadata: dict[str, Any] = {
+            "username": data.get("author", ""),
+            "guild_id": guild_id,
+        }
+        if is_conversation:
+            metadata["conversation_mode"] = True
+
+        # Start typing
+        await self._send_command("typing_start", channel_id=channel_id)
+
+        msg = InboundMessage(
+            channel=Channel.DISCORD,
+            sender_id=author_id,
+            chat_id=channel_id,
+            content=content,
+            media=media_paths,
+            metadata=metadata,
+        )
+        await self._publish_inbound(msg)
+
+    async def _handle_slash_event(self, data: dict) -> None:
+        command = data.get("command", "")
+        args = data.get("args", {})
+        channel_id = data.get("channel_id", "")
+        user_id = data.get("user_id", "")
+        guild_id = data.get("guild_id")
+        interaction_token = data.get("interaction_token", "")
+
+        if not self._check_auth(guild_id, user_id, channel_id):
+            await self._send_command(
+                "interaction_followup",
+                interaction_token=interaction_token,
+                content="Unauthorized.",
+            )
+            return
+
+        # Handle /converse locally — requires admin or manage_guild
+        if command == "converse":
+            is_admin = data.get("is_admin", False)
+            member_perms = data.get("member_permissions", 0)
+            # Discord permission bit 0x20 = manage_guild
+            has_manage_guild = bool(member_perms & 0x20)
+            if not is_admin and not has_manage_guild:
+                await self._send_command(
+                    "interaction_followup",
+                    interaction_token=interaction_token,
+                    content="You need **Administrator** or **Manage Server** permission.",
+                )
+                return
+            ch_id = int(channel_id)
+            if ch_id in self.conversation_channel_ids:
+                self.conversation_channel_ids.discard(ch_id)
+                self._conversation_history.pop(ch_id, None)
+                self._conversation_last_active.pop(ch_id, None)
+                reply = "Conversation mode **disabled** for this channel."
+            else:
+                self.conversation_channel_ids.add(ch_id)
+                reply = (
+                    "Conversation mode **enabled** for this channel. "
+                    f"I'll respond when mentioned or addressed as {self.bot_name}."
+                )
+            await self._send_command(
+                "interaction_followup",
+                interaction_token=interaction_token,
+                content=reply,
+            )
+            return
+
+        # Map slash commands to content
+        if command == "paw":
+            content = args.get("message", "")
+        elif command == "resume":
+            target = args.get("target", "")
+            content = f"/resume {target}" if target else "/resume"
+        elif command == "rename":
+            title = args.get("title", "")
+            content = f"/rename {title}" if title else "/rename"
+        elif command == "backend":
+            name = args.get("name", "")
+            content = f"/backend {name}" if name else "/backend"
+        elif command == "model":
+            name = args.get("name", "")
+            content = f"/model {name}" if name else "/model"
+        elif command == "tools":
+            name = args.get("name", "")
+            content = f"/tools {name}" if name else "/tools"
+        elif command in (
+            "new",
+            "sessions",
+            "clear",
+            "status",
+            "help",
+            "kill",
+            "delete",
+            "backends",
+        ):
+            content = f"/{command}"
+        else:
+            content = f"/{command}"
+
+        metadata: dict[str, Any] = {
+            "username": data.get("user", ""),
+            "guild_id": guild_id,
+            "interaction_token": interaction_token,
+        }
+
+        msg = InboundMessage(
+            channel=Channel.DISCORD,
+            sender_id=user_id,
+            chat_id=channel_id,
+            content=content,
+            metadata=metadata,
+        )
+        await self._publish_inbound(msg)
+
+    # ── Send (OutboundMessage → discli) ─────────────────────────────
+
+    async def send(self, message: OutboundMessage) -> None:
+        if not self._proc:
+            return
+
+        try:
+            # Skip [NO_RESPONSE]
+            if (
+                not message.is_stream_chunk
+                and not message.is_stream_end
+                and self._is_no_response(message.content)
+            ):
+                await self._send_command("typing_stop", channel_id=message.chat_id)
+                return
+
+            if message.is_stream_chunk:
+                await self._handle_stream_chunk(message)
+                return
+
+            if message.is_stream_end:
+                await self._handle_stream_end(message)
+                return
+
+            # Normal message
+            await self._send_command("typing_stop", channel_id=message.chat_id)
+            interaction_token = (message.metadata or {}).get("interaction_token")
+
+            if interaction_token:
+                await self._send_command(
+                    "interaction_followup",
+                    interaction_token=interaction_token,
+                    content=message.content,
+                )
+            else:
+                reply_to = message.reply_to
+                if reply_to:
+                    await self._send_command(
+                        "reply",
+                        channel_id=message.chat_id,
+                        message_id=reply_to,
+                        content=message.content,
+                    )
+                else:
+                    await self._send_command(
+                        "send",
+                        channel_id=message.chat_id,
+                        content=message.content,
+                    )
+
+            # Send media files
+            for path in message.media or []:
+                await self._send_command(
+                    "send",
+                    channel_id=message.chat_id,
+                    content="",
+                    files=[path],
+                )
+
+        except Exception as e:
+            logger.error("Failed to send Discord message: %s", e)
+
+    # ── Streaming ───────────────────────────────────────────────────
+
+    async def _handle_stream_chunk(self, message: OutboundMessage) -> None:
+        chat_id = message.chat_id
+        content = message.content
+
+        # Suppress [NO_RESPONSE] even in streaming mode
+        if self._is_no_response(content):
+            await self._send_command("typing_stop", channel_id=chat_id)
+            return
+
+        if chat_id not in self._active_streams:
+            # Start a new stream
+            interaction_token = (message.metadata or {}).get("interaction_token")
+            result = await self._send_command(
+                "stream_start",
+                channel_id=chat_id,
+                reply_to=message.reply_to,
+                interaction_token=interaction_token,
+            )
+            stream_id = result.get("stream_id")
+            if not stream_id:
+                logger.error("Failed to start stream: %s", result)
+                return
+            self._active_streams[chat_id] = stream_id
+
+        stream_id = self._active_streams[chat_id]
+        await self._send_command("stream_chunk", stream_id=stream_id, content=content)
+
+    async def _handle_stream_end(self, message: OutboundMessage) -> None:
+        chat_id = message.chat_id
+        stream_id = self._active_streams.pop(chat_id, None)
+        if stream_id:
+            await self._send_command("stream_end", stream_id=stream_id)
+
+        # Send media files after stream
+        for path in message.media or []:
+            await self._send_command("send", channel_id=chat_id, content="", files=[path])
+
+    # ── Conversation History ────────────────────────────────────────
+
+    def _add_to_history(self, channel_id: int, author: str, content: str) -> None:
+        if channel_id not in self._conversation_history:
+            self._conversation_history[channel_id] = []
+        history = self._conversation_history[channel_id]
+        history.append({"author": author, "content": content})
+        if len(history) > _CONVERSATION_HISTORY_SIZE:
+            self._conversation_history[channel_id] = history[-_CONVERSATION_HISTORY_SIZE:]
+        self._conversation_last_active[channel_id] = time.monotonic()
 
     def _should_respond(self, channel_id: int, latest: str) -> str | None:
-        """Decide if the bot should respond. Returns response mode or None.
-
-        Returns:
-            'addressed' - bot name mentioned, must respond
-            'engaged'   - bot recently active, likely should respond
-            None        - skip, don't send to the LLM
-        """
         lower = latest.lower()
         name_lower = self.bot_name.lower()
 
-        # Bot name mentioned anywhere in the message -> always respond
         if name_lower in lower:
             return "addressed"
 
-        # Check if message is a reply to the bot (bot was recent speaker)
         history = self._conversation_history.get(channel_id, [])
         if len(history) >= 2:
             prev = history[-2]
             if prev["author"] == _BOT_AUTHOR_KEY:
                 return "engaged"
 
-        # Question mark and bot was active in last 6 messages
         if lower.rstrip().endswith("?"):
-            recent = list(history)[-6:]
+            recent = history[-4:]
             for msg in recent:
                 if msg["author"] == _BOT_AUTHOR_KEY:
                     return "engaged"
 
-        # Bot active in last 3 messages -> stay in the conversation
-        recent_short = list(history)[-3:]
-        for msg in recent_short:
-            if msg["author"] == _BOT_AUTHOR_KEY:
-                return "engaged"
-
         return None
 
-    def _format_conversation_context(
-        self, channel_id: int, channel_name: str, mode: str = "engaged"
-    ) -> str:
-        """Build a context string from recent conversation history."""
+    def _format_conversation_context(self, channel_id: int, channel_name: str, mode: str) -> str:
         history = self._conversation_history.get(channel_id, [])
         if not history:
             return ""
 
-        # Scan user-authored messages through the injection scanner to prevent
-        # prompt injection via conversation history. Bot messages are trusted.
-        from pocketpaw.config import get_settings
-
-        settings = get_settings()
-        scanner = None
-        if settings.injection_scan_enabled:
-            from pocketpaw.security.injection_scanner import ThreatLevel, get_injection_scanner
-
-            scanner = get_injection_scanner()
-
-        # Build lines from most recent, staying within the character budget
-        all_lines: list[str] = []
+        lines: list[str] = []
         for m in history:
             author = m["author"]
-            content = m["content"]
-            display_name = self.bot_name if author == _BOT_AUTHOR_KEY else author
+            display = self.bot_name if author == _BOT_AUTHOR_KEY else author
+            lines.append(f"{display}: {m['content']}")
 
-            # Scan non-bot messages for injection attempts
-            if scanner is not None and author != _BOT_AUTHOR_KEY:
-                scan_result = scanner.scan(content, source=f"discord-history:{author}")
-                if scan_result.threat_level == ThreatLevel.HIGH:
-                    # Drop high-threat messages from context entirely
-                    logger.warning(
-                        "Dropped HIGH threat message from conversation history "
-                        "(channel=%s, author=%s, patterns=%s)",
-                        channel_id,
-                        author,
-                        scan_result.matched_patterns,
-                    )
-                    continue
-                if scan_result.threat_level != ThreatLevel.NONE:
-                    # Use sanitized content for medium/low threats
-                    content = scan_result.sanitized_content
-
-            all_lines.append(f"{display_name}: {content}")
-
-        if not all_lines:
-            return ""
-
-        # Walk backwards, keeping lines that fit the budget
+        # Trim to budget
         kept: list[str] = []
         budget = _CONVERSATION_CHAR_BUDGET
-        for line in reversed(all_lines):
+        for line in reversed(lines):
             if budget - len(line) < 0 and kept:
                 break
             kept.append(line)
@@ -238,56 +740,37 @@ class DiscordAdapter(BaseChannelAdapter):
         history_block = "Recent messages:\n" + "\n".join(kept)
 
         if mode == "addressed":
-            # Bot was directly called by name -> just respond, no skip option
             return (
                 f"[You are {self.bot_name} in a Discord group chat "
                 f"#{channel_name}. Someone is talking to you. "
                 f"Respond naturally and conversationally.]\n\n" + history_block
             )
 
-        # Engaged mode: bot was recently active, continue if relevant
         return (
             f"[You are {self.bot_name} in a Discord group chat "
-            f"#{channel_name}. You've been part of this conversation. "
-            "Continue naturally if the message is relevant to you or "
-            "the ongoing discussion. If this message clearly isn't "
-            f"directed at you, reply with exactly: "
-            f"{_NO_RESPONSE_MARKER}]\n\n" + history_block
+            f"#{channel_name}. You've been part of this conversation.\n\n"
+            f"IMPORTANT RULE: If the latest message is NOT directed at you, "
+            f"NOT about a topic you were discussing, and NOT asking you a question, "
+            f"you MUST reply with ONLY this exact text: {_NO_RESPONSE_MARKER}\n"
+            f"Only respond if someone is clearly talking to you.]\n\n" + history_block
         )
 
-    # ── Settings persistence ────────────────────────────────────────────
-
-    def _save_restrictions(self) -> None:
-        """Persist current restriction lists and presence to config."""
+    async def _eviction_loop(self) -> None:
         try:
-            from pocketpaw.config import Settings
+            while True:
+                await asyncio.sleep(_IDLE_CHANNEL_TTL // 2 or 300)
+                now = time.monotonic()
+                stale = [
+                    cid
+                    for cid, last in self._conversation_last_active.items()
+                    if now - last > _IDLE_CHANNEL_TTL
+                ]
+                for cid in stale:
+                    self._conversation_history.pop(cid, None)
+                    self._conversation_last_active.pop(cid, None)
+        except asyncio.CancelledError:
+            pass
 
-            settings = Settings.load()
-            settings.discord_allowed_guild_ids = self.allowed_guild_ids
-            settings.discord_allowed_user_ids = self.allowed_user_ids
-            settings.discord_allowed_channel_ids = self.allowed_channel_ids
-            settings.discord_conversation_channel_ids = self.conversation_channel_ids
-            settings.discord_bot_name = self.bot_name
-            settings.discord_status_type = self.status_type
-            settings.discord_activity_type = self.activity_type
-            settings.discord_activity_text = self.activity_text
-            settings.save()
-        except Exception as e:
-            logger.warning("Failed to persist Discord settings: %s", e)
-
-    # ── Auth ────────────────────────────────────────────────────────────
-
-    def _check_auth(self, guild: Any, user: Any, channel_id: int | None = None) -> bool:
-        """Check if guild, user, and channel are authorized."""
-        if self.allowed_guild_ids and guild and guild.id not in self.allowed_guild_ids:
-            return False
-        if self.allowed_user_ids and user.id not in self.allowed_user_ids:
-            return False
-        if self.allowed_channel_ids and channel_id and channel_id not in self.allowed_channel_ids:
-            return False
-        return True
-
-    @staticmethod
     def _is_admin(interaction: Any) -> bool:
         """Check if the interaction user has administrator permission."""
         if not interaction.guild:
@@ -907,182 +1390,7 @@ class DiscordAdapter(BaseChannelAdapter):
     def _is_no_response(self, text: str) -> bool:
         """Check if the AI decided not to respond (conversation mode)."""
         stripped = text.strip()
-        # Exact match
         if stripped in (_NO_RESPONSE_MARKER, f"{_NO_RESPONSE_MARKER}."):
             return True
-        # Sometimes the AI wraps it in backticks or adds minor decoration
-        clean = stripped.strip("`*_ .")
-        return clean == _NO_RESPONSE_MARKER
+        return stripped.strip("`*_ .") == _NO_RESPONSE_MARKER
 
-    async def send(self, message: OutboundMessage) -> None:
-        """Send message to Discord channel."""
-        if not self._client:
-            return
-
-        try:
-            # Skip [NO_RESPONSE] from conversation mode
-            if (
-                not message.is_stream_chunk
-                and not message.is_stream_end
-                and self._is_no_response(message.content)
-            ):
-                self._pending_interactions.pop(message.chat_id, None)
-                return
-
-            if message.is_stream_chunk:
-                await self._handle_stream_chunk(message)
-                return
-
-            if message.is_stream_end:
-                await self._flush_stream_buffer(message.chat_id)
-                # Send any attached media files
-                for path in message.media or []:
-                    await self._send_media_file(message.chat_id, path)
-                return
-
-            # Normal (non-streaming) message
-            interaction = self._pending_interactions.pop(message.chat_id, None)
-            if interaction:
-                for chunk in self._split_message(message.content):
-                    await interaction.followup.send(chunk)
-            else:
-                channel = self._client.get_channel(int(message.chat_id))
-                if channel:
-                    for chunk in self._split_message(message.content):
-                        await channel.send(chunk)
-
-        except Exception as e:
-            logger.error(f"Failed to send Discord message: {e}")
-
-    # --- Media sending ---
-
-    async def _send_media_file(self, chat_id: str, file_path: str) -> None:
-        """Send a media file to a Discord channel."""
-        import os
-
-        if not self._client or not os.path.isfile(file_path):
-            return
-
-        try:
-            import discord
-
-            channel = self._client.get_channel(int(chat_id))
-            if channel:
-                await channel.send(file=discord.File(file_path))
-        except Exception as e:
-            logger.warning("Failed to send Discord media file: %s", e)
-
-    # --- Stream buffering ---
-
-    async def _handle_stream_chunk(self, message: OutboundMessage) -> None:
-        chat_id = message.chat_id
-        content = message.content
-        is_convo = int(chat_id) in self.conversation_channel_ids
-
-        if chat_id not in self._buffers:
-            if is_convo:
-                # Conversation mode: buffer silently, no placeholder
-                self._buffers[chat_id] = {
-                    "discord_message": None,
-                    "text": content,
-                    "last_update": asyncio.get_running_loop().time(),
-                    "conversation_mode": True,
-                }
-                return
-
-            # Normal mode: send initial placeholder message
-            interaction = self._pending_interactions.pop(chat_id, None)
-            if interaction:
-                sent_msg = await interaction.followup.send("...", wait=True)
-            else:
-                channel = self._client.get_channel(int(chat_id))
-                if not channel:
-                    return
-                sent_msg = await channel.send("...")
-            self._buffers[chat_id] = {
-                "discord_message": sent_msg,
-                "text": content,
-                "last_update": asyncio.get_running_loop().time(),
-                "conversation_mode": False,
-            }
-        else:
-            self._buffers[chat_id]["text"] += content
-
-        buf = self._buffers[chat_id]
-        # Don't do periodic edits for conversation mode (no message to edit)
-        if buf.get("conversation_mode"):
-            return
-
-        now = asyncio.get_running_loop().time()
-        if now - buf["last_update"] > 1.5:
-            await self._update_buffer_message(chat_id)
-            buf["last_update"] = now
-
-    async def _flush_stream_buffer(self, chat_id: str) -> None:
-        self._pending_interactions.pop(chat_id, None)
-        if chat_id not in self._buffers:
-            return
-
-        buf = self._buffers[chat_id]
-        text = buf["text"].strip()
-
-        # If AI decided not to respond, silently discard
-        if self._is_no_response(text) or not text:
-            if buf["discord_message"]:
-                try:
-                    await buf["discord_message"].delete()
-                except Exception:
-                    pass
-            del self._buffers[chat_id]
-            return
-
-        # Conversation mode: send the full accumulated text now
-        if buf.get("conversation_mode") and buf["discord_message"] is None:
-            channel = self._client.get_channel(int(chat_id))
-            if channel:
-                for chunk in self._split_message(text):
-                    await channel.send(chunk)
-            del self._buffers[chat_id]
-            return
-
-        # Normal mode: final edit
-        await self._update_buffer_message(chat_id)
-        del self._buffers[chat_id]
-
-    async def _update_buffer_message(self, chat_id: str) -> None:
-        buf = self._buffers.get(chat_id)
-        if not buf:
-            return
-        text = buf["text"]
-        if not text.strip():
-            return
-        try:
-            discord_msg = buf["discord_message"]
-            # If text exceeds limit, edit with truncated and send overflow as new messages
-            if len(text) <= DISCORD_MSG_LIMIT:
-                await discord_msg.edit(content=text)
-            else:
-                await discord_msg.edit(content=text[:DISCORD_MSG_LIMIT])
-                channel = self._client.get_channel(int(chat_id))
-                if channel:
-                    for chunk in self._split_message(text[DISCORD_MSG_LIMIT:]):
-                        await channel.send(chunk)
-        except Exception as e:
-            logger.warning(f"Failed to update Discord message: {e}")
-
-    @staticmethod
-    def _split_message(text: str) -> list[str]:
-        """Split text into chunks respecting the Discord 2000-char limit."""
-        if not text:
-            return []
-        chunks = []
-        while len(text) > DISCORD_MSG_LIMIT:
-            # Try to split at a newline
-            split_at = text.rfind("\n", 0, DISCORD_MSG_LIMIT)
-            if split_at == -1:
-                split_at = DISCORD_MSG_LIMIT
-            chunks.append(text[:split_at])
-            text = text[split_at:].lstrip("\n")
-        if text:
-            chunks.append(text)
-        return chunks

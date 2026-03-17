@@ -258,7 +258,7 @@ async def _auth_dispatch(request: Request) -> Response | None:
                     is_valid = True
                     request.state.api_key = record
             except Exception:
-                pass
+                logger.warning("API key validation raised an unexpected error", exc_info=True)
 
     # 5. Check OAuth2 access token (ppat_* prefix)
     if not is_valid:
@@ -283,7 +283,7 @@ async def _auth_dispatch(request: Request) -> Response | None:
                     is_valid = True
                     request.state.oauth_token = oauth_token
             except Exception:
-                pass
+                logger.warning("OAuth2 token validation raised an unexpected error", exc_info=True)
 
     # 5b. Check extension runtime token (pex_* prefix) for extension runtime APIs only
     if not is_valid and request.url.path.startswith("/api/v1/extensions/runtime/"):
@@ -390,7 +390,7 @@ async def cookie_login(request: Request):
             if get_oauth_server().verify_access_token(submitted) is not None:
                 is_valid = True
         except Exception:
-            pass
+            logger.warning("OAuth2 token verification error during login", exc_info=True)
     # Accept API keys (pp_*)
     if not is_valid and submitted.startswith("pp_") and not submitted.startswith("ppat_"):
         try:
@@ -399,7 +399,7 @@ async def cookie_login(request: Request):
             if get_api_key_manager().verify(submitted) is not None:
                 is_valid = True
         except Exception:
-            pass
+            logger.warning("API key verification error during login", exc_info=True)
 
     if not is_valid:
         return JSONResponse(status_code=401, content={"detail": "Invalid access token"})
