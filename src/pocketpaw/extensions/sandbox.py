@@ -377,10 +377,21 @@ class SandboxManager:
         else:
             cmd_parts = list(command)
 
+        # Use sandbox env so managed Node.js/pnpm are on PATH
+        env = self.get_env()
+
+        # On Windows, subprocess.Popen without shell=True cannot find
+        # .CMD/.BAT scripts by bare name (e.g. "pnpm").  Resolve the
+        # first token via shutil.which() using the sandbox PATH.
+        if cmd_parts and platform.system() == "Windows":
+            resolved = shutil.which(cmd_parts[0], path=env.get("PATH"))
+            if resolved:
+                cmd_parts[0] = resolved
+
         if on_output:
             await on_output.put(f"$ {' '.join(cmd_parts)}\n")
 
-        return await self._run_cmd(cmd_parts, cwd=cwd or self.root, on_output=on_output)
+        return await self._run_cmd(cmd_parts, cwd=cwd or self.root, env=env, on_output=on_output)
 
     async def delete_venv(self) -> None:
         """Remove the venv directory (reset the plugin environment)."""

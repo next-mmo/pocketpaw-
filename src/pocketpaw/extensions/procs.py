@@ -156,17 +156,25 @@ class PluginProcessManager:
         drain_task = asyncio.create_task(_drain_output())
 
         try:
-            # ── Phase 0: Run shell "run" install steps that set up directories ──
+            # ── Phase 0: Run leading shell "run" install steps that set up
+            # directories (e.g. git clone) ──
             # Pinokio-style extensions often need `git clone` to create the
             # directory where the venv will live, so these must run BEFORE
-            # venv creation.
+            # venv creation.  However, we preserve manifest order for the
+            # remaining steps so that e.g. { "node": true } runs before
+            # { "run": "pnpm install" }.
             pre_venv_steps: list = []
             post_venv_steps: list = []
             if install_steps:
+                # Only leading "run" steps are pre-venv.  Once we hit a
+                # non-run step, everything goes to post_venv in order.
+                hit_non_run = False
                 for step in install_steps:
-                    if hasattr(step, "run") and step.run:
+                    is_run = hasattr(step, "run") and step.run
+                    if not hit_non_run and is_run:
                         pre_venv_steps.append(step)
                     else:
+                        hit_non_run = True
                         post_venv_steps.append(step)
 
             if pre_venv_steps:
@@ -211,7 +219,7 @@ class PluginProcessManager:
                 await sandbox.install_torch(on_output=output_queue)
             proc.install_progress = 0.7
 
-            # ── Phase 4: Run remaining custom install steps (pip, torch, node) ──
+            # ── Phase 4: Run remaining custom install steps (pip, torch, node, run) ──
             if post_venv_steps:
                 total = len(post_venv_steps)
                 for i, step in enumerate(post_venv_steps):
@@ -229,6 +237,18 @@ class PluginProcessManager:
                     elif hasattr(step, "node") and step.node:
                         from pocketpaw.extensions.nodejs import ensure_node
                         await ensure_node(on_output=output_queue)
+                    elif hasattr(step, "run") and step.run:
+                        cwd = sandbox.root
+                        if hasattr(step, "path") and step.path:
+                            cwd = sandbox.root / step.path
+                        cwd.mkdir(parents=True, exist_ok=True)
+                        rc = await sandbox.run_shell(
+                            step.run, cwd=cwd, on_output=output_queue,
+                        )
+                        if rc != 0:
+                            raise RuntimeError(
+                                f"Install step failed (exit code {rc}): {step.run}"
+                            )
                     proc.install_progress = 0.7 + (0.25 * (i + 1) / total)
 
             proc.install_progress = 1.0
