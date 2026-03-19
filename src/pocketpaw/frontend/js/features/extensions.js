@@ -53,6 +53,11 @@ window.PocketPaw.Extensions = {
         //   logs: [],
         //   pollTimer: null
         // }
+
+        // Browse tab state
+        urlBarInput: "",
+        urlBarExpanded: false,
+        browseTabCounter: 0,
       },
     };
   },
@@ -314,6 +319,121 @@ window.PocketPaw.Extensions = {
        */
       isLauncherActive() {
         return !this.extensionsHost.activeTabId;
+      },
+
+      // ── Browse URL Tabs ────────────────────────────────────
+
+      /**
+       * Open any URL as a browser tab inside the Apps area.
+       * Normalizes input — adds https:// if no protocol given.
+       */
+      openUrlTab(rawUrl) {
+        if (!rawUrl || !rawUrl.trim()) return;
+        let url = rawUrl.trim();
+
+        // Auto-prepend https:// if no protocol
+        if (!/^https?:\/\//i.test(url)) {
+          url = 'https://' + url;
+        }
+
+        // Generate a unique tab id
+        this.extensionsHost.browseTabCounter++;
+        const tabId = `browse_${this.extensionsHost.browseTabCounter}_${Date.now()}`;
+
+        // Derive a display name from hostname
+        let displayName = url;
+        try {
+          displayName = new URL(url).hostname.replace(/^www\./, '');
+        } catch (e) { /* keep full url as name */ }
+
+        // Add tab
+        this.extensionsHost.openTabs.push({
+          id: tabId,
+          route: `browse/${tabId}`,
+          name: displayName,
+          icon: 'globe',
+          isPlugin: false,
+          isUrlWrapper: true,
+          isBrowseTab: true,
+          url: url,
+        });
+
+        // Set iframe src and init frame state
+        this.extensionsHost.frameSrcs[tabId] = url;
+        this._initFrameState(tabId);
+
+        // Switch to the new tab
+        this.extensionsHost.activeTabId = tabId;
+        this.updateHash(`#/apps/browse/${tabId}`);
+
+        // Clear URL bar
+        this.extensionsHost.urlBarInput = '';
+
+        this.$nextTick(() => { this._refreshIcons(); });
+      },
+
+      /**
+       * Navigate an existing browse tab to a new URL.
+       */
+      navigateBrowseTab(tabId, newUrl) {
+        if (!newUrl || !newUrl.trim()) return;
+        let url = newUrl.trim();
+        if (!/^https?:\/\//i.test(url)) {
+          url = 'https://' + url;
+        }
+
+        const tab = this.extensionsHost.openTabs.find(t => t.id === tabId);
+        if (!tab) return;
+
+        // Update tab metadata
+        tab.url = url;
+        try {
+          tab.name = new URL(url).hostname.replace(/^www\./, '');
+        } catch (e) { /* keep current name */ }
+
+        // Update iframe src
+        this.extensionsHost.frameSrcs[tabId] = url;
+        this._initFrameState(tabId);
+
+        const frame = document.getElementById(`extensionFrame_${tabId}`);
+        if (frame) {
+          frame.src = url;
+        }
+
+        this.$nextTick(() => { this._refreshIcons(); });
+      },
+
+      /**
+       * Try to go back in the browse tab's iframe history.
+       */
+      browseTabGoBack(tabId) {
+        const frame = document.getElementById(`extensionFrame_${tabId}`);
+        if (frame?.contentWindow) {
+          try { frame.contentWindow.history.back(); } catch (e) {}
+        }
+      },
+
+      /**
+       * Try to go forward in the browse tab's iframe history.
+       */
+      browseTabGoForward(tabId) {
+        const frame = document.getElementById(`extensionFrame_${tabId}`);
+        if (frame?.contentWindow) {
+          try { frame.contentWindow.history.forward(); } catch (e) {}
+        }
+      },
+
+      /**
+       * Reload the browse tab's iframe.
+       */
+      browseTabReload(tabId) {
+        const frame = document.getElementById(`extensionFrame_${tabId}`);
+        const currentSrc = this.extensionsHost.frameSrcs[tabId];
+        if (frame && currentSrc) {
+          this._initFrameState(tabId);
+          frame.src = '';
+          this.$nextTick(() => { frame.src = currentSrc; });
+        }
       },
 
       /**
