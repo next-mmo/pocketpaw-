@@ -160,6 +160,11 @@
             "icon": "lucide:rocket"
           },
           {
+            "label": "CLI Reference",
+            "href": "/getting-started/cli",
+            "icon": "lucide:terminal"
+          },
+          {
             "label": "Configuration",
             "href": "/getting-started/configuration",
             "icon": "lucide:settings"
@@ -513,6 +518,11 @@
             "label": "MCP Servers",
             "href": "/integrations/mcp-servers",
             "icon": "lucide:server"
+          },
+          {
+            "label": "A2A Protocol",
+            "href": "/integrations/a2a-protocol",
+            "icon": "lucide:network"
           }
         ]
       },
