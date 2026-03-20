@@ -330,6 +330,35 @@ class PluginProcessManager:
                 if system_node:
                     cmd = f"{system_node} {cmd[5:]}"
 
+        # Replace bare 'npx', 'pnpm', or 'npm' with the managed or system path.
+        # On Windows these are .cmd scripts that subprocess.Popen cannot find
+        # without shell=True, so we resolve the full path here.
+        for _node_tool, _prefix_len in [("npx ", 4), ("pnpm ", 5), ("npm ", 4)]:
+            if cmd.startswith(_node_tool):
+                from pocketpaw.extensions.nodejs import get_node_env, _managed_node_path
+                import shutil as _shutil
+                managed = _managed_node_path()
+                tool_name = _node_tool.strip()
+                if managed:
+                    node_dir = managed.parent
+                    # On Windows, look for .cmd first, then bare name
+                    if sys.platform == "win32":
+                        tool_path = node_dir / f"{tool_name}.cmd"
+                        if not tool_path.exists():
+                            tool_path = node_dir / f"{tool_name}.exe"
+                    else:
+                        tool_path = node_dir / tool_name
+                    if tool_path.exists():
+                        cmd = f"{str(tool_path)} {cmd[_prefix_len:]}"
+                    # Merge managed node dir into PATH
+                    node_env = get_node_env()
+                    env.update(node_env)
+                else:
+                    resolved = _shutil.which(tool_name)
+                    if resolved:
+                        cmd = f"{resolved} {cmd[_prefix_len:]}"
+                break
+
         logger.info("Starting plugin %s: %s (cwd=%s)", plugin_id, cmd, sandbox.root)
 
         # Resolve working directory — supports start.path for subdirectories
@@ -348,6 +377,15 @@ class PluginProcessManager:
                 cmd_parts = shlex.split(cmd)
 
             logger.info("Plugin %s cmd_parts: %s", plugin_id, cmd_parts)
+
+            # On Windows, subprocess.Popen without shell=True cannot find
+            # .CMD/.BAT scripts by bare name.  Resolve the first token via
+            # shutil.which() using the sandbox PATH (mirrors sandbox.run_shell).
+            if sys.platform == "win32" and cmd_parts:
+                import shutil as _shutil
+                resolved = _shutil.which(cmd_parts[0], path=env.get("PATH"))
+                if resolved:
+                    cmd_parts[0] = resolved
 
             if sys.platform == "win32":
                 import subprocess as _sp

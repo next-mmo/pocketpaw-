@@ -1,0 +1,27 @@
+{
+  "id": "agent-cli",
+  "name": "Agent CLI",
+  "version": "1.0.0",
+  "description": "Universal AI agent config — sync .agents to any IDE (Cursor, Copilot, Windsurf, Gemini, Claude)",
+  "icon": "terminal",
+  "route": "agent-cli",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "node": true
+  },
+  "install": {
+    "steps": [
+      { "node": true },
+      { "run": "pnpm install --no-frozen-lockfile" }
+    ]
+  },
+  "start": {
+    "command": "npx tsx server.ts --host 127.0.0.1 --port __PORT__",
+    "daemon": true,
+    "ready_pattern": "Agent CLI server running on",
+    "port": "auto"
+  }
+}

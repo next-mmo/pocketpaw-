@@ -1,0 +1,315 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+}
+
+body {
+  background: #141414;
+  color: #e0e0e0;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* ── Layout ──────────────────────────────────────────────── */
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #303030;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+}
+
+.app-header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin: 0;
+}
+
+.app-header .version-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(22, 119, 255, 0.2);
+  color: #1677ff;
+  border: 1px solid rgba(22, 119, 255, 0.3);
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* ── Path Input ──────────────────────────────────────────── */
+
+.path-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 16px;
+  border-bottom: 1px solid #252525;
+  background: #1a1a1a;
+}
+
+/* ── Status Cards ────────────────────────────────────────── */
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.status-card {
+  background: #1f1f1f;
+  border: 1px solid #303030;
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.2s;
+}
+
+.status-card:hover {
+  border-color: #404040;
+}
+
+.status-card .card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #bbb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-card .card-header .anticon {
+  font-size: 14px;
+}
+
+.status-card .item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-card .item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.status-card .item-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-card .item-row .dot.green { background: #52c41a; }
+.status-card .item-row .dot.blue { background: #1677ff; }
+.status-card .item-row .dot.purple { background: #722ed1; }
+.status-card .item-row .dot.red { background: #ff4d4f; }
+.status-card .item-row .dot.gray { background: #555; }
+
+.status-card .item-row .item-name {
+  color: #e0e0e0;
+  font-weight: 500;
+}
+
+.status-card .item-row .item-desc {
+  color: #888;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.status-card .empty-state {
+  color: #555;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ── IDE Detection ───────────────────────────────────────── */
+
+.ide-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.ide-row .ide-icon {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.ide-row.detected .ide-name { color: #e0e0e0; }
+.ide-row.not-detected .ide-name { color: #555; }
+
+/* ── MCP Server Panel ────────────────────────────────────── */
+
+.mcp-server-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: border-color 0.2s;
+}
+
+.mcp-server-item:hover {
+  border-color: #404040;
+}
+
+.mcp-server-item .server-name {
+  font-weight: 500;
+  color: #e0e0e0;
+  font-size: 13px;
+}
+
+.mcp-server-item .server-type {
+  font-size: 11px;
+  color: #888;
+  background: #2a2a2a;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.mcp-server-item .server-url {
+  color: #666;
+  font-size: 11px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Section Header ──────────────────────────────────────── */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+/* ── Diagram ─────────────────────────────────────────────── */
+
+.sync-diagram {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, rgba(22, 119, 255, 0.05) 0%, rgba(114, 46, 209, 0.05) 100%);
+  border: 1px solid #303030;
+  border-radius: 12px;
+}
+
+.sync-diagram .source-box {
+  background: #1a1a2e;
+  border: 1px solid rgba(22, 119, 255, 0.3);
+  border-radius: 8px;
+  padding: 12px 20px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.sync-diagram .arrow {
+  color: #555;
+  font-size: 20px;
+}
+
+.sync-diagram .target-box {
+  background: #1a1a1a;
+  border: 1px solid #303030;
+  border-radius: 8px;
+  padding: 8px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: #aaa;
+  min-width: 80px;
+}
+
+.sync-diagram .target-box.detected {
+  border-color: rgba(82, 196, 26, 0.3);
+  color: #52c41a;
+}
+
+/* ── Init Result ─────────────────────────────────────────── */
+
+.init-result {
+  margin-top: 16px;
+  padding: 12px;
+  background: #1a1a1a;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+}
+
+.init-result .file-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 0;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace;
+}
+
+.init-result .file-entry.created { color: #52c41a; }
+.init-result .file-entry.skipped { color: #888; }
+
+/* ── Tabs ────────────────────────────────────────────────── */
+
+.ant-tabs-tab {
+  font-size: 13px !important;
+}

@@ -1,0 +1,19 @@
+{
+  "name": "pocketpaw-design-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "tsx server.ts",
+    "build": "cd ui && pnpm run build"
+  },
+  "dependencies": {
+    "@json-render/core": "latest",
+    "@json-render/mcp": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3"
+  }
+}

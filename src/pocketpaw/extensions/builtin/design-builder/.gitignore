@@ -1,0 +1,8 @@
+# Vite build output
+assets/
+index.html
+# Node modules
+node_modules/
+ui/node_modules/
+# Build
+dist/

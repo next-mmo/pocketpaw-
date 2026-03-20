@@ -25,6 +25,7 @@ interface ChatState {
   // Actions
   createConversation: (model: string) => string;
   deleteConversation: (id: string) => void;
+  renameConversation: (id: string, title: string) => void;
   setActiveConversation: (id: string | null) => void;
   addMessage: (conversationId: string, message: Message) => void;
   updateMessage: (
@@ -78,6 +79,14 @@ export const useChatStore = create<ChatState>()(
 
       setActiveConversation: (id: string | null) => {
         set({ activeConversationId: id });
+      },
+
+      renameConversation: (id: string, title: string) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { ...c, title, updatedAt: Date.now() } : c,
+          ),
+        }));
       },
 
       addMessage: (conversationId: string, message: Message) => {

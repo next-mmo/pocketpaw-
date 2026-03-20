@@ -1,13 +1,21 @@
-import { Button, Typography, Space, Tooltip } from "antd";
+import { useMemo } from "react";
+import { Conversations } from "@ant-design/x";
 import {
   PlusOutlined,
-  DeleteOutlined,
   MessageOutlined,
+  EditOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons";
+import { Button, Typography } from "antd";
 import { useChatStore } from "../stores/chatStore";
 
 const { Text } = Typography;
 
+/**
+ * Conversation sidebar using @ant-design/x <Conversations> component.
+ * Replaces the previous hand-rolled list with native grouping, context menus,
+ * keyboard shortcuts, and creation button support.
+ */
 export default function ConversationList() {
   const {
     conversations,
@@ -15,7 +23,39 @@ export default function ConversationList() {
     setActiveConversation,
     createConversation,
     deleteConversation,
+    renameConversation,
   } = useChatStore();
+
+  // Group conversations by time period
+  const items = useMemo(() => {
+    const now = Date.now();
+    const DAY = 86_400_000;
+
+    return conversations.map((conv) => {
+      const age = now - conv.createdAt;
+      let group = "older";
+      if (age < DAY) group = "today";
+      else if (age < 2 * DAY) group = "yesterday";
+      else if (age < 7 * DAY) group = "this_week";
+      else if (age < 30 * DAY) group = "this_month";
+
+      return {
+        key: conv.id,
+        label: conv.title || "New Chat",
+        icon: <MessageOutlined />,
+        group,
+        timestamp: new Date(conv.createdAt),
+      };
+    });
+  }, [conversations]);
+
+  const groupLabels: Record<string, string> = {
+    today: "Today",
+    yesterday: "Yesterday",
+    this_week: "This Week",
+    this_month: "This Month",
+    older: "Older",
+  };
 
   return (
     <div
@@ -24,9 +64,9 @@ export default function ConversationList() {
         flexDirection: "column",
         height: "100%",
         background: "#1a1a1a",
-        borderRight: "1px solid #303030",
       }}
     >
+      {/* New Chat button */}
       <div
         style={{
           padding: "12px",
@@ -43,83 +83,73 @@ export default function ConversationList() {
         </Button>
       </div>
 
-      <div style={{ flex: 1, overflow: "auto", padding: "4px" }}>
-        {conversations.length === 0 && (
-          <div
+      {/* Empty state */}
+      {conversations.length === 0 && (
+        <div
+          style={{
+            padding: 20,
+            textAlign: "center",
+            opacity: 0.4,
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          <MessageOutlined style={{ fontSize: 32 }} />
+          <Text type="secondary">No conversations yet</Text>
+        </div>
+      )}
+
+      {/* Conversation list with antdx Conversations component */}
+      {conversations.length > 0 && (
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <Conversations
+            items={items}
+            activeKey={activeConversationId ?? undefined}
+            onActiveChange={(key) => setActiveConversation(key)}
+            groupable={{
+              label: (group) => groupLabels[group] || group,
+              collapsible: true,
+              defaultExpandedKeys: ["today", "yesterday", "this_week"],
+            }}
+            menu={(item) => ({
+              items: [
+                {
+                  key: "rename",
+                  label: "Rename",
+                  icon: <EditOutlined />,
+                },
+                {
+                  key: "delete",
+                  label: "Delete",
+                  icon: <DeleteOutlined />,
+                  danger: true,
+                },
+              ],
+              onClick: ({ key: menuKey }) => {
+                if (menuKey === "delete") {
+                  deleteConversation(item.key as string);
+                } else if (menuKey === "rename") {
+                  const newTitle = prompt(
+                    "Rename conversation:",
+                    (item.label as string) || "",
+                  );
+                  if (newTitle?.trim()) {
+                    renameConversation(item.key as string, newTitle.trim());
+                  }
+                }
+              },
+            })}
             style={{
-              padding: 20,
-              textAlign: "center",
-              opacity: 0.4,
+              background: "transparent",
+              borderRight: "none",
             }}
-          >
-            <MessageOutlined style={{ fontSize: 32, marginBottom: 8 }} />
-            <br />
-            <Text type="secondary">No conversations yet</Text>
-          </div>
-        )}
-        {conversations.map((conv) => (
-          <div
-            key={conv.id}
-            onClick={() => setActiveConversation(conv.id)}
-            style={{
-              padding: "8px 12px",
-              margin: "2px 0",
-              borderRadius: 6,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background:
-                conv.id === activeConversationId
-                  ? "rgba(22, 119, 255, 0.15)"
-                  : "transparent",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              if (conv.id !== activeConversationId) {
-                e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (conv.id !== activeConversationId) {
-                e.currentTarget.style.background = "transparent";
-              }
-            }}
-          >
-            <Space
-              direction="vertical"
-              size={0}
-              style={{ flex: 1, minWidth: 0 }}
-            >
-              <Text
-                ellipsis
-                style={{
-                  color: conv.id === activeConversationId ? "#1677ff" : "#ccc",
-                  fontSize: 13,
-                  fontWeight: conv.id === activeConversationId ? 600 : 400,
-                }}
-              >
-                {conv.title}
-              </Text>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                {conv.messages.length} messages
-              </Text>
-            </Space>
-            <Tooltip title="Delete">
-              <Button
-                type="text"
-                size="small"
-                icon={<DeleteOutlined />}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteConversation(conv.id);
-                }}
-                style={{ color: "#666", flexShrink: 0 }}
-              />
-            </Tooltip>
-          </div>
-        ))}
-      </div>
+          />
+        </div>
+      )}
     </div>
   );
 }

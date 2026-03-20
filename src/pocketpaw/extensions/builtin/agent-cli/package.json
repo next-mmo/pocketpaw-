@@ -1,0 +1,29 @@
+{
+  "name": "pocketpaw-agent-cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "cli": "tsx src/index.ts",
+    "cli:init": "tsx src/index.ts init",
+    "cli:sync": "tsx src/index.ts sync",
+    "cli:status": "tsx src/index.ts status",
+    "cli:convert": "tsx src/index.ts convert",
+    "cli:mcp": "tsx src/index.ts mcp list",
+    "server": "tsx server.ts",
+    "build": "cd ui && pnpm run build"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "citty": "^0.1.6",
+    "fast-glob": "^3.3.3",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "design-builder",
+  "name": "Design Builder",
+  "version": "0.1.0",
+  "description": "Figma-like visual design tool powered by json-render and AI/MCP",
+  "icon": "layout",
+  "route": "design-builder",
+  "entry": "index.html",
+  "type": "plugin",
+  "autostart": false,
+  "scopes": ["storage.read", "storage.write"],
+  "sandbox": {
+    "node": true
+  },
+  "install": {
+    "steps": [
+      { "node": true },
+      { "run": "python build.py" }
+    ]
+  },
+  "start": {
+    "command": "node node_modules/tsx/dist/cli.mjs server.ts --host 127.0.0.1 --port __PORT__",
+    "daemon": true,
+    "ready_pattern": "Design Builder server running on",
+    "port": "auto"
+  }
+}

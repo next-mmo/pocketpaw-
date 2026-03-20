@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ConfigProvider, Layout, theme, Segmented } from "antd";
+import { XProvider } from "@ant-design/x";
 import {
   MessageOutlined,
   SettingOutlined,
@@ -16,6 +17,26 @@ import { useServerStore, API_BASE, PLUGIN_ID } from "./stores/serverStore";
 import { useProviderStore } from "./stores/providerStore";
 
 const { Sider, Content } = Layout;
+
+// ── Dark theme tokens (shared by antd + antd-x) ────────────────────
+const darkTheme = {
+  algorithm: theme.darkAlgorithm,
+  token: {
+    colorPrimary: "#1677ff",
+    borderRadius: 8,
+    colorBgContainer: "#1f1f1f",
+    colorBgElevated: "#262626",
+    colorBorder: "#303030",
+    colorText: "#e0e0e0",
+    colorTextSecondary: "#888",
+    fontSize: 13,
+  },
+  components: {
+    Card: {
+      headerBg: "#1a1a1a",
+    },
+  },
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("chat");
@@ -90,131 +111,114 @@ export default function App() {
   }, [loadModels]);
 
   return (
-    <ConfigProvider
-      theme={{
-        algorithm: theme.darkAlgorithm,
-        token: {
-          colorPrimary: "#1677ff",
-          borderRadius: 8,
-          colorBgContainer: "#1f1f1f",
-          colorBgElevated: "#262626",
-          colorBorder: "#303030",
-          colorText: "#e0e0e0",
-          colorTextSecondary: "#888",
-          fontSize: 13,
-        },
-        components: {
-          Card: {
-            headerBg: "#1a1a1a",
-          },
-        },
-      }}
-    >
-      <Layout style={{ height: "100vh", background: "#141414" }}>
-        {/* Conversation Sidebar — only in chat mode */}
-        {activeTab === "chat" && (
-          <Sider
-            width={220}
-            collapsible
-            collapsed={siderCollapsed}
-            onCollapse={setSiderCollapsed}
-            collapsedWidth={0}
-            trigger={null}
-            style={{
-              background: "#1a1a1a",
-              borderRight: "1px solid #303030",
-            }}
-          >
-            <ConversationList />
-          </Sider>
-        )}
+    <ConfigProvider theme={darkTheme}>
+      <XProvider>
+        <Layout style={{ height: "100vh", background: "#141414" }}>
+          {/* Conversation Sidebar — only in chat mode */}
+          {activeTab === "chat" && (
+            <Sider
+              width={240}
+              collapsible
+              collapsed={siderCollapsed}
+              onCollapse={setSiderCollapsed}
+              collapsedWidth={0}
+              trigger={null}
+              style={{
+                background: "#1a1a1a",
+                borderRight: "1px solid #303030",
+              }}
+            >
+              <ConversationList />
+            </Sider>
+          )}
 
-        {/* Main content area */}
-        <Layout style={{ background: "#141414" }}>
-          {/* Tab bar */}
-          <div
-            style={{
-              padding: "8px 16px",
-              borderBottom: "1px solid #303030",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "#1a1a1a",
-              flexShrink: 0,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {activeTab === "chat" && (
-                <UnorderedListOutlined
-                  onClick={() => setSiderCollapsed(!siderCollapsed)}
-                  style={{
-                    fontSize: 16,
-                    color: "#888",
-                    cursor: "pointer",
-                    padding: 4,
-                  }}
-                />
-              )}
-              <Segmented
-                value={activeTab}
-                onChange={(v) => setActiveTab(v as string)}
-                options={[
-                  {
-                    label: "Chat",
-                    value: "chat",
-                    icon: <MessageOutlined />,
-                  },
-                  {
-                    label: "Providers",
-                    value: "providers",
-                    icon: <ApiOutlined />,
-                  },
-                  {
-                    label: "Discover",
-                    value: "discover",
-                    icon: <CompassOutlined />,
-                  },
-                  {
-                    label: "Settings",
-                    value: "settings",
-                    icon: <SettingOutlined />,
-                  },
-                ]}
-                size="small"
-              />
-            </div>
+          {/* Main content area */}
+          <Layout style={{ background: "#141414" }}>
+            {/* Tab bar */}
             <div
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background:
-                  statusIndicator === "running"
-                    ? "#52c41a"
-                    : statusIndicator === "starting" ||
-                        statusIndicator === "installing"
-                      ? "#faad14"
-                      : "#ff4d4f",
-                boxShadow:
-                  statusIndicator === "running" ? "0 0 6px #52c41a" : "none",
+                padding: "8px 16px",
+                borderBottom: "1px solid #303030",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                background: "#1a1a1a",
+                flexShrink: 0,
               }}
-              title={`Status: ${statusIndicator} (${activeProvider?.name || "none"})`}
-            />
-          </div>
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {activeTab === "chat" && (
+                  <UnorderedListOutlined
+                    onClick={() => setSiderCollapsed(!siderCollapsed)}
+                    style={{
+                      fontSize: 16,
+                      color: "#888",
+                      cursor: "pointer",
+                      padding: 4,
+                    }}
+                  />
+                )}
+                <Segmented
+                  value={activeTab}
+                  onChange={(v) => setActiveTab(v as string)}
+                  options={[
+                    {
+                      label: "Chat",
+                      value: "chat",
+                      icon: <MessageOutlined />,
+                    },
+                    {
+                      label: "Providers",
+                      value: "providers",
+                      icon: <ApiOutlined />,
+                    },
+                    {
+                      label: "Discover",
+                      value: "discover",
+                      icon: <CompassOutlined />,
+                    },
+                    {
+                      label: "Settings",
+                      value: "settings",
+                      icon: <SettingOutlined />,
+                    },
+                  ]}
+                  size="small"
+                />
+              </div>
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background:
+                    statusIndicator === "running"
+                      ? "#52c41a"
+                      : statusIndicator === "starting" ||
+                          statusIndicator === "installing"
+                        ? "#faad14"
+                        : "#ff4d4f",
+                  boxShadow:
+                    statusIndicator === "running" ? "0 0 6px #52c41a" : "none",
+                }}
+                title={`Status: ${statusIndicator} (${activeProvider?.name || "none"})`}
+              />
+            </div>
 
-          <Content style={{ overflow: "hidden" }}>
-            {activeTab === "chat" ? (
-              <ChatPanel />
-            ) : activeTab === "providers" ? (
-              <ProvidersPanel />
-            ) : activeTab === "discover" ? (
-              <DiscoverPanel />
-            ) : (
-              <SettingsPanel />
-            )}
-          </Content>
+            <Content style={{ overflow: "hidden" }}>
+              {activeTab === "chat" ? (
+                <ChatPanel />
+              ) : activeTab === "providers" ? (
+                <ProvidersPanel />
+              ) : activeTab === "discover" ? (
+                <DiscoverPanel />
+              ) : (
+                <SettingsPanel />
+              )}
+            </Content>
+          </Layout>
         </Layout>
-      </Layout>
+      </XProvider>
     </ConfigProvider>
   );
 }

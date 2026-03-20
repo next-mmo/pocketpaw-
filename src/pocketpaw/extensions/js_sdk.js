@@ -33,6 +33,9 @@
  *   sdk.settings      .get()  .update(data)
  *   sdk.config        .get()  .set(config)
  *   sdk.host          .navigate(route)  .openChat(text)
+ *   sdk.plugins       .getApiBase()  .status(id)  .start(id)  .stop(id)
+ *                     .pollUntilRunning(id, timeout)  .streamCompletion(...)
+ *                     .createAbortController()
  *
  * ── Scopes ──────────────────────────────────────────────────────────────
  *

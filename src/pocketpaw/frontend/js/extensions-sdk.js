@@ -630,6 +630,169 @@
                 }
                 post('pocketpaw-extension:host:open-chat', payload || {});
             }
+        },
+
+        // ── Plugins (DRY helpers for extension backends) ──────────
+        //
+        // Common patterns extracted so extensions don't re-implement:
+        //   - API base detection (iframe-safe)
+        //   - Plugin status polling
+        //   - Plugin lifecycle (start / stop)
+        //   - OpenAI-compatible streaming
+        //
+        // Examples:
+        //   const base = sdk.plugins.getApiBase();
+        //   const st   = await sdk.plugins.status('llama-cpp');
+        //   await sdk.plugins.start('llama-cpp');
+        //   await sdk.plugins.stop('llama-cpp');
+        //   await sdk.plugins.pollUntilRunning('llama-cpp', 30000);
+        //   await sdk.plugins.streamCompletion(url, headers, body, {
+        //     onDelta(text) { console.log(text); },
+        //     onDone() { console.log('done'); },
+        //     onError(err) { console.error(err); },
+        //   });
+
+        plugins: {
+            /**
+             * Resolve the PocketPaw API base URL.
+             * Works inside iframes and top-level windows.
+             */
+            getApiBase() {
+                try {
+                    if (window.parent !== window) {
+                        return window.parent.location.origin;
+                    }
+                } catch (_e) { /* cross-origin */ }
+                return window.location.origin;
+            },
+
+            /**
+             * Get the status of a plugin by its ID.
+             */
+            async status(pluginId) {
+                const base = api.plugins.getApiBase();
+                const res = await fetch(`${base}/api/v1/plugins/${encodeURIComponent(pluginId)}/status`);
+                if (!res.ok) throw new Error(`Plugin status error: ${res.status}`);
+                return res.json();
+            },
+
+            /**
+             * Start a plugin.
+             */
+            async start(pluginId) {
+                const base = api.plugins.getApiBase();
+                const res = await fetch(`${base}/api/v1/plugins/${encodeURIComponent(pluginId)}/start`, {
+                    method: 'POST',
+                });
+                if (!res.ok) throw new Error(`Plugin start error: ${res.status}`);
+                return res.json();
+            },
+
+            /**
+             * Stop a plugin.
+             */
+            async stop(pluginId) {
+                const base = api.plugins.getApiBase();
+                const res = await fetch(`${base}/api/v1/plugins/${encodeURIComponent(pluginId)}/stop`, {
+                    method: 'POST',
+                });
+                if (!res.ok) throw new Error(`Plugin stop error: ${res.status}`);
+                return res.json();
+            },
+
+            /**
+             * Poll until a plugin reaches "running" status.
+             * Resolves with the status object or rejects on timeout.
+             */
+            async pollUntilRunning(pluginId, timeoutMs = 30000, intervalMs = 1000) {
+                const start = Date.now();
+                while (Date.now() - start < timeoutMs) {
+                    const st = await api.plugins.status(pluginId);
+                    if (st.status === 'running') return st;
+                    if (st.status === 'error') throw new Error(st.error || 'Plugin errored');
+                    await new Promise((r) => setTimeout(r, intervalMs));
+                }
+                throw new Error(`Plugin ${pluginId} did not start within ${timeoutMs}ms`);
+            },
+
+            /**
+             * Stream an OpenAI-compatible chat completion response.
+             * Works with local llama.cpp, OpenRouter, Codex, or any
+             * OpenAI-compatible endpoint.
+             *
+             * @param {string} url - Full endpoint URL
+             * @param {Record<string,string>} headers - Request headers
+             * @param {object} body - Request body (will be JSON-stringified)
+             * @param {object} handlers - { onDelta, onDone, onError, signal }
+             * @returns {Promise<string>} Full accumulated response text
+             */
+            async streamCompletion(url, headers, body, handlers = {}) {
+                const controller = handlers.signal ? undefined : new AbortController();
+                const signal = handlers.signal || controller?.signal;
+
+                try {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...headers },
+                        body: JSON.stringify(body),
+                        signal,
+                    });
+
+                    if (!res.ok) {
+                        const errBody = await res.text().catch(() => '');
+                        throw new Error(`Completion error (${res.status}): ${errBody.slice(0, 200)}`);
+                    }
+
+                    const reader = res.body?.getReader();
+                    if (!reader) throw new Error('No response body');
+
+                    const decoder = new TextDecoder();
+                    let accumulated = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        const chunk = decoder.decode(value, { stream: true });
+                        const lines = chunk.split('\n');
+
+                        for (const line of lines) {
+                            if (!line.startsWith('data: ')) continue;
+                            const data = line.slice(6).trim();
+                            if (data === '[DONE]') continue;
+
+                            try {
+                                const parsed = JSON.parse(data);
+                                const delta = parsed.choices?.[0]?.delta?.content;
+                                if (delta) {
+                                    accumulated += delta;
+                                    if (handlers.onDelta) handlers.onDelta(delta, accumulated);
+                                }
+                            } catch (_e) {
+                                // skip parse errors
+                            }
+                        }
+                    }
+
+                    if (handlers.onDone) handlers.onDone(accumulated);
+                    return accumulated;
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        if (handlers.onDone) handlers.onDone('');
+                        return '';
+                    }
+                    if (handlers.onError) handlers.onError(err);
+                    throw err;
+                }
+            },
+
+            /**
+             * Get the abort controller for use with streamCompletion.
+             * Pass controller.signal as handlers.signal.
+             */
+            createAbortController() {
+                return new AbortController();
+            },
         }
     };
 

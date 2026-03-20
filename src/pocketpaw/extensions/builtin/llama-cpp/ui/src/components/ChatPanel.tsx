@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Bubble, Sender } from "@ant-design/x";
+import { useCallback, useRef, useState } from "react";
+import { Bubble, Sender, Prompts } from "@ant-design/x";
 import { Typography, Space, Button, Tooltip, Tag } from "antd";
 import {
   DeleteOutlined,
   ClearOutlined,
   RobotOutlined,
   UserOutlined,
+  BulbOutlined,
+  CodeOutlined,
+  FileTextOutlined,
+  TranslationOutlined,
 } from "@ant-design/icons";
 import { Avatar } from "antd";
 import { useChatStore, type Message } from "../stores/chatStore";
@@ -17,6 +21,52 @@ import {
 import ModelSwitcher from "./ModelSwitcher";
 
 const { Text } = Typography;
+
+// ── Role-based bubble configuration ─────────────────────────────────
+const role: React.ComponentProps<typeof Bubble.List>["role"] = {
+  user: {
+    placement: "end",
+  },
+  assistant: {
+    placement: "start",
+    typing: true,
+  },
+};
+
+// ── Starter prompts ─────────────────────────────────────────────────
+const STARTER_PROMPTS = [
+  {
+    key: "explain",
+    icon: <BulbOutlined style={{ color: "#faad14" }} />,
+    label: "Explain a concept",
+    description: "Break down something complex",
+  },
+  {
+    key: "code",
+    icon: <CodeOutlined style={{ color: "#52c41a" }} />,
+    label: "Write some code",
+    description: "Generate code for a task",
+  },
+  {
+    key: "summarize",
+    icon: <FileTextOutlined style={{ color: "#1677ff" }} />,
+    label: "Summarize text",
+    description: "Condense long content",
+  },
+  {
+    key: "translate",
+    icon: <TranslationOutlined style={{ color: "#eb2f96" }} />,
+    label: "Translate text",
+    description: "Convert between languages",
+  },
+];
+
+const PROMPT_PREFILLS: Record<string, string> = {
+  explain: "Explain in simple terms: ",
+  code: "Write code to: ",
+  summarize: "Summarize the following:\n\n",
+  translate: "Translate the following to English:\n\n",
+};
 
 export default function ChatPanel() {
   const {
@@ -34,18 +84,10 @@ export default function ChatPanel() {
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const activeConv = conversations.find((c) => c.id === activeConversationId);
   const messages = activeConv?.messages ?? [];
   const activeProvider = providers.find((p) => p.id === activeProviderId);
-
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
-    }
-  }, [messages]);
 
   // Determine if sending is possible
   const canSend = (() => {
@@ -61,9 +103,10 @@ export default function ChatPanel() {
     if (activeProvider.type === "local" && localStatus !== "running")
       return "Start the local server first...";
     if (!activeModelId) return "Select a model first...";
-    return "Type a message...";
+    return "Type a message... (Shift+Enter for new line)";
   };
 
+  // ── Send message with streaming ───────────────────────────────────
   const sendMessage = useCallback(
     async (content: string) => {
       if (!content.trim() || isStreaming || !canSend || !activeProvider) return;
@@ -192,14 +235,15 @@ export default function ChatPanel() {
     abortRef.current?.abort();
   };
 
-  // Convert messages to Bubble.List items
+  // ── Convert messages to Bubble.List items ─────────────────────────
   const bubbleItems = messages.map((msg) => ({
     key: msg.id,
     role: msg.role as string,
-    content: msg.content || (msg.loading ? "" : ""),
+    content: msg.content || "",
     loading: msg.loading,
   }));
 
+  // ── Render ────────────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -222,7 +266,9 @@ export default function ChatPanel() {
         }}
       >
         <Space style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <RobotOutlined style={{ fontSize: 16, color: "#1677ff", flexShrink: 0 }} />
+          <RobotOutlined
+            style={{ fontSize: 16, color: "#1677ff", flexShrink: 0 }}
+          />
           <Text
             strong
             style={{
@@ -278,13 +324,15 @@ export default function ChatPanel() {
 
       {/* Messages */}
       <div
-        ref={listRef}
         style={{
           flex: 1,
           overflow: "auto",
           padding: "16px",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
+        {/* Empty state: starter prompts */}
         {messages.length === 0 && canSend && (
           <div
             style={{
@@ -293,23 +341,46 @@ export default function ChatPanel() {
               justifyContent: "center",
               height: "100%",
               flexDirection: "column",
-              gap: 12,
-              opacity: 0.5,
+              gap: 20,
             }}
           >
-            <RobotOutlined style={{ fontSize: 48, color: "#1677ff" }} />
-            <Text style={{ color: "#888", fontSize: 16 }}>
-              Start a conversation
-            </Text>
-            {activeProvider && (
-              <Text style={{ color: "#555", fontSize: 12 }}>
-                Using {activeProvider.name} · {activeModelId}
-              </Text>
-            )}
+            <div style={{ textAlign: "center", opacity: 0.7 }}>
+              <RobotOutlined
+                style={{ fontSize: 48, color: "#1677ff", marginBottom: 12 }}
+              />
+              <div>
+                <Text style={{ color: "#ccc", fontSize: 16 }}>
+                  Start a conversation
+                </Text>
+              </div>
+              {activeProvider && (
+                <Text style={{ color: "#555", fontSize: 12 }}>
+                  Using {activeProvider.name} · {activeModelId}
+                </Text>
+              )}
+            </div>
+            <Prompts
+              items={STARTER_PROMPTS}
+              onItemClick={({ data }) => {
+                const prefill =
+                  PROMPT_PREFILLS[data.key] || "";
+                setInputValue(prefill);
+              }}
+              wrap
+              styles={{
+                item: {
+                  flex: "none",
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid #303030",
+                  borderRadius: 8,
+                },
+              }}
+            />
           </div>
         )}
 
-        {!canSend && (
+        {/* Provider not ready state */}
+        {!canSend && messages.length === 0 && (
           <div
             style={{
               display: "flex",
@@ -332,14 +403,14 @@ export default function ChatPanel() {
           </div>
         )}
 
+        {/* Chat bubbles using @ant-design/x roles config */}
         <Bubble.List
+          role={role}
           items={bubbleItems.map((item) => ({
             key: item.key,
             role: item.role as "user" | "assistant",
             loading: item.loading,
             content: item.content,
-            placement:
-              item.role === "user" ? ("end" as const) : ("start" as const),
             avatar:
               item.role === "user" ? (
                 <Avatar
@@ -361,7 +432,11 @@ export default function ChatPanel() {
               maxWidth: "85%",
             },
           }))}
-          style={{ minHeight: messages.length > 0 ? 100 : 0 }}
+          autoScroll
+          style={{
+            minHeight: messages.length > 0 ? 100 : 0,
+            flex: messages.length > 0 ? 1 : undefined,
+          }}
         />
       </div>
 
