@@ -12,6 +12,13 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { chatWithAI, pluginApi } from "./sdk";
+import {
+  getActiveProvider,
+  getActiveProviderId,
+  setActiveProvider,
+  getProviders,
+  type ProviderDefinition,
+} from "./providers";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -81,57 +88,11 @@ const DEFAULT_SPEC: DesignSpec = {
   },
 };
 
-// ─── System prompt for AI ───────────────────────────────────
+// ─── System prompt for AI (dynamically built from active provider) ──
 
-const DESIGN_SYSTEM_PROMPT = `You are a UI design assistant that generates JSON specs for a React Native component renderer.
-
-## Available Components
-
-### Layout
-- **Stack**: Container. Props: { direction?: "column"|"row", gap?: number, padding?: number, flex?: number, background?: string, borderRadius?: number, align?: "start"|"center"|"end"|"stretch" }. Has children.
-- **ScrollView**: Scrollable container. Props: { direction?: "vertical"|"horizontal" }. Has children.
-
-### Display
-- **Text**: Props: { text: string, size?: number, weight?: "normal"|"bold"|"semibold", color?: string, align?: "left"|"center"|"right" }
-- **Heading**: Props: { text: string, level?: 1|2|3|4, color?: string }
-- **Image**: Props: { uri: string, width?: number, height?: number, borderRadius?: number }
-- **Badge**: Props: { text: string, variant?: "default"|"secondary"|"destructive"|"outline" }
-- **Avatar**: Props: { uri?: string, fallback: string, size?: number }
-- **Separator**: Props: { orientation?: "horizontal"|"vertical" }
-- **Progress**: Props: { value: number, max?: number }
-- **Icon**: Props: { name: string, size?: number, color?: string }
-
-### Inputs
-- **Button**: Props: { label: string, variant?: "default"|"secondary"|"destructive"|"outline"|"ghost"|"link", size?: "default"|"sm"|"lg", action?: string }
-- **Input**: Props: { placeholder?: string, value?: string, type?: "text"|"password"|"email"|"number" }
-- **Textarea**: Props: { placeholder?: string, value?: string, rows?: number }
-- **Checkbox**: Props: { label?: string, checked?: boolean }
-- **Switch**: Props: { label?: string, checked?: boolean }
-- **Select**: Props: { placeholder?: string, options: { label: string, value: string }[] }
-
-### Container
-- **Card**: Props: { title?: string, description?: string }. Has children.
-- **Alert**: Props: { title: string, description?: string, variant?: "default"|"destructive" }
-
-## Spec Format
-Return a JSON object:
-{
-  "version": "1.0",
-  "root": "root",
-  "state": {},
-  "elements": {
-    "root": { "type": "Stack", "props": { "direction": "column", "padding": 16, "gap": 12 }, "children": ["child1"] },
-    "child1": { "type": "Text", "props": { "text": "Hello", "size": 24, "weight": "bold" } }
-  }
+function getDesignSystemPrompt(): string {
+  return getActiveProvider().buildSystemPrompt();
 }
-
-## Rules
-- Every element needs a unique string ID
-- Root is always "root" with type "Stack"
-- Only use components listed above
-- Return ONLY valid JSON, no markdown code blocks
-- Generate realistic, visually appealing designs
-- Use dark theme: backgrounds "#141414", text "#e0e0e0"`;
 
 // ─── History ────────────────────────────────────────────────
 
@@ -215,9 +176,21 @@ export interface DesignStore {
   loadSpec: (name: string) => Promise<void>;
   deleteSpec: (name: string) => Promise<void>;
 
+  // Provider
+  activeProviderId: string;
+  availableProviders: Array<{
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    tags?: string[];
+    version: string;
+  }>;
+  setProvider: (id: string) => void;
+
   // UI
-  activePanel: "chat" | "layers" | "palette";
-  setActivePanel: (panel: "chat" | "layers" | "palette") => void;
+  activePanel: "config" | "chat" | "layers" | "palette";
+  setActivePanel: (panel: "config" | "chat" | "layers" | "palette") => void;
   showSettings: boolean;
   setShowSettings: (show: boolean) => void;
   pluginStatus: string;
@@ -401,6 +374,7 @@ export const useDesignStore = create<DesignStore>()(
         // Build the prompt with current spec context
         const specContext = `Current design spec:\n${JSON.stringify(state.spec, null, 2)}`;
         const fullPrompt = `${specContext}\n\nUser request: ${content.trim()}\n\nGenerate a complete JSON spec according to the rules. Return ONLY the JSON.`;
+        const DESIGN_SYSTEM_PROMPT = getDesignSystemPrompt();
 
         let result: string;
 
@@ -570,8 +544,25 @@ export const useDesignStore = create<DesignStore>()(
       get().fetchSavedSpecs();
     },
 
+    // ── Provider ──
+    activeProviderId: getActiveProviderId(),
+    availableProviders: getProviders().map((p) => ({
+      id: p.id, name: p.name, description: p.description,
+      category: p.category, tags: p.tags, version: p.version,
+    })),
+    setProvider: (id) => {
+      setActiveProvider(id);
+      set({
+        activeProviderId: id,
+        availableProviders: getProviders().map((p) => ({
+          id: p.id, name: p.name, description: p.description,
+          category: p.category, tags: p.tags, version: p.version,
+        })),
+      });
+    },
+
     // ── UI ──
-    activePanel: "chat",
+    activePanel: "config",
     setActivePanel: (panel) => set({ activePanel: panel }),
     showSettings: false,
     setShowSettings: (show) => set({ showSettings: show }),

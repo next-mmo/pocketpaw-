@@ -12,6 +12,7 @@
     "@ant-design/icons": "^5.6.0",
     "@json-render/core": "latest",
     "@json-render/react": "latest",
+    "@json-render/shadcn": "^0.14.1",
     "@json-render/zustand": "latest",
     "antd": "^5.23.0",
     "react": "^19.1.0",

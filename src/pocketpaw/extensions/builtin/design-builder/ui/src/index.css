@@ -318,6 +318,224 @@ body,
 
 .palette-section:first-child { margin-top: 0; }
 
+/* ─── Config Panel ───────────────────────────────────── */
+
+.config-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.config-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e0e0e0;
+  letter-spacing: -0.3px;
+}
+
+.config-subtitle {
+  font-size: 11px;
+  color: #555;
+}
+
+.config-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.config-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+/* Folder node */
+.config-folder {
+  color: #999;
+  font-weight: 600;
+}
+
+.config-folder:hover {
+  background: #1a1a1a;
+  color: #ccc;
+}
+
+.config-chevron {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  opacity: 0.6;
+}
+
+.config-folder-label {
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+}
+
+.config-count {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #1f1f1f;
+  color: #666;
+  font-weight: 500;
+}
+
+/* Provider node */
+.config-provider {
+  color: #aaa;
+}
+
+.config-provider:hover {
+  background: #1677ff0e;
+  color: #e0e0e0;
+}
+
+.config-provider.active {
+  background: #1677ff15;
+  border: 1px solid #1677ff33;
+  color: #e0e0e0;
+}
+
+.config-radio {
+  font-size: 14px;
+  color: #444;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.config-provider.active .config-radio {
+  color: #1677ff;
+}
+
+.config-provider-info {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.config-provider-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-provider-ver {
+  font-size: 10px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.config-active-badge {
+  font-size: 9px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: #1677ff22;
+  color: #1677ff;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Coming soon node */
+.config-coming-soon {
+  color: #444;
+  cursor: default;
+  opacity: 0.6;
+}
+
+.config-soon-name {
+  flex: 1;
+  font-style: italic;
+}
+
+.config-soon-badge {
+  font-size: 9px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: #fa8c1618;
+  color: #fa8c1688;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Active provider info card */
+.config-active-card {
+  margin-top: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.config-active-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.config-active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #52c41a;
+  flex-shrink: 0;
+  animation: config-dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes config-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.config-active-desc {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.5;
+}
+
+.config-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.config-tag {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #1f1f1f;
+  color: #666;
+  font-weight: 500;
+}
+
 /* ─── Canvas ────────────────────────────────────────── */
 
 .canvas-area {

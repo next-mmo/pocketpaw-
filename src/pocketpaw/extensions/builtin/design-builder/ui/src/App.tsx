@@ -1,17 +1,18 @@
 /**
  * Design Builder — Main App
  *
- * 3-panel Figma-like layout:
- *   Left: Chat / Layers / Palette
+ * 4-panel Figma-like layout:
+ *   Left: Config / Chat / Layers / Palette
  *   Center: Live Canvas (json-render Renderer)
  *   Right: Props Panel for selected element
  */
 
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { Renderer, StateProvider, ActionProvider, VisibilityProvider } from "@json-render/react";
-import { registry } from "./registry";
+import { buildActiveRegistry } from "./registry";
 import { useDesignStore, type DesignSpec, type DesignElement } from "./store";
 import { getPluginStatus } from "./sdk";
+import { getActiveProvider } from "./providers";
 
 // ─── Plugin status polling (using SDK) ──────────────────────
 
@@ -37,6 +38,246 @@ function usePluginStatus() {
   return pluginStatus;
 }
 
+// ─── Provider Tree Helpers ──────────────────────────────────
+
+interface TreeNode {
+  label: string;
+  /** Segment path so far, e.g. "web" or "web/ui" */
+  path: string;
+  children: TreeNode[];
+  /** If this node IS a provider leaf, its metadata */
+  provider?: {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    tags?: string[];
+  };
+  /** "coming-soon" placeholder — shown but disabled */
+  comingSoon?: boolean;
+}
+
+/**
+ * Static tree structure.
+ * Providers are slotted in based on their `category` field.
+ * Placeholder nodes mark spots where future providers will go.
+ */
+function buildProviderTree(
+  providers: Array<{
+    id: string; name: string; description: string;
+    category: string; tags?: string[]; version: string;
+  }>,
+): TreeNode[] {
+  // Define the fixed tree skeleton with coming-soon placeholders
+  const skeleton: TreeNode[] = [
+    {
+      label: "Web",
+      path: "web",
+      children: [
+        {
+          label: "UI",
+          path: "web/ui",
+          children: [],  // providers with category "web/ui" go here
+        },
+        {
+          label: "Form",
+          path: "web/form",
+          children: [
+            { label: "TanStack Form", path: "web/form/tanstack", children: [], comingSoon: true },
+            { label: "React Hook Form", path: "web/form/rhf", children: [], comingSoon: true },
+          ],
+        },
+        {
+          label: "Data",
+          path: "web/data",
+          children: [
+            { label: "TanStack Table", path: "web/data/tanstack-table", children: [], comingSoon: true },
+          ],
+        },
+        {
+          label: "Charts",
+          path: "web/charts",
+          children: [
+            { label: "Recharts", path: "web/charts/recharts", children: [], comingSoon: true },
+          ],
+        },
+      ],
+    },
+    {
+      label: "Mobile",
+      path: "mobile",
+      children: [
+        {
+          label: "UI",
+          path: "mobile/ui",
+          children: [
+            { label: "React Native", path: "mobile/ui/rn", children: [], comingSoon: true },
+          ],
+        },
+      ],
+    },
+  ];
+
+  // Slot registered providers into the tree by category
+  for (const p of providers) {
+    const target = findNode(skeleton, p.category);
+    if (target) {
+      target.children.push({
+        label: p.name,
+        path: `${p.category}/${p.id}`,
+        children: [],
+        provider: {
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          version: p.version,
+          tags: p.tags,
+        },
+      });
+    }
+  }
+
+  return skeleton;
+}
+
+function findNode(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = findNode(node.children, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+// ─── Config Panel ───────────────────────────────────────────
+
+function ConfigPanel() {
+  const { activeProviderId, availableProviders, setProvider, setActivePanel } = useDesignStore();
+  const tree = buildProviderTree(availableProviders);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(["web", "web/ui"]));
+
+  const toggle = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const handleSelect = (providerId: string) => {
+    setProvider(providerId);
+    // Jump to palette to see the new components
+    setActivePanel("palette");
+  };
+
+  const renderNode = (node: TreeNode, depth: number): React.ReactElement[] => {
+    const items: React.ReactElement[] = [];
+    const isExpanded = expanded.has(node.path);
+    const isActive = node.provider?.id === activeProviderId;
+    const hasChildren = node.children.length > 0;
+
+    // Provider leaf
+    if (node.provider) {
+      items.push(
+        <div
+          key={node.path}
+          className={`config-item config-provider ${isActive ? "active" : ""}`}
+          style={{ paddingLeft: 12 + depth * 16 }}
+          onClick={() => handleSelect(node.provider!.id)}
+        >
+          <span className="config-radio">{isActive ? "◉" : "○"}</span>
+          <div className="config-provider-info">
+            <span className="config-provider-name">{node.provider.name}</span>
+            <span className="config-provider-ver">v{node.provider.version}</span>
+          </div>
+          {isActive && <span className="config-active-badge">Active</span>}
+        </div>,
+      );
+      return items;
+    }
+
+    // Coming-soon placeholder
+    if (node.comingSoon) {
+      items.push(
+        <div
+          key={node.path}
+          className="config-item config-coming-soon"
+          style={{ paddingLeft: 12 + depth * 16 }}
+        >
+          <span className="config-radio">○</span>
+          <span className="config-soon-name">{node.label}</span>
+          <span className="config-soon-badge">Soon</span>
+        </div>,
+      );
+      return items;
+    }
+
+    // Category folder
+    items.push(
+      <div
+        key={node.path}
+        className="config-item config-folder"
+        style={{ paddingLeft: 12 + depth * 16 }}
+        onClick={() => toggle(node.path)}
+      >
+        <span className="config-chevron">{isExpanded ? "▾" : "▸"}</span>
+        <span className="config-folder-label">{node.label}</span>
+        {hasChildren && (
+          <span className="config-count">{countProviders(node)}</span>
+        )}
+      </div>,
+    );
+
+    if (isExpanded) {
+      for (const child of node.children) {
+        items.push(...renderNode(child, depth + 1));
+      }
+    }
+
+    return items;
+  };
+
+  return (
+    <div className="panel-body config-panel">
+      <div className="config-header">
+        <span className="config-title">Providers</span>
+        <span className="config-subtitle">Select a component provider</span>
+      </div>
+      <div className="config-tree">
+        {tree.map((node) => renderNode(node, 0))}
+      </div>
+      {/* Active provider info card */}
+      {(() => {
+        const active = availableProviders.find((p) => p.id === activeProviderId);
+        if (!active) return null;
+        return (
+          <div className="config-active-card">
+            <div className="config-active-card-header">
+              <span className="config-active-dot" />
+              <span>{active.name}</span>
+            </div>
+            <div className="config-active-desc">{active.description}</div>
+            {active.tags && active.tags.length > 0 && (
+              <div className="config-tags">
+                {active.tags.map((t) => (
+                  <span key={t} className="config-tag">{t}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+function countProviders(node: TreeNode): number {
+  let count = 0;
+  if (node.provider) count++;
+  for (const child of node.children) count += countProviders(child);
+  return count;
+}
 // ─── Chat Panel ─────────────────────────────────────────────
 
 function ChatPanel() {
@@ -130,11 +371,11 @@ function ChatPanel() {
 function LayersPanel() {
   const { spec, selectedId, hoveredId, select, hover, removeElement } = useDesignStore();
 
-  const renderTree = (id: string, depth: number): JSX.Element[] => {
+  const renderTree = (id: string, depth: number): React.ReactElement[] => {
     const el = spec.elements[id];
     if (!el) return [];
 
-    const items: JSX.Element[] = [];
+    const items: React.ReactElement[] = [];
     items.push(
       <div
         key={id}
@@ -175,37 +416,10 @@ function LayersPanel() {
 
 // ─── Palette Panel ──────────────────────────────────────────
 
-const PALETTE_ITEMS = [
-  { section: "Layout", items: [
-    { type: "Stack", icon: "⬜", defaultProps: { direction: "column", gap: 12, padding: 16, background: "#1a1a1a", borderRadius: 8 } },
-    { type: "ScrollView", icon: "📜", defaultProps: { direction: "vertical" } },
-  ]},
-  { section: "Display", items: [
-    { type: "Text", icon: "✏️", defaultProps: { text: "Text", size: 14, color: "#e0e0e0" } },
-    { type: "Heading", icon: "H", defaultProps: { text: "Heading", level: 2 } },
-    { type: "Image", icon: "🖼", defaultProps: { uri: "https://picsum.photos/200/100", width: 200, height: 100, borderRadius: 8 } },
-    { type: "Badge", icon: "🏷", defaultProps: { text: "Badge", variant: "default" } },
-    { type: "Avatar", icon: "👤", defaultProps: { fallback: "AB", size: 40 } },
-    { type: "Separator", icon: "—", defaultProps: { orientation: "horizontal" } },
-    { type: "Progress", icon: "▰", defaultProps: { value: 65, max: 100 } },
-    { type: "Icon", icon: "◆", defaultProps: { name: "star", size: 20, color: "#faad14" } },
-  ]},
-  { section: "Input", items: [
-    { type: "Button", icon: "🔘", defaultProps: { label: "Button", variant: "default" } },
-    { type: "Input", icon: "📝", defaultProps: { placeholder: "Enter text..." } },
-    { type: "Textarea", icon: "📋", defaultProps: { placeholder: "Enter text...", rows: 3 } },
-    { type: "Checkbox", icon: "☑", defaultProps: { label: "Checkbox" } },
-    { type: "Switch", icon: "🔀", defaultProps: { label: "Toggle" } },
-    { type: "Select", icon: "▾", defaultProps: { placeholder: "Select...", options: [{ label: "Option 1", value: "1" }, { label: "Option 2", value: "2" }] } },
-  ]},
-  { section: "Container", items: [
-    { type: "Card", icon: "📇", defaultProps: { title: "Card Title", description: "Description" } },
-    { type: "Alert", icon: "⚠", defaultProps: { title: "Alert", description: "Something happened" } },
-  ]},
-];
-
 function PalettePanel() {
-  const { selectedId, addElement, spec } = useDesignStore();
+  const { selectedId, addElement, spec, activeProviderId } = useDesignStore();
+  const provider = getActiveProvider();
+  const paletteItems = provider.palette;
 
   const handleAdd = (type: string, defaultProps: Record<string, any>) => {
     const parentId = selectedId && spec.elements[selectedId]?.children !== undefined
@@ -216,7 +430,7 @@ function PalettePanel() {
 
   return (
     <div className="panel-body">
-      {PALETTE_ITEMS.map((section) => (
+      {paletteItems.map((section) => (
         <div key={section.section}>
           <div className="palette-section">{section.section}</div>
           <div className="palette-grid">
@@ -317,7 +531,10 @@ function PropsPanel() {
 // ─── Canvas (json-render Renderer) ──────────────────────────
 
 function DesignCanvas() {
-  const { spec, selectedId, select, hover } = useDesignStore();
+  const { spec, selectedId, select, hover, activeProviderId } = useDesignStore();
+
+  // Rebuild registry when provider switches
+  const { registry } = useMemo(() => buildActiveRegistry(), [activeProviderId]);
 
   const rendererSpec = {
     version: spec.version,
@@ -495,6 +712,8 @@ export default function App() {
     clearChat,
     savedSpecs, fetchSavedSpecs, saveSpec, loadSpec,
     spec,
+    // Provider
+    activeProviderId, availableProviders, setProvider,
   } = useDesignStore();
 
   const [saveName, setSaveName] = useState("");
@@ -575,6 +794,12 @@ export default function App() {
         <div className="left-panel">
           <div className="panel-tabs">
             <button
+              className={activePanel === "config" ? "active" : ""}
+              onClick={() => setActivePanel("config")}
+            >
+              ⚡ Config
+            </button>
+            <button
               className={activePanel === "chat" ? "active" : ""}
               onClick={() => setActivePanel("chat")}
             >
@@ -594,6 +819,7 @@ export default function App() {
             </button>
           </div>
 
+          {activePanel === "config" && <ConfigPanel />}
           {activePanel === "chat" && <ChatPanel />}
           {activePanel === "layers" && <LayersPanel />}
           {activePanel === "palette" && <PalettePanel />}
