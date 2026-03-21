@@ -8,32 +8,29 @@
  * @see https://playwright.dev/docs/api/class-electron
  * @see tests/smoke/fixtures.ts
  */
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: './tests/smoke',
+  testDir: "./tests/smoke",
   timeout: 120_000,
   expect: {
     timeout: 10_000,
   },
 
   /* Electron tests must run serially — only one app instance at a time */
-  workers: 1,
-  fullyParallel: false,
+  workers: 3,
+  // fullyParallel: false,
 
-  retries: process.env.CI ? 2 : 1,
+  retries: process.env.CI ? 2 : 0,
   forbidOnly: !!process.env.CI,
 
-  reporter: [
-    ['list'],
-    ['html', { open: 'never' }],
-  ],
+  reporter: [["list"], ["html", { open: "never" }]],
 
-  outputDir: 'test-results',
+  outputDir: "test-results",
 
   use: {
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
 
   /*
