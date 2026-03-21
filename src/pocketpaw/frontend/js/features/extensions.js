@@ -58,6 +58,12 @@ window.PocketPaw.Extensions = {
         urlBarInput: "",
         urlBarExpanded: false,
         browseTabCounter: 0,
+
+        // Right drawer state (API Docs / Logs)
+        drawerOpen: false,
+        drawerTab: 'docs',    // 'docs' | 'logs'
+        drawerLogs: [],
+        drawerLogPollTimer: null,
       },
     };
   },
@@ -1171,6 +1177,12 @@ window.PocketPaw.Extensions = {
         ps.error = null;
         ps.logs = [];
 
+        // Auto-open the logs drawer
+        this.extensionsHost.drawerOpen = true;
+        this.extensionsHost.drawerTab = 'logs';
+        this.extensionsHost.drawerLogs = [];
+        this.$nextTick(() => { this._refreshIcons(); });
+
         try {
           const resp = await fetch(`/api/v1/plugins/${pluginId}/install`, {
             method: 'POST',
@@ -1244,6 +1256,15 @@ window.PocketPaw.Extensions = {
             if (logsResp.ok) {
               const logData = await logsResp.json();
               ps.logs = logData.lines || [];
+              // Sync into drawer logs when drawer is open on this plugin
+              if (this.extensionsHost.drawerOpen && this.extensionsHost.drawerTab === 'logs'
+                  && this.extensionsHost.activeTabId === pluginId) {
+                this.extensionsHost.drawerLogs = ps.logs;
+                this.$nextTick(() => {
+                  const el = this.$refs.drawerLogScroll;
+                  if (el) el.scrollTop = el.scrollHeight;
+                });
+              }
             }
           } catch (error) {
             console.error('Poll error:', error);
@@ -1262,6 +1283,12 @@ window.PocketPaw.Extensions = {
         const ps = this._getPluginState(pluginId);
         ps.status = 'starting';
         ps.error = null;
+
+        // Auto-open the logs drawer
+        this.extensionsHost.drawerOpen = true;
+        this.extensionsHost.drawerTab = 'logs';
+        this.extensionsHost.drawerLogs = [];
+        this.$nextTick(() => { this._refreshIcons(); });
 
         try {
           const resp = await fetch(`/api/v1/plugins/${pluginId}/start`, {
@@ -1365,6 +1392,89 @@ window.PocketPaw.Extensions = {
           console.error('Plugin reinstall failed:', error);
           ps.status = 'error';
           ps.error = error.message;
+        }
+      },
+
+      // ── Right Drawer (API Docs / Logs) ────────────────────
+
+      /**
+       * Toggle the right drawer open/closed.
+       * If `tab` matches the current tab and drawer is open, close it.
+       * If `tab` is null, always close.
+       */
+      toggleDrawer(tab) {
+        if (tab === null || (this.extensionsHost.drawerOpen && this.extensionsHost.drawerTab === tab)) {
+          this.extensionsHost.drawerOpen = false;
+          this._stopDrawerLogPoll();
+        } else {
+          this.extensionsHost.drawerOpen = true;
+          this.extensionsHost.drawerTab = tab;
+          if (tab === 'logs') {
+            this._startDrawerLogPoll();
+          } else {
+            this._stopDrawerLogPoll();
+          }
+        }
+        this.$nextTick(() => { this._refreshIcons(); });
+      },
+
+      /**
+       * Switch the drawer tab without toggling open/close.
+       */
+      switchDrawerTab(tab) {
+        this.extensionsHost.drawerTab = tab;
+        if (tab === 'logs') {
+          this._startDrawerLogPoll();
+        } else {
+          this._stopDrawerLogPoll();
+        }
+        this.$nextTick(() => { this._refreshIcons(); });
+      },
+
+      /**
+       * Get the Swagger docs URL for a plugin via the reverse proxy.
+       */
+      getDrawerDocsUrl(pluginId) {
+        if (!pluginId) return '';
+        return `/api/v1/plugins/${pluginId}/proxy/docs`;
+      },
+
+      /**
+       * Start polling logs for the active plugin (drawer logs tab).
+       */
+      _startDrawerLogPoll() {
+        this._stopDrawerLogPoll();
+        const pluginId = this.extensionsHost.activeTabId;
+        if (!pluginId) return;
+
+        const poll = async () => {
+          try {
+            const resp = await fetch(`/api/v1/plugins/${pluginId}/logs?tail=200`);
+            if (resp.ok) {
+              const data = await resp.json();
+              this.extensionsHost.drawerLogs = data.lines || [];
+              // Auto-scroll to bottom
+              this.$nextTick(() => {
+                const el = this.$refs.drawerLogScroll;
+                if (el) el.scrollTop = el.scrollHeight;
+              });
+            }
+          } catch (e) {
+            // Silently ignore — daemon may not be running
+          }
+        };
+
+        poll();
+        this.extensionsHost.drawerLogPollTimer = setInterval(poll, 2000);
+      },
+
+      /**
+       * Stop polling drawer logs.
+       */
+      _stopDrawerLogPoll() {
+        if (this.extensionsHost.drawerLogPollTimer) {
+          clearInterval(this.extensionsHost.drawerLogPollTimer);
+          this.extensionsHost.drawerLogPollTimer = null;
         }
       },
     };

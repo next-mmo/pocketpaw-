@@ -697,6 +697,32 @@
             </template>
 
             <div class="flex items-center gap-1 shrink-0">
+              <!-- API Docs button (plugin tabs only) -->
+              <template x-if="!tab.isBrowseTab && tab.isPlugin">
+                <button
+                  class="p-1.5 rounded-md transition-colors"
+                  :class="extensionsHost.drawerOpen && extensionsHost.drawerTab === 'docs'
+                    ? 'text-accent bg-accent/10'
+                    : 'text-white/30 hover:text-white/60 hover:bg-white/5'"
+                  @click="toggleDrawer('docs')"
+                  title="API Documentation"
+                >
+                  <i data-lucide="file-text" class="w-3.5 h-3.5"></i>
+                </button>
+              </template>
+              <!-- Logger button (plugin tabs only) -->
+              <template x-if="!tab.isBrowseTab && tab.isPlugin">
+                <button
+                  class="p-1.5 rounded-md transition-colors"
+                  :class="extensionsHost.drawerOpen && extensionsHost.drawerTab === 'logs'
+                    ? 'text-accent bg-accent/10'
+                    : 'text-white/30 hover:text-white/60 hover:bg-white/5'"
+                  @click="toggleDrawer('logs')"
+                  title="Daemon Logs"
+                >
+                  <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+                </button>
+              </template>
               <template x-if="!tab.isBrowseTab">
                 <button
                   class="p-1.5 rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
@@ -718,8 +744,7 @@
 
           <!-- ═══ Plugin Install/Start Screen ═══ -->
           <template x-if="tab.isPlugin && activeTabNeedsInstall() && extensionsHost.activeTabId === tab.id">
-            <div class="flex-1 flex items-center justify-center p-8 overflow-y-auto"
-                 x-data="{ showLogs: false }">
+            <div class="flex-1 flex items-center justify-center p-8 overflow-y-auto">
               <div class="w-full max-w-lg">
                 <!-- Plugin Icon & Name -->
                 <div class="text-center mb-6">
@@ -760,24 +785,15 @@
                            style="background: var(--accent-color);"
                            :style="'width: ' + Math.max(2, (activePluginState()?.progress || 0) * 100) + '%'"></div>
                     </div>
-                    <!-- Toggle logs -->
+                    <!-- Open logs in drawer -->
                     <button
                       class="text-[11px] flex items-center gap-1 mx-auto transition-colors"
                       style="color: var(--text-tertiary)"
-                      @click="showLogs = !showLogs"
+                      @click="toggleDrawer('logs')"
                     >
-                      <i :data-lucide="showLogs ? 'chevron-up' : 'chevron-down'" class="w-3 h-3"></i>
-                      <span x-text="showLogs ? 'Hide logs' : 'Show logs'"></span>
+                      <i data-lucide="terminal" class="w-3 h-3"></i>
+                      <span>View Logs</span>
                     </button>
-                    <!-- Log output -->
-                    <div x-show="showLogs" x-transition
-                         class="mt-3 rounded-xl p-3 max-h-[200px] overflow-y-auto font-mono text-[11px] leading-relaxed"
-                         style="background: black; color: var(--text-tertiary); border: 1px solid var(--glass-border);">
-                      <template x-for="(line, i) in (activePluginState()?.logs || []).slice(-30)" :key="i">
-                        <div x-text="line" class="whitespace-pre-wrap break-all"></div>
-                      </template>
-                      <div x-show="!activePluginState()?.logs?.length" class="text-white/20">Waiting for output...</div>
-                    </div>
                   </div>
                 </template>
 
@@ -846,6 +862,14 @@
                       {{ plugin_primary_button("refresh-cw", "Retry Install", "installPlugin(tab.id)") }}
                       {{ plugin_management_buttons() }}
                     </div>
+                    <button
+                      class="text-[11px] flex items-center gap-1 mx-auto mt-3 transition-colors"
+                      style="color: var(--text-tertiary)"
+                      @click="toggleDrawer('logs')"
+                    >
+                      <i data-lucide="terminal" class="w-3 h-3"></i>
+                      <span>View Logs</span>
+                    </button>
                   </div>
                 </template>
               </div>
@@ -858,22 +882,117 @@
           {# ── Unified Error Overlay (all extension types) ── #}
           {{ frame_error_overlay() }}
 
-          <!-- Extension iframe (only shown when plugin is running or non-plugin) -->
-          <iframe
-            x-show="!tab.isPlugin || !activeTabNeedsInstall() || extensionsHost.activeTabId !== tab.id"
-            :id="'extensionFrame_' + tab.id"
-            title="PocketPaw Extension"
-            class="w-full flex-1 bg-black/20"
-            :sandbox="tab.isUrlWrapper
-              ? 'allow-downloads allow-forms allow-same-origin allow-scripts allow-popups allow-modals allow-popups-to-escape-sandbox'
-              : 'allow-downloads allow-forms allow-same-origin allow-scripts'"
-            :allow="tab.isUrlWrapper
-              ? 'autoplay; fullscreen; clipboard-write; encrypted-media'
-              : ''"
-            :src="extensionsHost.frameSrcs[tab.id] || ''"
-            @load="onFrameLoad(tab.id)"
-            @error="onFrameError(tab.id, 'Unable to reach the extension')"
-          ></iframe>
+          <!-- Extension iframe + Drawer wrapper -->
+          <div class="flex flex-1 min-h-0 relative">
+            <!-- Extension iframe (only shown when plugin is running or non-plugin) -->
+            <iframe
+              x-show="!tab.isPlugin || !activeTabNeedsInstall() || extensionsHost.activeTabId !== tab.id"
+              :id="'extensionFrame_' + tab.id"
+              title="PocketPaw Extension"
+              class="flex-1 min-w-0 bg-black/20"
+              :sandbox="tab.isUrlWrapper
+                ? 'allow-downloads allow-forms allow-same-origin allow-scripts allow-popups allow-modals allow-popups-to-escape-sandbox'
+                : 'allow-downloads allow-forms allow-same-origin allow-scripts'"
+              :allow="tab.isUrlWrapper
+                ? 'autoplay; fullscreen; clipboard-write; encrypted-media'
+                : ''"
+              :src="extensionsHost.frameSrcs[tab.id] || ''"
+              @load="onFrameLoad(tab.id)"
+              @error="onFrameError(tab.id, 'Unable to reach the extension')"
+            ></iframe>
+
+            <!-- ═══ Right Drawer (API Docs / Logs) ═══ -->
+            <div
+              x-show="extensionsHost.drawerOpen && extensionsHost.activeTabId === tab.id && tab.isPlugin"
+              x-transition:enter="transition ease-out duration-200"
+              x-transition:enter-start="translate-x-full opacity-0"
+              x-transition:enter-end="translate-x-0 opacity-100"
+              x-transition:leave="transition ease-in duration-150"
+              x-transition:leave-start="translate-x-0 opacity-100"
+              x-transition:leave-end="translate-x-full opacity-0"
+              class="w-[420px] shrink-0 flex flex-col border-l border-white/8 bg-black/40 backdrop-blur-sm"
+            >
+              <!-- Drawer Header -->
+              <div class="flex items-center gap-1 px-3 py-2 border-b border-white/8 shrink-0">
+                <button
+                  class="px-3 py-1 rounded-md text-[11px] font-medium transition-colors"
+                  :class="extensionsHost.drawerTab === 'docs'
+                    ? 'bg-white/10 text-white'
+                    : 'text-white/40 hover:text-white/60'"
+                  @click="switchDrawerTab('docs')"
+                >
+                  <i data-lucide="file-text" class="w-3 h-3 inline mr-1"></i>
+                  API Docs
+                </button>
+                <button
+                  class="px-3 py-1 rounded-md text-[11px] font-medium transition-colors"
+                  :class="extensionsHost.drawerTab === 'logs'
+                    ? 'bg-white/10 text-white'
+                    : 'text-white/40 hover:text-white/60'"
+                  @click="switchDrawerTab('logs')"
+                >
+                  <i data-lucide="terminal" class="w-3 h-3 inline mr-1"></i>
+                  Logs
+                </button>
+                <div class="flex-1"></div>
+                <button
+                  class="p-1 rounded-md text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+                  @click="toggleDrawer(null)"
+                  title="Close panel"
+                >
+                  <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+
+              <!-- API Docs Tab -->
+              <div x-show="extensionsHost.drawerTab === 'docs'" class="flex-1 min-h-0 flex flex-col">
+                <iframe
+                  :src="getDrawerDocsUrl(tab.id)"
+                  class="w-full flex-1 bg-black/20 border-0"
+                  title="API Documentation"
+                  sandbox="allow-same-origin allow-scripts allow-popups"
+                ></iframe>
+              </div>
+
+              <!-- Logs Tab -->
+              <div x-show="extensionsHost.drawerTab === 'logs'" class="flex-1 min-h-0 flex flex-col">
+                <!-- Controls -->
+                <div class="flex items-center gap-2 px-3 py-1.5 border-b border-white/5 shrink-0">
+                  <span class="text-[10px] uppercase tracking-wider font-medium text-white/30">Live Output</span>
+                  <div class="flex-1"></div>
+                  <button
+                    class="text-[10px] text-white/30 hover:text-white/50 transition-colors"
+                    @click="extensionsHost.drawerLogs = []"
+                  >Clear</button>
+                </div>
+                <!-- Log output -->
+                <div
+                  class="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed"
+                  style="background: #0a0a0a; color: #a0a0a0;"
+                  x-ref="drawerLogScroll"
+                >
+                  <template x-if="extensionsHost.drawerLogs.length === 0">
+                    <div class="text-white/15 text-center pt-8">
+                      <i data-lucide="terminal" class="w-8 h-8 mx-auto mb-2 opacity-30"></i>
+                      <div>No log output yet</div>
+                      <div class="text-[10px] mt-1">Logs will appear when the daemon is running</div>
+                    </div>
+                  </template>
+                  <template x-for="(line, i) in extensionsHost.drawerLogs" :key="i">
+                    <div
+                      class="whitespace-pre-wrap break-all py-[1px] border-b border-white/[0.02]"
+                      :class="{
+                        'text-red-400/80': line.toLowerCase().includes('error') || line.toLowerCase().includes('traceback'),
+                        'text-yellow-400/70': line.toLowerCase().includes('warn'),
+                        'text-green-400/70': line.toLowerCase().includes('running') || line.toLowerCase().includes('started') || line.toLowerCase().includes('ready'),
+                      }"
+                      x-text="line"
+                    ></div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
     </div>
