@@ -6,6 +6,7 @@ export type AppId =
   | 'vscode'
   | 'appstore'
   | 'purus-twitter'
+  | 'activity-monitor'
   | 'mail'
   | 'messages'
   | 'facetime'

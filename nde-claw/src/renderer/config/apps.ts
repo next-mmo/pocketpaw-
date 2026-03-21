@@ -174,6 +174,17 @@ const definitions: readonly AppDefinition[] = [
     searchTerms: ['writing', 'scratchpad'],
   }),
   createLaunchpadApp({
+    id: 'activity-monitor',
+    title: 'Activity Monitor',
+    icon: '/app-icons/devutils/256.webp',
+    routePath: '/app/activity-monitor',
+    defaultBounds: {
+      width: 980,
+      height: 650,
+    },
+    searchTerms: ['activity', 'monitor', 'telemetry', 'agent', 'tools'],
+  }),
+  createLaunchpadApp({
     id: 'reminders',
     title: 'Reminders',
     icon: '/app-icons/reminders/256.png',

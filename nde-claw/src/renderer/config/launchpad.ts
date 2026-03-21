@@ -55,7 +55,7 @@ export const launchpadFolders: Record<LaunchpadFolderId, LaunchpadFolderDefiniti
     id: 'utilities',
     title: 'Utilities',
     subtitle: 'System-level tools',
-    appIds: ['system-preferences', 'terminal'],
+    appIds: ['system-preferences', 'activity-monitor', 'terminal'],
   },
 };
 

@@ -12,6 +12,13 @@ const appSurfaces: Partial<Record<AppId, AppSurfaceComponent>> = {
   vscode: lazy(() => import('./VscodeApp')),
   appstore: lazy(() => import('./AppStoreApp')),
   'purus-twitter': lazy(() => import('./DeveloperApp')),
+  // PocketPaw-integrated apps
+  'activity-monitor': lazy(() => import('./ActivityMonitorApp')),
+  'system-preferences': lazy(() => import('./SystemPreferencesApp')),
+  messages: lazy(() => import('./MessagesApp')),
+  terminal: lazy(() => import('./TerminalApp')),
+  notes: lazy(() => import('./NotesApp')),
+  reminders: lazy(() => import('./RemindersApp')),
 };
 
 export function AppSurface({ appId }: { appId: AppId }) {

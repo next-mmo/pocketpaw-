@@ -44,6 +44,26 @@ class TestHealthStatus:
         assert resp.status_code == 200
         assert resp.json()["status"] == "unknown"
 
+    @patch("pocketpaw.tools.status.get_system_status_snapshot")
+    def test_health_system_status(self, mock_status_fn, client):
+        mock_status_fn.return_value = {
+            "available": True,
+            "limited": False,
+            "label": "Windows (AMD64)",
+            "cpu": {"percent": 8.0, "cores": 12},
+            "memory": {"percent": 39.0, "used_gb": 6.2, "total_gb": 16.0},
+            "disk": {"percent": 44.0, "used_gb": 220.0, "total_gb": 512.0},
+            "battery": None,
+            "uptime": "1 day, 02:03:04",
+        }
+
+        resp = client.get("/api/v1/health/system")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["available"] is True
+        assert data["cpu"]["percent"] == 8.0
+        assert data["memory"]["percent"] == 39.0
+
 
 class TestHealthErrors:
     """Tests for GET /api/v1/health/errors."""

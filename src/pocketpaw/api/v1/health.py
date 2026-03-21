@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -48,6 +49,17 @@ async def get_health_status():
         return engine.summary
     except Exception as e:
         return HealthSummary(error=str(e))
+
+
+@router.get("/health/system")
+async def get_system_health_status():
+    """Return structured host system metrics for desktop clients."""
+    try:
+        from pocketpaw.tools.status import get_system_status_snapshot
+
+        return await asyncio.to_thread(get_system_status_snapshot)
+    except Exception as e:
+        return {"available": False, "limited": True, "error": str(e)}
 
 
 @router.get("/health/errors")

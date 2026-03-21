@@ -67,4 +67,19 @@ describe('windowsStore', () => {
     expect(state.windows.finder.fullscreen).toBe(false);
     expect(state.windows.finder.bounds).toEqual(originalBounds);
   });
+
+  it('syncs missing app registry entries into an existing hot-reloaded store', () => {
+    const state = useWindowsStore.getState();
+    const { ['activity-monitor']: _removed, ...nextWindows } = state.windows;
+
+    useWindowsStore.setState({
+      windows: nextWindows as unknown as ReturnType<typeof createInitialWindowsState>,
+    });
+    expect(useWindowsStore.getState().windows['activity-monitor']).toBeUndefined();
+
+    useWindowsStore.getState().syncRegistry();
+
+    expect(useWindowsStore.getState().windows['activity-monitor']).toBeDefined();
+    expect(useWindowsStore.getState().windows['activity-monitor'].open).toBe(false);
+  });
 });

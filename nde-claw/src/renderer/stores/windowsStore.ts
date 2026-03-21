@@ -31,6 +31,7 @@ type WindowsStore = {
   activeAppId: AppId;
   activeZIndex: number;
   windows: Record<AppId, WindowState>;
+  syncRegistry: () => void;
   setViewport: (viewport: { width: number; height: number }) => void;
   openApp: (appId: AppId) => void;
   closeApp: (appId: AppId) => void;
@@ -93,6 +94,25 @@ export function createInitialWindowsState() {
   return windows;
 }
 
+function syncWindowsWithRegistry(windows: Record<AppId, WindowState>) {
+  const nextWindows = { ...windows } as Record<AppId, WindowState>;
+
+  for (const appId of Object.keys(appRegistry) as AppId[]) {
+    if (!nextWindows[appId]) {
+      nextWindows[appId] = {
+        open: Boolean(appRegistry[appId].initiallyOpen),
+        zIndex: 0,
+        fullscreen: false,
+        isDragging: false,
+        bounds: null,
+        previousBounds: null,
+      };
+    }
+  }
+
+  return nextWindows;
+}
+
 function normalizeZIndices(windows: Record<AppId, WindowState>, activeZIndex: number) {
   const values = Object.values(windows).map((windowState) => windowState.zIndex);
 
@@ -123,6 +143,10 @@ export const useWindowsStore = create<WindowsStore>()((set, get) => ({
   activeAppId: 'finder',
   activeZIndex: -2,
   windows: createInitialWindowsState(),
+  syncRegistry: () =>
+    set((state) => ({
+      windows: syncWindowsWithRegistry(state.windows),
+    })),
   setViewport: (viewport) => set({ viewport }),
   openApp: (appId) =>
     set((state) => {

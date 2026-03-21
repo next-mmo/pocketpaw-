@@ -12,6 +12,35 @@
 WhatsApp, or a web dashboard. It operates on the user's machine with configurable tool access
 and safety guardrails.
 
+## Client Frontends
+
+PocketPaw has **three client frontends** that all connect to the same Python backend on `:8888`:
+
+| Client | Directory | Tech Stack | Auth Method |
+|---|---|---|---|
+| **Web Dashboard** | `src/pocketpaw/` (served by backend) | Jinja2 templates + vanilla JS | Localhost bypass or `?token=` query param |
+| **Tauri Desktop** | `client/` | SvelteKit 5 + Tailwind 4 + shadcn-svelte + Rust | OAuth PKCE → session cookie → WS cookie auth |
+| **Electron Desktop** | `nde-claw/` | React 19 + TanStack Router/Query + Zustand + Tailwind 4 | IPC token read → session cookie (via main process) → WS cookie auth |
+
+### Electron App (`nde-claw/`)
+
+- **Main process** (`electron/main.ts`): Spawns the PocketPaw backend via `uv run pocketpaw serve`,
+  reads access token from `~/.pocketpaw/config.toml`, exchanges it for a session cookie via
+  `POST /api/v1/auth/login`, and sets the cookie on the renderer session.
+- **Preload** (`electron/preload.ts`): Exposes `window.desktop` API (type: `DesktopApi` from `src/shared/desktop.ts`).
+- **Renderer** (`src/renderer/`): React SPA with hash routing. Auth is managed by `stores/authStore.ts`,
+  WebSocket by `lib/ws/PocketPawWebSocket.ts`. All REST goes through an Axios client (`lib/http/client.ts`)
+  with a request interceptor that injects `Bearer` token from IPC.
+- **WebSocket events**: Typed via `lib/ws/types.ts`. React hooks: `useWebSocket('event_type', handler)`.
+- **Design language**: macOS 26 Tahoe (see `nde-claw/AGENTS.md`).
+
+### Shared Auth Architecture
+
+All three clients ultimately authenticate against the same backend middleware (`src/pocketpaw/dashboard_auth.py`).
+The token resolution order is: query param → Bearer header → session cookie → API key (`pp_*`) →
+OAuth token (`ppat_*`) → extension token (`pex_*`) → localhost bypass. The WebSocket endpoint
+(`/api/v1/ws`) validates the `pocketpaw_session` cookie set by `POST /api/v1/auth/login`.
+
 ## Supported Backends
 
 PocketPaw can delegate to any of the following AI backends:

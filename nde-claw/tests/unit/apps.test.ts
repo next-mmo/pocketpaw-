@@ -16,5 +16,7 @@ describe('app registry', () => {
     expect(appRegistry.wallpapers.routePath).toBe('/app/wallpapers');
     expect(appRegistry.calendar.defaultBounds.width).toBeGreaterThan(800);
     expect(appRegistry['view-source'].href).toBe('https://github.com/puruvj/macos-web');
+    expect(appRegistry['activity-monitor'].routePath).toBe('/app/activity-monitor');
+    expect(appRegistry['activity-monitor'].title).toBe('Activity Monitor');
   });
 });
