@@ -9,25 +9,33 @@ export type MenuSection = {
   menu: Record<string, MenuEntry>;
 };
 
-const appleMenu = {
-  title: 'apple',
-  menu: {
-    'about-this-mac': { title: 'About This Mac', breakAfter: true },
-    'system-preferences': { title: 'System Preferences...' },
-    'app-store': { title: 'App Store...', breakAfter: true },
-    launchpad: { title: 'Launchpad', breakAfter: true },
-    'recent-items': { title: 'Recent Items', breakAfter: true },
-    'force-quit': { title: 'Force Quit...', breakAfter: true },
-    sleep: { title: 'Sleep' },
-    restart: { title: 'Restart...' },
-    shutdown: { title: 'Shut Down...', breakAfter: true },
-    'lock-screen': { title: 'Lock Screen' },
-    logout: { title: 'Log Out User...' },
-  },
-} satisfies MenuSection;
+const appleMenu = (userName = 'User') =>
+  ({
+    title: 'apple',
+    menu: {
+      'about-this-mac': { title: 'About This Mac', breakAfter: true },
+      'system-preferences': { title: 'System Preferences...' },
+      'app-store': { title: 'App Store...', breakAfter: true },
+      launchpad: { title: 'Launchpad', breakAfter: true },
+      'recent-items': { title: 'Recent Items', breakAfter: true },
+      'force-quit': { title: 'Force Quit...', breakAfter: true },
+      sleep: { title: 'Sleep' },
+      restart: { title: 'Restart...' },
+      shutdown: { title: 'Shut Down...', breakAfter: true },
+      'lock-screen': { title: 'Lock Screen' },
+      logout: { title: `Log Out ${userName}…` },
+    },
+  }) satisfies MenuSection;
+
+export function buildFinderMenus(userName?: string) {
+  return {
+    ...finderMenus,
+    apple: appleMenu(userName),
+  };
+}
 
 export const finderMenus = {
-  apple: appleMenu,
+  apple: appleMenu(),
   default: {
     title: 'Finder',
     menu: {

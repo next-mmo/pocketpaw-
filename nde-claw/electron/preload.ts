@@ -15,7 +15,11 @@ const desktopApi: DesktopApi = {
     getAccessToken: () => ipcRenderer.invoke('pocketpaw:get-access-token'),
     getBackendStatus: () => ipcRenderer.invoke('pocketpaw:get-backend-status'),
     getWsUrl: () => ipcRenderer.invoke('pocketpaw:get-ws-url'),
-    loginForSession: () => ipcRenderer.invoke('pocketpaw:login-for-session'),
+    readOAuthTokens: () => ipcRenderer.invoke('pocketpaw:read-oauth-tokens'),
+    startOAuthFlow: () => ipcRenderer.invoke('pocketpaw:start-oauth-flow'),
+    refreshOAuthTokens: () => ipcRenderer.invoke('pocketpaw:refresh-oauth-tokens'),
+    clearOAuthTokens: () => ipcRenderer.invoke('pocketpaw:clear-oauth-tokens'),
+    loginForSession: (token?: string) => ipcRenderer.invoke('pocketpaw:login-for-session', token),
     openExtension: (url: string, title: string) =>
       ipcRenderer.invoke('pocketpaw:open-extension', { url, title }),
     onBackendStatusChanged: (callback: (status: string) => void) => {

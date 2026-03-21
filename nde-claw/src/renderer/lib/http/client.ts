@@ -1,4 +1,5 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import { clearTokens, readTokens, refreshAccessToken } from '@/lib/auth';
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:8888';
 
@@ -37,10 +38,16 @@ apiClient.interceptors.request.use(async (config) => {
   // Otherwise, try IPC (first request before auth store is ready)
   try {
     if (window.desktop?.pocketpaw) {
-      const token = await window.desktop.pocketpaw.getAccessToken();
-      if (token) {
-        cachedToken = token;
-        config.headers.Authorization = `Bearer ${token}`;
+      const tokens = await readTokens();
+      if (tokens?.access_token) {
+        cachedToken = tokens.access_token;
+        config.headers.Authorization = `Bearer ${tokens.access_token}`;
+      } else {
+        const token = await window.desktop.pocketpaw.getAccessToken();
+        if (token) {
+          cachedToken = token;
+          config.headers.Authorization = `Bearer ${token}`;
+        }
       }
       const baseUrl = await window.desktop.pocketpaw.getApiBaseUrl();
       if (baseUrl) {
@@ -98,26 +105,24 @@ apiClient.interceptors.response.use(
     isRefreshing = true;
 
     try {
-      // Re-read token from the main process (it may have been rotated)
-      if (window.desktop?.pocketpaw) {
-        const freshToken = await window.desktop.pocketpaw.getAccessToken();
-        if (freshToken) {
-          cachedToken = freshToken;
+      const tokens = await readTokens();
+      if (tokens?.refresh_token) {
+        const refreshed = await refreshAccessToken(tokens);
+        cachedToken = refreshed.access_token;
 
-          // Also try to refresh the session cookie
-          try {
-            await window.desktop.pocketpaw.loginForSession();
-          } catch {
-            // Non-fatal
-          }
-
-          onTokenRefreshed(freshToken);
-          originalRequest.headers.Authorization = `Bearer ${freshToken}`;
-          return apiClient(originalRequest);
+        try {
+          await window.desktop?.pocketpaw.loginForSession(refreshed.access_token);
+        } catch {
+          // Non-fatal.
         }
+
+        onTokenRefreshed(refreshed.access_token);
+        originalRequest.headers.Authorization = `Bearer ${refreshed.access_token}`;
+        return apiClient(originalRequest);
       }
     } catch {
-      // IPC failure — reject
+      cachedToken = null;
+      void clearTokens().catch(() => {});
     } finally {
       isRefreshing = false;
     }

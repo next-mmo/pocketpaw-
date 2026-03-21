@@ -1,6 +1,9 @@
+import { AuthOverlay } from '@/components/auth/AuthOverlay';
+import { OnboardingOverlay } from '@/components/overlays/OnboardingOverlay';
 import { Outlet } from '@tanstack/react-router';
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools';
 import { DesktopShell } from '@/components/desktop/DesktopShell';
+import { useAuth } from '@/hooks/useAuth';
 import { useBackendConnection } from '@/hooks/useBackendConnection';
 import { useDesktopBootstrap } from '@/hooks/useDesktopBootstrap';
 import { useDesktopRouteSync } from '@/hooks/useDesktopRouteSync';
@@ -15,6 +18,7 @@ export function DesktopRoot() {
   useWallpaperScheduler();
   useDesktopRouteSync();
   useBackendConnection();
+  const auth = useAuth();
   const syncRegistry = useWindowsStore((state) => state.syncRegistry);
 
   useEffect(() => {
@@ -24,6 +28,8 @@ export function DesktopRoot() {
   return (
     <>
       <DesktopShell />
+      <OnboardingOverlay />
+      <AuthOverlay auth={auth} />
       <Outlet />
       {import.meta.env.DEV ? <TanStackRouterDevtools position="bottom-right" /> : null}
     </>

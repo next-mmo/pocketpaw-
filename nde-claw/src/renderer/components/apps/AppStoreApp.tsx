@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import type { AppId } from '@/lib/apps';
 import { useExtensions, type Extension } from '@/hooks/usePocketPaw';
 import { useConnectionStore } from '@/stores/connectionStore';
 import { apiClient } from '@/lib/http/client';
 import { usePluginLifecycle, type PluginStatus } from '@/hooks/usePluginLifecycle';
+
+// ── Native extension overrides (rendered instead of iframe) ─────────
+const NATIVE_EXTENSIONS: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
+  'anti-browser': lazy(() => import('./anti-browser/AntiBrowserApp')),
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 const IC: Record<string, string> = {
@@ -244,6 +249,7 @@ function ActiveExtView({ ext, refetchAll }: { ext: Extension; refetchAll: () => 
 
   const needsInstall = ext.is_plugin && pl.state.status !== 'running';
   const src = frameSrc(ext);
+  const NativeComp = NATIVE_EXTENSIONS[ext.id] ?? null;
 
   const toggleDrawer = (t: DrawerTab) => setDrawer(cur => cur === t ? null : t);
   const openLogs = () => { setDrawer('logs'); };
@@ -269,9 +275,18 @@ function ActiveExtView({ ext, refetchAll }: { ext: Extension; refetchAll: () => 
 
       {/* Content */}
       <div className="flex flex-1 min-h-0 relative">
-        {/* Install screen OR iframe */}
+        {/* Install screen OR native component OR iframe */}
         {needsInstall ? (
           <InstallScreen ext={ext} ps={pl.state} onInstall={pl.install} onStart={pl.start} onReinstall={pl.reinstall} onUninstall={pl.uninstall} onViewLogs={openLogs} />
+        ) : NativeComp ? (
+          /* Native rendering — no iframe, direct React component */
+          <Suspense fallback={
+            <div className="flex flex-1 items-center justify-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-500" />
+            </div>
+          }>
+            <NativeComp />
+          </Suspense>
         ) : (
           <div className="relative flex-1">
             {loading && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4" style={{ background: '#111' }}>

@@ -1263,6 +1263,260 @@ body.dark .dock-tooltip {
   backdrop-filter: blur(8px);
 }
 
+.desktop-auth-overlay,
+.desktop-auth-atmosphere {
+  position: absolute;
+  inset: 0;
+}
+
+.desktop-auth-overlay {
+  z-index: 55;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.desktop-auth-atmosphere {
+  background:
+    radial-gradient(circle at 16% 20%, rgba(111, 193, 255, 0.2), transparent 24%),
+    radial-gradient(circle at 84% 18%, rgba(255, 190, 117, 0.16), transparent 20%),
+    linear-gradient(180deg, rgba(7, 10, 18, 0.14), rgba(7, 10, 18, 0.56));
+  backdrop-filter: blur(20px) saturate(1.1);
+}
+
+.desktop-auth-panel {
+  position: relative;
+  z-index: 1;
+  width: min(42rem, calc(100vw - 2rem));
+  display: grid;
+  gap: 1.4rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 2rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.08)),
+    rgba(8, 14, 24, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 28px 80px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(28px) saturate(1.12);
+  color: white;
+}
+
+.desktop-auth-header,
+.desktop-auth-status-row,
+.desktop-auth-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.desktop-auth-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.desktop-auth-chip-muted {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.desktop-auth-hero {
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.desktop-auth-orb {
+  display: grid;
+  width: 6.4rem;
+  height: 6.4rem;
+  place-items: center;
+  border-radius: 2rem;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.08)),
+    linear-gradient(135deg, rgba(78, 156, 255, 0.32), rgba(255, 184, 111, 0.22));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 24px 50px rgba(0, 0, 0, 0.22);
+}
+
+.desktop-auth-orb-core {
+  display: grid;
+  width: 4.8rem;
+  height: 4.8rem;
+  place-items: center;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.18)),
+    rgba(11, 18, 30, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.desktop-auth-copy {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.desktop-auth-kicker,
+.desktop-auth-step p,
+.desktop-auth-status-label,
+.desktop-auth-status-note,
+.desktop-auth-error,
+.desktop-auth-copy p {
+  margin: 0;
+}
+
+.desktop-auth-kicker,
+.desktop-auth-step p {
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.desktop-auth-copy h1,
+.desktop-auth-step strong {
+  margin: 0;
+}
+
+.desktop-auth-copy h1 {
+  max-width: 18ch;
+  font-size: clamp(2.1rem, 4vw, 3rem);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+}
+
+.desktop-auth-copy p,
+.desktop-auth-status-note {
+  color: rgba(255, 255, 255, 0.76);
+  line-height: 1.6;
+}
+
+.desktop-auth-status-row {
+  padding: 1rem 1.05rem;
+  border-radius: 1.4rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.desktop-auth-spinner-shell {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.desktop-auth-spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  border-top-color: white;
+  border-radius: 999px;
+  animation: desktop-auth-spin 850ms linear infinite;
+}
+
+.desktop-auth-status-label {
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.desktop-auth-step-grid {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.desktop-auth-step {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.3rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.desktop-auth-step strong {
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+.desktop-auth-step-done {
+  border-color: rgba(151, 255, 173, 0.26);
+  background: rgba(76, 190, 112, 0.12);
+}
+
+.desktop-auth-step-active {
+  border-color: rgba(117, 186, 255, 0.24);
+  background: rgba(53, 128, 255, 0.12);
+}
+
+.desktop-auth-error {
+  border-radius: 1.2rem;
+  padding: 0.95rem 1rem;
+  background: rgba(255, 98, 98, 0.12);
+  color: rgba(255, 221, 221, 0.96);
+  line-height: 1.55;
+}
+
+.desktop-auth-actions {
+  justify-content: flex-end;
+}
+
+.desktop-auth-primary,
+.desktop-auth-secondary {
+  border-radius: 999px;
+  padding: 0.82rem 1.15rem;
+  font-weight: 700;
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease,
+    background 160ms ease;
+}
+
+.desktop-auth-primary {
+  background: linear-gradient(135deg, #0a84ff, #59c4ff);
+  color: white;
+}
+
+.desktop-auth-secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+.desktop-auth-primary:hover,
+.desktop-auth-primary:focus-visible,
+.desktop-auth-secondary:hover,
+.desktop-auth-secondary:focus-visible {
+  transform: translateY(-1px);
+}
+
+.desktop-auth-secondary:disabled {
+  opacity: 0.7;
+}
+
+@keyframes desktop-auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .modal-card {
   width: min(28rem, calc(100vw - 2rem));
   display: flex;
@@ -1968,6 +2222,34 @@ body.dark ::-webkit-scrollbar-thumb {
   .lock-screen-unlock-button {
     width: 100%;
     border-radius: 999px;
+  }
+
+  .desktop-auth-panel {
+    gap: 1.1rem;
+    padding: 1.2rem;
+    border-radius: 1.6rem;
+  }
+
+  .desktop-auth-header,
+  .desktop-auth-hero,
+  .desktop-auth-status-row,
+  .desktop-auth-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .desktop-auth-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .desktop-auth-step-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-auth-actions {
+    justify-content: stretch;
   }
 
   .wallpaper-current {

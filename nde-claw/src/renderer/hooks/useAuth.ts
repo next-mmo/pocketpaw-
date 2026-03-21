@@ -11,7 +11,18 @@ import { useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 
 /** Boot the auth flow on mount. Call once in the root layout. */
-export function useAuth() {
+export type UseAuthResult = {
+  authState: ReturnType<typeof useAuthStore.getState>['authState'];
+  authError: string | null;
+  wsState: ReturnType<typeof useAuthStore.getState>['wsState'];
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  isError: boolean;
+  retry: () => Promise<void>;
+  logout: () => void;
+};
+
+export function useAuth(): UseAuthResult {
   const authState = useAuthStore((s) => s.authState);
   const authError = useAuthStore((s) => s.authError);
   const wsState = useAuthStore((s) => s.wsState);

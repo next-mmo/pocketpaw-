@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { usePreferencesStore } from '@/stores/preferencesStore';
 import { useSystemStore } from '@/stores/systemStore';
+import { useUserProfileStore } from '@/stores/userProfileStore';
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
@@ -24,6 +25,8 @@ export function LockScreenOverlay() {
   const unlock = useSystemStore((state) => state.unlock);
   const wallpaperImage = usePreferencesStore((state) => state.wallpaper.image);
   const reducedMotion = usePreferencesStore((state) => state.reducedMotion);
+  const userName = useUserProfileStore((state) => state.name) || 'User';
+  const userInitials = useUserProfileStore((state) => state.initials) || '?';
   const [password, setPassword] = useState('');
   const [now, setNow] = useState(() => new Date());
   const [isUnlocking, setIsUnlocking] = useState(false);
@@ -143,11 +146,11 @@ export function LockScreenOverlay() {
           }}
         >
           <div aria-hidden="true" className="lock-screen-avatar">
-            MM
+            {userInitials}
           </div>
 
           <div className="lock-screen-auth-copy">
-            <h2>MMO User</h2>
+            <h2>{userName}</h2>
             <p>{hostLabel}</p>
           </div>
 

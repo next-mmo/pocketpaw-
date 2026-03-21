@@ -1,11 +1,14 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { appRegistry } from '@/config/apps';
+import { buildFinderMenus } from '@/config/menus';
 import { useOnClickOutside } from '@/hooks/useOnClickOutside';
 import { launchApp } from '@/lib/launchApp';
 import { openExternal } from '@/lib/utils/desktop';
+import { useAuthStore } from '@/stores/authStore';
 import { useLaunchpadStore } from '@/stores/launchpadStore';
 import { useMenuBarStore } from '@/stores/menuBarStore';
 import { useSystemStore } from '@/stores/systemStore';
+import { useUserProfileStore } from '@/stores/userProfileStore';
 import { MenuPopover } from './MenuPopover';
 
 export function MenuBar() {
@@ -17,6 +20,11 @@ export function MenuBar() {
   const openLaunchpad = useLaunchpadStore((state) => state.open);
   const closeLaunchpad = useLaunchpadStore((state) => state.close);
   const lockDesktop = useSystemStore((state) => state.lock);
+  const authLogout = useAuthStore((state) => state.logout);
+  const userName = useUserProfileStore((state) => state.name);
+
+  // Rebuild menus with the user's name for the "Log Out <Name>…" item
+  const dynamicMenus = useMemo(() => buildFinderMenus(userName || undefined), [userName]);
 
   useOnClickOutside(containerRef, closeMenu);
 
@@ -33,6 +41,11 @@ export function MenuBar() {
           break;
         case 'lock-screen':
           closeLaunchpad();
+          lockDesktop();
+          break;
+        case 'logout':
+          closeLaunchpad();
+          authLogout();
           lockDesktop();
           break;
         case 'system-preferences':
@@ -53,12 +66,12 @@ export function MenuBar() {
           break;
       }
     },
-    [closeLaunchpad, closeMenu, lockDesktop, openLaunchpad],
+    [authLogout, closeLaunchpad, closeMenu, lockDesktop, openLaunchpad],
   );
 
   return (
     <div className="menu-bar" ref={containerRef}>
-      {Object.entries(menus).map(([menuId, menuSection]) => (
+      {Object.entries(dynamicMenus).map(([menuId, menuSection]) => (
         <div className="menu-button-group" key={menuId}>
           <button
             className="menu-button no-drag"
