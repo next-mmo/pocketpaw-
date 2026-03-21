@@ -228,13 +228,8 @@ export async function startBackend(onStatus = () => {}) {
     cmd = binaryPath
     args = ['--port', String(currentPort)]
     onStatus('Starting PocketPaw…')
-  } else if (existsSync(python)) {
-    // ── Strategy 3: Existing venv Python ──
-    cmd = python
-    args = ['-m', 'pocketpaw', '--port', String(currentPort)]
-    onStatus('Starting via Python environment…')
   } else {
-    // ── Strategy 2: Bootstrap from bundled wheel ──
+    // ── Strategy 2: Bootstrap from bundled wheel (preferred for distribution) ──
     const bundle = getBundledWheel()
     if (bundle) {
       try {
@@ -246,6 +241,11 @@ export async function startBackend(onStatus = () => {}) {
         onStatus(`Bootstrap failed: ${err.message}`)
         return { ok: false, port: currentPort, message: err.message }
       }
+    } else if (existsSync(python)) {
+      // ── Strategy 3: Existing venv Python ──
+      cmd = python
+      args = ['-m', 'pocketpaw', '--port', String(currentPort)]
+      onStatus('Starting via Python environment…')
     } else {
       // ── Strategy 4: System command ──
       cmd = 'pocketpaw'

@@ -1315,7 +1315,32 @@ window.PocketPaw.Extensions = {
         const ps = this._getPluginState(pluginId);
         ps.status = 'running';
         await this._activatePluginFrame(pluginId);
+      },
 
+      /**
+       * Stop a running plugin daemon.
+       */
+      async stopPlugin(pluginId) {
+        const ps = this._getPluginState(pluginId);
+        if (ps.status !== 'running') return;
+
+        try {
+          const resp = await fetch(`/api/v1/plugins/${pluginId}/stop`, {
+            method: 'POST',
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Stop request failed');
+          }
+          ps.status = 'stopped';
+          // Clear iframe so install screen shows
+          delete this.extensionsHost.frameSrcs[pluginId];
+          this.showToast('Service stopped', 'success');
+          this._refreshIcons();
+        } catch (error) {
+          console.error('Plugin stop failed:', error);
+          this.showToast(error.message || 'Stop failed', 'error');
+        }
       },
 
       /**
@@ -1377,6 +1402,12 @@ window.PocketPaw.Extensions = {
 
         // Clear iframe src so the install screen shows
         delete this.extensionsHost.frameSrcs[pluginId];
+
+        // Auto-open the logs drawer
+        this.extensionsHost.drawerOpen = true;
+        this.extensionsHost.drawerTab = 'logs';
+        this.extensionsHost.drawerLogs = [];
+        this.$nextTick(() => { this._refreshIcons(); });
 
         try {
           const resp = await fetch(`/api/v1/plugins/${pluginId}/update`, {

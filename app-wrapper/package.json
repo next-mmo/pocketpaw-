@@ -1,6 +1,6 @@
 {
   "name": "pocketpaw-desktop",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "description": "PocketPaw Desktop — Electron wrapper for the self-hosted AI agent",
   "author": "PocketPaw Team <hello@pocketpaw.ai>",
   "main": "./out/main/index.js",
@@ -8,15 +8,16 @@
     "dev": "electron-vite dev",
     "build:backend": "python scripts/build-backend.py",
     "build:backend:onefile": "python scripts/build-backend.py --onefile",
+    "build:bundle": "bash scripts/bundle-backend.sh",
     "build:electron": "electron-vite build",
     "compile:bytecode": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/compile-bytecode.js",
-    "build": "npm run build:backend && npm run build:electron",
+    "build": "npm run build:bundle && npm run build:electron",
     "build:secure": "npm run build:electron && npm run compile:bytecode || echo 'Bytecode compilation skipped (optional)'",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "release:win": "npm run build:secure && electron-builder --win --publish never",
-    "release:mac": "npm run build:secure && electron-builder --mac --publish never",
-    "release:linux": "npm run build:secure && electron-builder --linux --publish never",
+    "release:win": "npm run build:bundle && npm run build:secure && electron-builder --win --publish never",
+    "release:mac": "npm run build:bundle && npm run build:secure && electron-builder --mac --publish never",
+    "release:linux": "npm run build:bundle && npm run build:secure && electron-builder --linux --publish never",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

@@ -78,6 +78,7 @@ PocketPaw can delegate to any of the following AI backends:
 - ❌ Logging API keys, tokens, or user PII
 - ❌ Unauthenticated REST endpoints — all routes require existing auth middleware
 - ❌ Creating new event types on the message bus without updating `bus/events.py`
+- ❌ Writing temporary/scratch files to the repository root — use `.tmp/` instead (see below)
 
 ## Project-Specific Instructions for AI Agents
 
@@ -91,6 +92,9 @@ When working on this repository:
 5. Run `uv run ruff check .` and `uv run pytest --ignore=tests/e2e` before committing.
 6. New secret fields must be added to `SECRET_FIELDS` in `credentials.py`.
 7. Every new `AgentBackend` must yield `AgentEvent(type="done", ...)` as its final event.
+8. **Temporary files** (screenshots, debug scripts, scratch data, logs) must be written to
+   `.tmp/` at the repository root — never to the root directory itself. The `.tmp/` folder
+   is gitignored and auto-cleaned. Create it if it does not exist.
 
 ## Tool Policy Groups
 

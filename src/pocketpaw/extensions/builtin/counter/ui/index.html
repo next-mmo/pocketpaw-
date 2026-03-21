@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Counter</title>
+  <script src="/static/js/extensions-sdk.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5/dist/reset.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -18,14 +19,14 @@
 <body>
   <div id="root"></div>
   <script type="text/babel" data-type="module">
-    const { ConfigProvider, Button, Card, Space, Slider, Typography, Tag, Statistic, Divider, Tooltip, theme, Flex, Badge } = antd;
-    const { Title, Text, Paragraph } = Typography;
+    const { ConfigProvider, Button, Card, Space, Slider, Typography, Tag, Flex, theme } = antd;
+    const { Title, Text } = Typography;
     const { useState, useEffect, useCallback } = React;
 
-    /* ── API helper ── */
-    const API = window.location.origin;
+    /* ── API helper — uses proxy route through PocketPaw ── */
+    const API_BASE = window.location.origin + '/api/v1/plugins/counter/proxy';
     const api = (path, opts = {}) =>
-      fetch(`${API}/api/v1/plugins/counter/proxy/api${path}`, {
+      fetch(`${API_BASE}/api${path}`, {
         ...opts,
         headers: { 'Content-Type': 'application/json', ...opts.headers },
       }).then(r => r.json());
@@ -42,7 +43,7 @@
           setCount(data.count);
           setStep(data.step);
           setHistory(data.history || []);
-        } catch(e) { console.error(e); }
+        } catch(e) { console.error('Counter API error:', e); }
         setLoading(false);
       }, []);
 
@@ -54,29 +55,27 @@
           const data = await api(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
           if (data.count !== undefined) setCount(data.count);
           if (data.step !== undefined) setStep(data.step);
-          // Re-fetch full state for history
           const full = await api('/state');
           setHistory(full.history || []);
-        } catch(e) { console.error(e); }
+        } catch(e) { console.error('Counter action error:', e); }
         setLoading(false);
       };
 
       return (
-        <ConfigProvider
-          theme={{
-            algorithm: theme.darkAlgorithm,
-            token: {
-              colorPrimary: '#4096ff',
-              borderRadius: 12,
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif',
-              colorBgContainer: '#141414',
-              colorBgElevated: '#1a1a1a',
-              colorBorder: 'rgba(255,255,255,0.08)',
-            },
-          }}
-        >
+        <ConfigProvider theme={{
+          algorithm: theme.darkAlgorithm,
+          token: {
+            colorPrimary: '#4096ff',
+            borderRadius: 12,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif',
+            colorBgContainer: '#141414',
+            colorBgElevated: '#1a1a1a',
+            colorBorder: 'rgba(255,255,255,0.08)',
+          },
+        }}>
           <Flex vertical align="center" justify="center" style={{ minHeight: '100vh', padding: 24 }}>
             <div style={{ width: '100%', maxWidth: 420 }}>
+
               {/* Header */}
               <Flex vertical align="center" gap={4} style={{ marginBottom: 24 }}>
                 <Text style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>
@@ -89,52 +88,29 @@
               </Flex>
 
               {/* Counter Display */}
-              <Card
-                style={{ background: '#111', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 16, textAlign: 'center' }}
-                styles={{ body: { padding: '32px 24px' } }}
-              >
+              <Card style={{ background: '#111', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 16, textAlign: 'center' }}
+                    styles={{ body: { padding: '32px 24px' } }}>
                 <div style={{
-                  fontSize: 72,
-                  fontWeight: 800,
-                  letterSpacing: '-0.04em',
+                  fontSize: 72, fontWeight: 800, letterSpacing: '-0.04em',
                   fontVariantNumeric: 'tabular-nums',
                   background: 'linear-gradient(135deg, #4096ff, #69b1ff)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  lineHeight: 1.1,
-                  transition: 'transform 0.15s ease',
-                  userSelect: 'none',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  lineHeight: 1.1, userSelect: 'none',
                 }}>
                   {count}
                 </div>
               </Card>
 
-              {/* Main Controls */}
-              <Card
-                style={{ background: '#111', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}
-                styles={{ body: { padding: 16 } }}
-              >
+              {/* Controls */}
+              <Card style={{ background: '#111', border: '1px solid rgba(255,255,255,0.06)', marginBottom: 12 }}
+                    styles={{ body: { padding: 16 } }}>
                 <Flex gap={8}>
-                  <Button
-                    size="large"
-                    block
-                    onClick={() => doAction('/decrement')}
-                    style={{ height: 48, fontSize: 22, fontWeight: 700, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
-                  >−</Button>
-                  <Button
-                    size="large"
-                    block
-                    danger
-                    onClick={() => doAction('/reset')}
-                    style={{ height: 48, fontWeight: 600 }}
-                  >Reset</Button>
-                  <Button
-                    size="large"
-                    block
-                    type="primary"
-                    onClick={() => doAction('/increment')}
-                    style={{ height: 48, fontSize: 22, fontWeight: 700 }}
-                  >+</Button>
+                  <Button size="large" block onClick={() => doAction('/decrement')}
+                    style={{ height: 48, fontSize: 22, fontWeight: 700, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}>−</Button>
+                  <Button size="large" block danger onClick={() => doAction('/reset')}
+                    style={{ height: 48, fontWeight: 600 }}>Reset</Button>
+                  <Button size="large" block type="primary" onClick={() => doAction('/increment')}
+                    style={{ height: 48, fontSize: 22, fontWeight: 700 }}>+</Button>
                 </Flex>
 
                 {/* Step slider */}
@@ -143,39 +119,28 @@
                     <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Step Size</Text>
                     <Tag color="blue" style={{ borderRadius: 10, fontSize: 11 }}>{step}</Tag>
                   </Flex>
-                  <Slider
-                    min={1}
-                    max={100}
-                    value={step}
+                  <Slider min={1} max={100} value={step}
                     onChange={(v) => setStep(v)}
-                    onChangeComplete={(v) => doAction(`/set-step?step=${v}`)}
-                  />
+                    onChangeComplete={(v) => doAction(`/set-step?step=${v}`)} />
                 </div>
 
                 {/* Quick buttons */}
                 <Text style={{ display: 'block', textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.25)', margin: '8px 0' }}>Quick Changes</Text>
                 <Flex gap={8}>
                   {[-10, -5, 5, 10].map(n => (
-                    <Button
-                      key={n}
-                      block
-                      size="small"
-                      type={n > 0 ? 'primary' : 'default'}
-                      ghost={n > 0}
-                      onClick={() => doAction(`/quick?delta=${n}`)}
-                      style={{ fontWeight: 600 }}
-                    >{n > 0 ? `+${n}` : n}</Button>
+                    <Button key={n} block size="small" type={n > 0 ? 'primary' : 'default'} ghost={n > 0}
+                      onClick={() => doAction(`/quick?delta=${n}`)} style={{ fontWeight: 600 }}>
+                      {n > 0 ? `+${n}` : n}
+                    </Button>
                   ))}
                 </Flex>
               </Card>
 
               {/* History */}
-              <Card
-                size="small"
+              <Card size="small"
                 title={<Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>📜 History</Text>}
                 style={{ background: '#111', border: '1px solid rgba(255,255,255,0.06)' }}
-                styles={{ body: { padding: '8px 12px', maxHeight: 80, overflowY: 'auto' } }}
-              >
+                styles={{ body: { padding: '8px 12px', maxHeight: 80, overflowY: 'auto' } }}>
                 <Text style={{ fontSize: 11, fontFamily: '"SF Mono", "Fira Code", monospace', color: 'rgba(255,255,255,0.4)', wordBreak: 'break-all' }}>
                   {history.length > 0 ? history.slice(-20).join(' → ') : '(no operations yet)'}
                 </Text>

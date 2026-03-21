@@ -1,0 +1,5 @@
+*.whl
+*.dist/
+uv/
+pocketpaw-server*
+!.gitignore

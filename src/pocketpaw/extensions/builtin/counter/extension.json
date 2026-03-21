@@ -1,8 +1,8 @@
 {
   "id": "counter",
   "name": "Counter (Demo)",
-  "version": "2.0.0",
-  "description": "Official demo — full-stack plugin with Python backend, Gradio UI, FastAPI REST API, and persistent state.",
+  "version": "3.0.0",
+  "description": "Official demo — full-stack plugin with Python backend, Ant Design UI, FastAPI REST API, and persistent state.",
   "icon": "hash",
   "route": "counter",
   "entry": "index.html",
@@ -11,10 +11,7 @@
   "scopes": ["storage.read", "storage.write", "host.open_chat"],
   "sandbox": {
     "python": "3.11",
-    "venv": "env",
-    "env": {
-      "GRADIO_SERVER_NAME": "127.0.0.1"
-    }
+    "venv": "env"
   },
   "install": {
     "steps": [

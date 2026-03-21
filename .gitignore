@@ -62,6 +62,18 @@ idocs/
 *.pyo
 
 temp
+.tmp/
+
+# Stray agent-generated files (screenshots, etc.)
+*.png
+*.jpg
+*.jpeg
+!/src/**/*.png
+!/src/**/*.jpg
+!/docs/**/*.png
+!/docs/**/*.jpg
+!/client/**/*.png
+!/client/**/*.jpg
 
 # Client (Tauri + SvelteKit)
 node_modules/
