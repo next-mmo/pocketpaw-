@@ -91,3 +91,4 @@ client/bun.lock
 .playwright-mcp/
 nul
 private.key
+out

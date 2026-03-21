@@ -1,0 +1,1973 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: var(--system-font-family);
+  --radius: 0.625rem;
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+}
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 3.9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96.1%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 96.1%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 0 0% 3.9%;
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-accent: 240 4.8% 95.9%;
+  --sidebar-accent-foreground: 240 5.9% 10%;
+  --sidebar-border: 220 13% 91%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+}
+
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
+  --sidebar: 240 5.9% 10%;
+  --sidebar-foreground: 240 4.8% 95.9%;
+  --sidebar-accent: 240 3.7% 15.9%;
+  --sidebar-accent-foreground: 240 4.8% 95.9%;
+  --sidebar-border: 240 3.7% 15.9%;
+  --sidebar-ring: 217.2 91.2% 59.8%;
+}
+
+:root {
+  --window-titlebar-height: 2rem;
+  --topbar-height: 1.8rem;
+  --dock-height: 5.4rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body,
+body[data-theme='light'] {
+  --system-color-primary: hsl(211, 100%, 50%);
+  --system-color-primary-hsl: 211, 100%, 50%;
+  --system-color-primary-contrast: hsl(240, 24%, 100%);
+  --system-color-primary-contrast-hsl: 240, 24%, 100%;
+  --system-color-dark: hsl(240, 3%, 11%);
+  --system-color-dark-hsl: 240, 3%, 11%;
+  --system-color-dark-contrast: hsl(240, 24%, 100%);
+  --system-color-dark-contrast-hsl: 240, 24%, 100%;
+  --system-color-light: hsl(240, 24%, 100%);
+  --system-color-light-hsl: 240, 24%, 100%;
+  --system-color-light-contrast: hsl(0, 0%, 11%);
+  --system-color-light-contrast-hsl: 0, 0%, 11%;
+  --system-font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  --system-focus-outline: 0 0 0 3px hsla(var(--system-color-primary-hsl), 0.5);
+  --system-cursor-default: auto;
+}
+
+body.dark {
+  --system-color-primary: hsl(210, 100%, 52%);
+  --system-color-primary-hsl: 210, 100%, 52%;
+  --system-color-primary-contrast: hsl(210, 92%, 5%);
+  --system-color-primary-contrast-hsl: 210, 92%, 5%;
+  --system-color-dark: hsl(240, 24%, 100%);
+  --system-color-dark-hsl: 240, 24%, 100%;
+  --system-color-dark-contrast: hsl(0, 0%, 11%);
+  --system-color-dark-contrast-hsl: 0, 0%, 11%;
+  --system-color-light: hsl(240, 3%, 11%);
+  --system-color-light-hsl: 240, 3%, 11%;
+  --system-color-light-contrast: hsl(240, 24%, 100%);
+  --system-color-light-contrast-hsl: 240, 24%, 100%;
+}
+
+* {
+  box-sizing: border-box;
+  cursor: var(--system-cursor-default);
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--system-font-family);
+  color: var(--system-color-light-contrast);
+  background: #000;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body[data-motion='reduced'] * {
+  animation-duration: 0ms !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0ms !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--system-focus-outline);
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.desktop-shell {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+}
+
+.desktop-wallpaper,
+.desktop-vignette {
+  position: absolute;
+  inset: 0;
+}
+
+.desktop-wallpaper {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform: scale(1.03);
+}
+
+.desktop-vignette {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 38%),
+    linear-gradient(180deg, rgba(8, 12, 18, 0.16), rgba(8, 12, 18, 0.5));
+}
+
+.desktop-main {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: var(--topbar-height) 1fr var(--dock-height);
+  height: 100%;
+  width: 100%;
+}
+
+.topbar {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 0.6rem;
+  background: rgba(255, 255, 255, 0.26);
+  backdrop-filter: blur(24px);
+  color: white;
+}
+
+.topbar-left,
+.topbar-right {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.topbar-button {
+  border-radius: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: white;
+}
+
+.topbar-button:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.notch {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 1;
+  width: 132px;
+  height: calc(var(--topbar-height) - 2px);
+  transform: translateX(-50%);
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+  background: #151515;
+}
+
+.menu-bar {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.menu-button-group {
+  position: relative;
+  height: 100%;
+}
+
+.menu-button {
+  position: relative;
+  height: 100%;
+  border-radius: 0.4rem;
+  padding: 0 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: white;
+}
+
+.menu-button[data-active='true'],
+.menu-button:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.apple-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.menu-popover-anchor {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 40;
+}
+
+.menu-popover {
+  min-width: 16rem;
+  padding: 0.45rem;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.78);
+  color: #101010;
+  backdrop-filter: blur(28px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.26);
+}
+
+body.dark .menu-popover {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(22, 22, 22, 0.85);
+  color: white;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  border-radius: 0.55rem;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  font-size: 0.87rem;
+}
+
+.menu-item:hover:not(:disabled) {
+  background: var(--system-color-primary);
+  color: var(--system-color-primary-contrast);
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+}
+
+.menu-divider {
+  height: 1px;
+  margin: 0.2rem 0;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+body.dark .menu-divider {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.action-center {
+  position: relative;
+}
+
+.action-center-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  width: 18rem;
+  z-index: 40;
+}
+
+.windows-layer {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  isolation: isolate;
+}
+
+.app-window {
+  overflow: visible !important;
+}
+
+.app-window-shell {
+  height: 100%;
+  overflow: hidden;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 22px 64px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(18px);
+}
+
+body.dark .app-window-shell {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(20, 20, 24, 0.82);
+}
+
+.app-window.active .app-window-shell {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.app-window-titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--window-titlebar-height);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  user-select: none;
+}
+
+body.dark .app-window-titlebar {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.app-window-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(10, 10, 10, 0.72);
+}
+
+body.dark .app-window-title {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.traffic-lights {
+  position: absolute;
+  left: 0.75rem;
+  display: flex;
+  gap: 0.45rem;
+}
+
+.traffic-button {
+  width: 0.82rem;
+  height: 0.82rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.traffic-button.close {
+  background: #ff5f57;
+}
+
+.traffic-button.minimize {
+  background: #febc2e;
+}
+
+.traffic-button.maximize {
+  background: #28c840;
+}
+
+.traffic-button:disabled {
+  opacity: 0.45;
+}
+
+.window-content {
+  height: calc(100% - var(--window-titlebar-height));
+  overflow: hidden;
+  color: var(--system-color-light-contrast);
+}
+
+.app-loading {
+  display: grid;
+  height: 100%;
+  place-items: center;
+  color: rgba(0, 0, 0, 0.66);
+}
+
+body.dark .app-loading {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dock {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  padding-bottom: 0.65rem;
+  transition: transform 180ms ease;
+}
+
+.dock.hidden {
+  transform: translateY(88%);
+}
+
+.dock-inner {
+  display: flex;
+  align-items: end;
+  gap: 0.25rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 1.4rem;
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(18px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 14px 42px rgba(0, 0, 0, 0.28);
+}
+
+.dock-slot {
+  display: flex;
+  align-items: end;
+}
+
+.dock-divider {
+  width: 1px;
+  height: 2.75rem;
+  margin: 0 0.4rem 0 0.1rem;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.dock-item-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.15rem;
+  transform-origin: center bottom;
+  transition: transform 120ms ease;
+}
+
+.dock-item-button img {
+  width: 3.75rem;
+  height: 3.75rem;
+  border-radius: 1rem;
+}
+
+.dock-item-dot {
+  width: 0.28rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.dock-tooltip {
+  pointer-events: none;
+  position: absolute;
+  bottom: calc(100% + 0.35rem);
+  display: none;
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.62rem;
+  background: rgba(255, 255, 255, 0.74);
+  color: #101010;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+body.dark .dock-tooltip {
+  background: rgba(20, 20, 24, 0.84);
+  color: white;
+}
+
+.dock-item-button:hover .dock-tooltip,
+.dock-item-button:focus-visible .dock-tooltip {
+  display: block;
+}
+
+.desktop-shell.launchpad-active .desktop-wallpaper {
+  transform: scale(1.08);
+  filter: saturate(1.08);
+}
+
+.desktop-shell.launchpad-active .desktop-vignette {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(6, 10, 16, 0.22), rgba(6, 10, 16, 0.62));
+}
+
+.desktop-shell.locked .desktop-main {
+  opacity: 0.82;
+}
+
+.launchpad-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding: calc(var(--topbar-height) + 1rem) 2.2rem calc(var(--dock-height) + 1.1rem);
+  background:
+    linear-gradient(180deg, rgba(4, 8, 14, 0.38), rgba(4, 8, 14, 0.52)),
+    rgba(8, 13, 22, 0.16);
+  backdrop-filter: blur(22px) saturate(1.15);
+}
+
+.launchpad-backdrop-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top center, rgba(117, 186, 255, 0.26), transparent 28%),
+    radial-gradient(circle at 15% 20%, rgba(255, 111, 145, 0.15), transparent 24%),
+    radial-gradient(circle at 85% 22%, rgba(255, 206, 89, 0.14), transparent 20%);
+  pointer-events: none;
+}
+
+.launchpad-shell {
+  position: relative;
+  width: min(1180px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.launchpad-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.launchpad-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.7rem;
+  max-width: 34rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  padding: 0.9rem 1.15rem;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 18px 55px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(20px);
+}
+
+.launchpad-search-icon,
+.launchpad-hint {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.launchpad-search-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: white;
+  font-size: 1.05rem;
+}
+
+.launchpad-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.launchpad-search-input::-webkit-search-cancel-button {
+  filter: invert(1);
+}
+
+.launchpad-hint {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.launchpad-hero,
+.launchpad-folder-panel,
+.launchpad-results {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2rem;
+  padding: 1.4rem 1.5rem 1.6rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06)),
+    rgba(10, 14, 22, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 28px 80px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.launchpad-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.launchpad-eyebrow,
+.launchpad-folder-kicker {
+  margin: 0 0 0.4rem;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.launchpad-hero h2,
+.launchpad-folder-header h3,
+.launchpad-empty-state h3 {
+  margin: 0;
+  color: white;
+  font-size: clamp(1.55rem, 2vw, 2.15rem);
+  line-height: 1.08;
+}
+
+.launchpad-recents {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.launchpad-recents-label,
+.launchpad-results-header {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.launchpad-recents-grid {
+  display: flex;
+  gap: 0.7rem;
+}
+
+.launchpad-recent-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem 0.55rem 0.6rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.launchpad-recent-button:hover,
+.launchpad-recent-button:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.launchpad-recent-button img {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.65rem;
+}
+
+.launchpad-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem 1.2rem;
+}
+
+.launchpad-card,
+.launchpad-folder-tile {
+  display: flex;
+  min-height: 10.5rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border-radius: 1.75rem;
+  padding: 1rem 0.85rem;
+  color: white;
+  animation: launchpad-card-in 220ms ease both;
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.launchpad-card:hover,
+.launchpad-card:focus-visible,
+.launchpad-folder-tile:hover,
+.launchpad-folder-tile:focus-visible {
+  transform: translateY(-4px) scale(1.02);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 18px 40px rgba(0, 0, 0, 0.2);
+}
+
+.launchpad-card.is-open {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.launchpad-card-icon {
+  width: 5.6rem;
+  height: 5.6rem;
+  border-radius: 1.4rem;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.18);
+}
+
+.launchpad-card-title,
+.launchpad-folder-subtitle {
+  text-align: center;
+}
+
+.launchpad-card-title {
+  font-size: 0.96rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.launchpad-folder-subtitle,
+.launchpad-folder-header p,
+.launchpad-empty-state p {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.launchpad-folder-preview {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.45rem;
+  width: 5.8rem;
+  padding: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.08)),
+    rgba(12, 16, 24, 0.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 16px 32px rgba(0, 0, 0, 0.18);
+}
+
+.launchpad-folder-preview img {
+  width: 100%;
+  border-radius: 0.85rem;
+}
+
+.launchpad-folder-header,
+.launchpad-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.launchpad-folder-close {
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  font-weight: 600;
+}
+
+.launchpad-folder-close:hover,
+.launchpad-folder-close:focus-visible {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.launchpad-pagination {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.launchpad-page-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.launchpad-page-dot.is-active {
+  width: 1.9rem;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.launchpad-empty-state {
+  display: grid;
+  min-height: 18rem;
+  place-items: center;
+  text-align: center;
+}
+
+@keyframes launchpad-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.boot-splash,
+.desktop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+}
+
+.lock-screen-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.6rem 1.6rem 1.3rem;
+  color: white;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.lock-screen-overlay.is-unlocking {
+  pointer-events: none;
+}
+
+.lock-screen-wallpaper,
+.lock-screen-atmosphere,
+.lock-screen-frost {
+  position: absolute;
+  inset: 0;
+}
+
+.lock-screen-wallpaper {
+  inset: -6%;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  filter: saturate(1.12) brightness(0.72);
+  transform: scale(1.08);
+  transition:
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 420ms ease,
+    opacity 360ms ease;
+}
+
+.lock-screen-atmosphere {
+  background:
+    radial-gradient(circle at 20% 18%, rgba(102, 207, 255, 0.18), transparent 24%),
+    radial-gradient(circle at 78% 14%, rgba(255, 150, 126, 0.14), transparent 20%),
+    radial-gradient(circle at 50% 82%, rgba(255, 255, 255, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(4, 8, 14, 0.22), rgba(4, 8, 14, 0.62));
+}
+
+.lock-screen-frost {
+  backdrop-filter: blur(18px) saturate(1.1);
+}
+
+.lock-screen-overlay.is-unlocking .lock-screen-wallpaper {
+  transform: scale(1.14) translateY(-4%);
+  filter: saturate(1.2) brightness(0.84) blur(5px);
+  opacity: 0;
+}
+
+.lock-screen-panel,
+.lock-screen-footer {
+  position: relative;
+  z-index: 1;
+  transition:
+    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease;
+}
+
+.lock-screen-overlay.is-unlocking .lock-screen-panel {
+  transform: translateY(-5.5rem);
+  opacity: 0;
+}
+
+.lock-screen-overlay.is-unlocking .lock-screen-footer {
+  transform: translateY(3rem);
+  opacity: 0;
+}
+
+.lock-screen-panel {
+  display: grid;
+  gap: 2.2rem;
+}
+
+.lock-screen-header,
+.lock-screen-footer-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.lock-screen-header {
+  justify-content: space-between;
+}
+
+.lock-screen-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08)),
+    rgba(10, 14, 22, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 20px 48px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(22px);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.lock-screen-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgba(163, 255, 149, 0.96);
+  box-shadow: 0 0 0.7rem rgba(163, 255, 149, 0.76);
+}
+
+.lock-screen-hero {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+  padding-top: 0.6rem;
+  text-align: center;
+}
+
+.lock-screen-kicker {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.lock-screen-time {
+  margin: 0;
+  font-family:
+    'SF Pro Display',
+    var(--system-font-family);
+  font-size: clamp(5rem, 15vw, 9.5rem);
+  font-weight: 500;
+  line-height: 0.9;
+  letter-spacing: -0.06em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.28);
+}
+
+.lock-screen-date {
+  margin: 0;
+  max-width: 28rem;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: clamp(1rem, 2.4vw, 1.45rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.lock-screen-auth-card {
+  width: min(28rem, calc(100vw - 2rem));
+  margin-inline: auto;
+  display: grid;
+  justify-items: center;
+  gap: 0.9rem;
+  padding: 1.5rem 1.4rem 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 2rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08)),
+    rgba(8, 14, 24, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 30px 70px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(26px) saturate(1.12);
+}
+
+.lock-screen-avatar {
+  display: grid;
+  width: 5.4rem;
+  height: 5.4rem;
+  place-items: center;
+  border-radius: 1.7rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.1)),
+    rgba(15, 24, 38, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 14px 34px rgba(0, 0, 0, 0.22);
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.lock-screen-auth-copy {
+  display: grid;
+  gap: 0.35rem;
+  text-align: center;
+}
+
+.lock-screen-auth-copy h2,
+.lock-screen-auth-copy p,
+.lock-screen-footnote,
+.lock-screen-footer-hint {
+  margin: 0;
+}
+
+.lock-screen-auth-copy h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.lock-screen-auth-copy p,
+.lock-screen-footnote,
+.lock-screen-footer-hint {
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.lock-screen-auth-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lock-screen-password {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+.lock-screen-password::placeholder {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.lock-screen-password:focus-visible {
+  box-shadow:
+    var(--system-focus-outline),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.lock-screen-unlock-button {
+  display: inline-flex;
+  width: 3.2rem;
+  height: 3.2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14)),
+    rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 12px 26px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.lock-screen-unlock-button:hover,
+.lock-screen-unlock-button:focus-visible {
+  transform: translateY(-1px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.18)),
+    rgba(255, 255, 255, 0.1);
+}
+
+.lock-screen-unlock-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.lock-screen-footnote {
+  font-size: 0.86rem;
+}
+
+.lock-screen-footer {
+  display: grid;
+  justify-items: center;
+  gap: 0.85rem;
+}
+
+.lock-screen-footer-pills {
+  justify-content: center;
+}
+
+.lock-screen-footer-hint {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.lock-screen-swipe-indicator {
+  width: min(9rem, 30vw);
+  height: 0.32rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  box-shadow: 0 0 1.1rem rgba(255, 255, 255, 0.22);
+}
+
+.boot-splash {
+  gap: 1.8rem;
+  background: #000;
+  color: white;
+}
+
+.boot-brand {
+  font-size: 4rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.boot-progress {
+  width: 11rem;
+  height: 0.3rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.boot-progress-indicator {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.22), #fff);
+  animation: boot-progress 2.4s linear forwards;
+  transform: translateX(-100%);
+}
+
+@keyframes boot-progress {
+  to {
+    transform: translateX(0%);
+  }
+}
+
+.desktop-overlay {
+  background: rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(8px);
+}
+
+.modal-card {
+  width: min(28rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 1.25rem;
+  padding: 1.6rem;
+  background: rgba(255, 255, 255, 0.86);
+  color: #111;
+}
+
+body.dark .modal-card {
+  background: rgba(16, 16, 20, 0.9);
+  color: white;
+}
+
+.update-icon {
+  width: 6rem;
+  height: 6rem;
+  border-radius: 1.2rem;
+}
+
+.modal-card h2,
+.modal-card p {
+  margin: 0;
+  text-align: center;
+}
+
+.modal-actions {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.primary-button,
+.secondary-button {
+  border-radius: 0.8rem;
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+}
+
+.primary-button {
+  background: var(--system-color-primary);
+  color: var(--system-color-primary-contrast);
+}
+
+.secondary-button {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+body.dark .secondary-button {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.iframe-app,
+.iframe-app iframe {
+  width: 100%;
+  height: 100%;
+}
+
+.iframe-app iframe {
+  border: 0;
+}
+
+.calculator-app {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto 1fr;
+  gap: 1px;
+  background: rgba(15, 15, 19, 0.9);
+}
+
+.calculator-display {
+  display: flex;
+  align-items: end;
+  justify-content: end;
+  padding: 1.4rem 1rem 0.9rem;
+  font-size: 3rem;
+  font-weight: 200;
+  color: white;
+}
+
+.calculator-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  padding: 1px;
+}
+
+.calculator-key {
+  min-height: 4.25rem;
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  font-size: 1.35rem;
+}
+
+.calculator-key.utility {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.calculator-key.operation {
+  background: #ff9f0a;
+}
+
+.calculator-key.wide {
+  grid-column: span 2;
+}
+
+.calendar-app {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1rem 0.75rem;
+}
+
+.calendar-month,
+.calendar-year {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+.calendar-year {
+  color: rgba(0, 0, 0, 0.58);
+}
+
+body.dark .calendar-year {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+.calendar-controls {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.calendar-controls button {
+  border-radius: 0.55rem;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0.45rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+body.dark .calendar-controls button {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.calendar-grid {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekday,
+.calendar-day {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.65rem;
+}
+
+body.dark .calendar-weekday,
+body.dark .calendar-day {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.calendar-weekday:nth-child(7n),
+.calendar-day:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-weekday {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+body.dark .calendar-weekday {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.calendar-day {
+  display: flex;
+  justify-content: end;
+}
+
+.calendar-day span {
+  display: inline-flex;
+  width: 1.8rem;
+  height: 1.8rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.92rem;
+}
+
+.calendar-day.muted span {
+  color: rgba(0, 0, 0, 0.38);
+}
+
+body.dark .calendar-day.muted span {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.calendar-day.today span {
+  background: #ec4d3c;
+  color: white;
+}
+
+.wallpaper-app {
+  height: 100%;
+  overflow: auto;
+  padding: 1.25rem;
+  color: var(--system-color-light-contrast);
+}
+
+.appstore-app {
+  height: 100%;
+  overflow: auto;
+  padding: 1.25rem;
+  color: var(--system-color-light-contrast);
+  background:
+    radial-gradient(circle at top left, rgba(95, 194, 255, 0.26), transparent 28rem),
+    radial-gradient(circle at bottom right, rgba(255, 174, 106, 0.22), transparent 26rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.08));
+}
+
+body.dark .appstore-app {
+  background:
+    radial-gradient(circle at top left, rgba(70, 150, 255, 0.24), transparent 28rem),
+    radial-gradient(circle at bottom right, rgba(255, 145, 92, 0.18), transparent 26rem),
+    linear-gradient(180deg, rgba(18, 20, 28, 0.74), rgba(12, 14, 20, 0.9));
+}
+
+.appstore-hero {
+  display: grid;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+  grid-template-columns: minmax(0, 1.5fr) minmax(19rem, 0.95fr);
+}
+
+.appstore-hero-copy,
+.appstore-panel,
+.appstore-product-card {
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 18px 46px rgba(18, 30, 56, 0.12);
+  backdrop-filter: blur(22px);
+}
+
+body.dark .appstore-hero-copy,
+body.dark .appstore-panel,
+body.dark .appstore-product-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(14, 16, 22, 0.82);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.3);
+}
+
+.appstore-hero-copy {
+  position: relative;
+  overflow: hidden;
+  padding: 1.75rem;
+}
+
+.appstore-hero-copy::before {
+  content: '';
+  position: absolute;
+  inset: auto -6rem -7rem auto;
+  width: 16rem;
+  height: 16rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.appstore-badge,
+.appstore-panel-header span,
+.appstore-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(5, 115, 255, 0.12);
+  color: #0059d6;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+body.dark .appstore-badge,
+body.dark .appstore-panel-header span,
+body.dark .appstore-eyebrow {
+  background: rgba(79, 155, 255, 0.12);
+  color: #82b5ff;
+}
+
+.appstore-hero-copy h1,
+.appstore-product-card h2,
+.appstore-panel h3,
+.appstore-feature-card h4 {
+  margin: 0;
+}
+
+.appstore-hero-copy h1 {
+  max-width: 14ch;
+  margin-top: 1rem;
+  font-size: clamp(2.35rem, 4vw, 3.6rem);
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+
+.appstore-hero-lead,
+.appstore-feature-card p,
+.appstore-panel p,
+.appstore-list li,
+.appstore-steps li,
+.appstore-subtle,
+.appstore-hero-note {
+  color: rgba(22, 22, 28, 0.7);
+}
+
+body.dark .appstore-hero-lead,
+body.dark .appstore-feature-card p,
+body.dark .appstore-panel p,
+body.dark .appstore-list li,
+body.dark .appstore-steps li,
+body.dark .appstore-subtle,
+body.dark .appstore-hero-note {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.appstore-hero-lead {
+  max-width: 32rem;
+  margin: 1rem 0 0;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.appstore-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.4rem;
+}
+
+.appstore-primary-button,
+.appstore-secondary-button {
+  border-radius: 999px;
+  padding: 0.8rem 1.15rem;
+  font-weight: 700;
+}
+
+.appstore-primary-button {
+  background: linear-gradient(135deg, #007aff, #57b8ff);
+  color: white;
+}
+
+.appstore-secondary-button {
+  background: rgba(4, 24, 56, 0.08);
+  color: inherit;
+}
+
+body.dark .appstore-secondary-button {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.appstore-hero-note {
+  max-width: 36rem;
+  margin: 1rem 0 0;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.appstore-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+
+.appstore-product-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.appstore-product-icon {
+  width: 4.75rem;
+  height: 4.75rem;
+  border-radius: 1.25rem;
+  box-shadow: 0 18px 32px rgba(14, 34, 76, 0.18);
+}
+
+.appstore-product-card h2 {
+  margin-top: 0.45rem;
+  font-size: 1.75rem;
+  line-height: 1.05;
+}
+
+.appstore-subtle {
+  margin: 0.3rem 0 0;
+  font-size: 0.94rem;
+}
+
+.appstore-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.appstore-meta-item {
+  min-width: 0;
+  border-radius: 1.15rem;
+  padding: 0.9rem;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+body.dark .appstore-meta-item {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.appstore-meta-item dt {
+  margin-bottom: 0.35rem;
+  color: rgba(22, 22, 28, 0.45);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.dark .appstore-meta-item dt {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.appstore-meta-item dd {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.appstore-terminal-tip {
+  border-radius: 1.15rem;
+  padding: 1rem;
+  background: linear-gradient(180deg, rgba(10, 18, 36, 0.94), rgba(16, 26, 50, 0.96));
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.appstore-terminal-tip p {
+  margin: 0 0 0.55rem;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.appstore-terminal-tip code {
+  font-family:
+    'SFMono-Regular',
+    'SF Mono',
+    Consolas,
+    'Liberation Mono',
+    Menlo,
+    monospace;
+  font-size: 0.9rem;
+}
+
+.appstore-info-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.appstore-panel {
+  padding: 1.4rem;
+}
+
+.appstore-panel-accent {
+  background:
+    radial-gradient(circle at top right, rgba(255, 196, 129, 0.32), transparent 10rem),
+    rgba(255, 255, 255, 0.74);
+}
+
+body.dark .appstore-panel-accent {
+  background:
+    radial-gradient(circle at top right, rgba(255, 181, 104, 0.14), transparent 10rem),
+    rgba(14, 16, 22, 0.82);
+}
+
+.appstore-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-bottom: 1.1rem;
+}
+
+.appstore-panel h3 {
+  font-size: 1.4rem;
+  line-height: 1.1;
+}
+
+.appstore-feature-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.appstore-feature-card {
+  border-radius: 1.2rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+body.dark .appstore-feature-card {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.appstore-feature-card h4 {
+  font-size: 1rem;
+}
+
+.appstore-feature-card p,
+.appstore-panel p,
+.appstore-list li,
+.appstore-steps li {
+  margin: 0.6rem 0 0;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.appstore-list,
+.appstore-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.appstore-list li + li,
+.appstore-steps li + li {
+  margin-top: 0.7rem;
+}
+
+.wallpaper-current {
+  display: grid;
+  gap: 1.2rem;
+  margin-bottom: 2rem;
+  align-items: center;
+  grid-template-columns: minmax(0, 30rem) minmax(0, 1fr);
+}
+
+.wallpaper-current > img {
+  width: 100%;
+  border-radius: 1.2rem;
+  object-fit: cover;
+  aspect-ratio: 16 / 10;
+}
+
+.wallpaper-current-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.wallpaper-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.92rem;
+}
+
+.wallpaper-toggle input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--system-color-primary);
+}
+
+.wallpaper-section {
+  margin-top: 1.5rem;
+}
+
+.wallpaper-section h2 {
+  margin: 0 0 1rem;
+  font-size: 1.4rem;
+}
+
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 1rem;
+}
+
+.wallpaper-button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  text-align: center;
+}
+
+.wallpaper-button img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 0.95rem;
+  object-fit: cover;
+  transition: box-shadow 120ms ease;
+}
+
+.wallpaper-button:hover img,
+.wallpaper-button:focus-visible img {
+  box-shadow: 0 0 0 0.24rem hsla(var(--system-color-primary-hsl), 0.5);
+}
+
+.wallpaper-button span {
+  font-size: 0.92rem;
+}
+
+::-webkit-scrollbar {
+  width: 0.65rem;
+  height: 0.65rem;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 0.18rem solid transparent;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  background-clip: content-box;
+}
+
+body.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.24);
+  background-clip: content-box;
+}
+
+@media (max-width: 900px) {
+  .launchpad-overlay {
+    padding:
+      calc(var(--topbar-height) + 0.8rem)
+      1rem
+      calc(var(--dock-height) + 0.9rem);
+  }
+
+  .launchpad-header,
+  .launchpad-hero,
+  .launchpad-folder-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .launchpad-recents {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .launchpad-recents-grid {
+    flex-wrap: wrap;
+  }
+
+  .launchpad-grid {
+    grid-template-columns: repeat(auto-fit, minmax(7.25rem, 1fr));
+  }
+
+  .launchpad-card,
+  .launchpad-folder-tile {
+    min-height: 9.25rem;
+  }
+
+  .launchpad-card-icon {
+    width: 4.9rem;
+    height: 4.9rem;
+  }
+
+  .lock-screen-overlay {
+    padding: 1rem 1rem 1.1rem;
+  }
+
+  .lock-screen-header {
+    justify-content: center;
+  }
+
+  .lock-screen-panel {
+    gap: 1.5rem;
+  }
+
+  .lock-screen-auth-card {
+    width: min(100%, 24rem);
+    border-radius: 1.6rem;
+  }
+
+  .lock-screen-auth-row {
+    flex-direction: column;
+  }
+
+  .lock-screen-unlock-button {
+    width: 100%;
+    border-radius: 999px;
+  }
+
+  .wallpaper-current {
+    grid-template-columns: 1fr;
+  }
+
+  .appstore-hero,
+  .appstore-info-grid,
+  .appstore-feature-grid,
+  .appstore-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
