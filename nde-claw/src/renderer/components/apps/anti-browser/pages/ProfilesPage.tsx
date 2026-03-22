@@ -1,12 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAntiBrowserStore } from '../store';
-import { antiBrowserApi, type Profile } from '../api';
+import { antiBrowserApi, type ActivityEvent, type Profile } from '../api';
 
 const OS_ICONS: Record<string, string> = { windows: '🪟', macos: '🍎', linux: '🐧' };
 const AVATAR_GRADIENTS = [
@@ -43,7 +42,7 @@ export default function ProfilesPage() {
   const [creating, setCreating] = useState(false);
   const [detailProfile, setDetailProfile] = useState<Profile | null>(null);
   const [launchingId, setLaunchingId] = useState<string | null>(null);
-  const [activity, setActivity] = useState<Array<{ id: string; type: string; message: string; timestamp: number }>>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
 
   const filtered = useMemo(() => {
     if (!search) return profiles;

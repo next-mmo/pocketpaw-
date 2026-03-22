@@ -1,2 +1,2 @@
-declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
-declare const MAIN_WINDOW_VITE_NAME: string;
+// electron-vite sets ELECTRON_RENDERER_URL in dev mode automatically.
+// No custom globals needed — use process.env['ELECTRON_RENDERER_URL'] in main.ts.

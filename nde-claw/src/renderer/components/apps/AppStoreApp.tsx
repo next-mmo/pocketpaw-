@@ -1,9 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppId } from '@/lib/apps';
+import { appRegistry } from '@/config/apps';
 import { useExtensions, type Extension } from '@/hooks/usePocketPaw';
 import { useConnectionStore } from '@/stores/connectionStore';
 import { apiClient } from '@/lib/http/client';
 import { usePluginLifecycle, type PluginStatus } from '@/hooks/usePluginLifecycle';
+import { AppSurface } from '@/components/apps';
+import { launchApp } from '@/lib/launchApp';
 
 // ── Native extension overrides (rendered instead of iframe) ─────────
 const NATIVE_EXTENSIONS: Record<string, React.LazyExoticComponent<React.ComponentType>> = {
@@ -28,8 +31,26 @@ function frameSrc(ext: Extension) {
     : `${b}${ext.asset_base ?? `/extensions/${ext.id}/`}`;
 }
 
-// ── SVG Icons (inline, no dep) ─────────────────────────────────────
-const svgProps = { className: 'h-3.5 w-3.5', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+// ── System apps embeddable as tabs ───────────────────────────────────
+const EMBEDDABLE_APPS: AppId[] = [
+  'system-preferences', 'activity-monitor', 'terminal',
+  'notes', 'reminders', 'messages',
+];
+const EMBEDDABLE_ICONS: Record<string, string> = {
+  'system-preferences': '⚙️', 'activity-monitor': '📊', terminal: '⌨️',
+  notes: '📝', reminders: '✅', messages: '💬',
+};
+
+// ── SVG Icons (inline, no dep) ───────────────────────────────────────
+const svgProps = {
+  className: 'h-3.5 w-3.5',
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+};
 const IGrid = () => <svg {...svgProps}><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>;
 const IX = () => <svg {...svgProps}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>;
 const ITerm = () => <svg {...svgProps}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></svg>;
@@ -41,6 +62,8 @@ const IPlay = () => <svg {...svgProps}><polygon points="5 3 19 12 5 21 5 3" /></
 const IDown = () => <svg {...svgProps}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>;
 const IStop = () => <svg {...svgProps}><rect x="6" y="6" width="12" height="12" /></svg>;
 const ITrash = () => <svg {...svgProps}><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>;
+const IPlus = () => <svg {...svgProps}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
+const IWindow = () => <svg {...svgProps}><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="3" y1="9" x2="21" y2="9" /></svg>;
 
 // ── Open in Electron window ──────────────────────────────────────────
 async function popOut(ext: Extension) {
@@ -52,116 +75,204 @@ async function popOut(ext: Extension) {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Tab types
-// ════════════════════════════════════════════════════════════════════
-type Tab = { id: string; route: string; name: string; icon: string; isPlugin: boolean; isBrowse?: boolean; url?: string };
+// ═══════════════════════════════════════════════════════════════════════
+// Tab — discriminated union for all tab types
+// ═══════════════════════════════════════════════════════════════════════
+type ExtensionTab = { kind: 'extension'; id: string; name: string; icon: string; isPlugin: boolean };
+type AppTab       = { kind: 'app';       id: string; appId: AppId; name: string; icon: string };
+type BrowseTab    = { kind: 'browse';    id: string; name: string; icon: string; url: string };
+type Tab = ExtensionTab | AppTab | BrowseTab;
 
-// ════════════════════════════════════════════════════════════════════
-// Extension Card (launcher grid)
-// ════════════════════════════════════════════════════════════════════
-function Card({ ext, onOpen, onToggle }: { ext: Extension; onOpen: (e: Extension) => void; onToggle: (e: Extension, en: boolean) => void }) {
+function tabIcon(tab: Tab): string {
+  if (tab.kind === 'browse') return '🌐';
+  if (tab.kind === 'app') return EMBEDDABLE_ICONS[tab.appId] ?? '📦';
+  return IC[tab.icon] ?? '📦';
+}
+
+// ── Tab class helper (module scope — pure function, no closure cost) ─
+const tabCls = (active: boolean) =>
+  `flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t-lg border border-b-0 py-2 pl-3 pr-1.5 text-[12px] font-semibold transition-all max-w-[180px]
+   ${active
+     ? 'border-black/8 bg-white/60 text-black/80 dark:border-white/10 dark:bg-white/8 dark:text-white/85'
+     : 'border-transparent text-black/40 hover:text-black/60 dark:text-white/40 dark:hover:text-white/60'}`;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Apple-style pill button
+// ═══════════════════════════════════════════════════════════════════════
+function Pill({ children, variant = 'default', ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'default' | 'danger';
+}) {
   return (
-    <div
-      className={`group relative flex flex-col items-center gap-2.5 rounded-2xl border p-4 transition-all ${ext.enabled ? 'cursor-pointer border-white/8 hover:opacity-80 active:scale-[0.97]' : 'border-dashed border-white/8 opacity-55'}`}
-      style={{ background: 'rgba(255,255,255,0.03)' }}
-      onClick={() => ext.enabled && onOpen(ext)}
+    <button
+      type="button"
+      {...props}
+      className={`rounded-full px-3.5 py-[5px] text-[12px] font-semibold tracking-[-0.01em] transition-all active:scale-[0.96]
+        ${variant === 'danger'
+          ? 'bg-red-500/10 text-red-500 hover:bg-red-500/18 dark:bg-red-500/15 dark:text-red-400'
+          : 'bg-black/[0.06] text-blue-600 hover:bg-black/[0.10] dark:bg-white/10 dark:text-blue-400 dark:hover:bg-white/14'
+        } ${props.className ?? ''}`}
     >
-      <span className={`absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${ext.source === 'builtin' ? 'bg-white/5 text-white/30' : 'bg-emerald-500/10 text-emerald-400'}`}>
-        {ext.source === 'builtin' ? 'Built-in' : 'Uploaded'}
-      </span>
-      <div className="mt-3 flex h-12 w-12 items-center justify-center rounded-xl border border-white/8 bg-white/5 text-[26px]">{emoji(ext)}</div>
-      <div className="min-w-0 text-center">
-        <div className="truncate text-[13px] font-medium text-white/70">{ext.display_name || ext.name}</div>
-        <div className="mt-1.5 flex items-center justify-center gap-1 text-[10px]">
-          <button className="text-blue-400 hover:underline" onClick={(ev) => { ev.stopPropagation(); onToggle(ext, !ext.enabled); }}>{ext.enabled ? 'Disable' : 'Enable'}</button>
-          {ext.is_removable && (
-            <><span className="text-white/20"> · </span><button className="text-red-400 hover:underline" onClick={(ev) => { ev.stopPropagation(); void apiClient.delete(`/api/v1/extensions/${ext.id}`); }}>Uninstall</button></>
-          )}
-        </div>
-      </div>
-    </div>
+      {children}
+    </button>
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Plugin Install Screen (lifecycle states)
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// Section header
+// ═══════════════════════════════════════════════════════════════════════
+function SectionHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-4 px-1 text-[11px] font-bold uppercase tracking-[0.12em] text-black/35 dark:text-white/35">
+      {children}
+    </h3>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Extension Card — launcher grid cell
+// ═══════════════════════════════════════════════════════════════════════
+const Card = memo(function Card({ ext, onOpen, onToggle }: {
+  ext: Extension;
+  onOpen: (e: Extension) => void;
+  onToggle: (e: Extension, en: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => ext.enabled && onOpen(ext)}
+      className={`group relative flex flex-col items-center gap-3 rounded-2xl p-5 text-center transition-all
+        ${ext.enabled
+          ? 'cursor-pointer hover:bg-black/4 active:scale-[0.97] dark:hover:bg-white/6'
+          : 'opacity-45'}`}
+    >
+      {ext.source !== 'builtin' && (
+        <span className="absolute right-2 top-2 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
+          Uploaded
+        </span>
+      )}
+      <div className="flex h-14 w-14 items-center justify-center rounded-[16px] bg-white/80 text-[30px] shadow-sm shadow-black/8 ring-1 ring-black/6 dark:bg-white/10 dark:shadow-black/20 dark:ring-white/10">
+        {emoji(ext)}
+      </div>
+      <span className="w-full truncate text-[13px] font-medium leading-tight text-black/80 dark:text-white/80">
+        {ext.display_name || ext.name}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Pill onClick={(ev) => { ev.stopPropagation(); onToggle(ext, !ext.enabled); }}>
+          {ext.enabled ? 'Disable' : 'Enable'}
+        </Pill>
+        {ext.is_removable && (
+          <Pill variant="danger" onClick={(ev) => { ev.stopPropagation(); void apiClient.delete(`/api/v1/extensions/${ext.id}`); }}>
+            Remove
+          </Pill>
+        )}
+      </div>
+    </button>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// System App Card — for built-in embeddable apps
+// ═══════════════════════════════════════════════════════════════════════
+const SystemAppCard = memo(function SystemAppCard({ appId, onOpen }: { appId: AppId; onOpen: (appId: AppId) => void }) {
+  const def = appRegistry[appId];
+  if (!def) return null;
+  return (
+    <div
+      className="group flex flex-col items-center gap-3 rounded-2xl p-5 text-center transition-all cursor-pointer hover:bg-black/4 active:scale-[0.97] dark:hover:bg-white/6"
+      onClick={() => onOpen(appId)}
+    >
+      <div className="flex h-14 w-14 items-center justify-center rounded-[16px] bg-white/80 text-[30px] shadow-sm shadow-black/8 ring-1 ring-black/6 dark:bg-white/10 dark:shadow-black/20 dark:ring-white/10">
+        {EMBEDDABLE_ICONS[appId] ?? '📦'}
+      </div>
+      <span className="w-full truncate text-[13px] font-medium leading-tight text-black/80 dark:text-white/80">
+        {def.title}
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Pill onClick={(ev) => { ev.stopPropagation(); onOpen(appId); }}>Open</Pill>
+        <Pill onClick={(ev) => { ev.stopPropagation(); void launchApp(appId); }}>
+          <span className="inline-flex items-center gap-1"><IWindow /> Window</span>
+        </Pill>
+      </div>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Plugin Install Screen
+// ═══════════════════════════════════════════════════════════════════════
 function InstallScreen({ ext, ps, onInstall, onStart, onReinstall, onUninstall, onViewLogs }: {
-  ext: Extension; ps: { status: PluginStatus; progress: number; error: string | null };
+  ext: Extension;
+  ps: { status: PluginStatus; progress: number; error: string | null };
   onInstall: () => void; onStart: () => void; onReinstall: () => void; onUninstall: () => void; onViewLogs: () => void;
 }) {
   return (
     <div className="flex flex-1 items-center justify-center p-8">
-      <div className="w-full max-w-lg text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-[32px]">{emoji(ext)}</div>
-        <h2 className="text-xl font-semibold text-white">{ext.display_name || ext.name}</h2>
-        <p className="mt-1.5 text-sm text-white/40">{ext.description || 'Plugin extension'}</p>
-
+      <div className="w-full max-w-md text-center">
+        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-[22px] bg-white/80 text-[38px] shadow-lg shadow-black/10 ring-1 ring-black/[0.06] dark:bg-white/10 dark:shadow-black/30 dark:ring-white/10">
+          {emoji(ext)}
+        </div>
+        <h2 className="text-xl font-bold text-black dark:text-white">{ext.display_name || ext.name}</h2>
+        <p className="mt-1.5 text-[14px] leading-relaxed text-black/45 dark:text-white/45">
+          {ext.description || 'Plugin extension'}
+        </p>
         {ps.status === 'idle' && (
-          <div className="mt-6">
-            <p className="mb-4 text-[13px] text-white/50">This app needs to be installed before first use.</p>
-            <button onClick={onInstall} className="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-600 active:scale-[0.97]"><IDown /> Install</button>
+          <div className="mt-8">
+            <p className="mb-5 text-[13px] text-black/50 dark:text-white/50">This app needs to be installed before first use.</p>
+            <Pill onClick={onInstall}><span className="inline-flex items-center gap-1.5"><IDown /> Install</span></Pill>
           </div>
         )}
-
         {ps.status === 'installing' && (
-          <div className="mt-6">
-            <div className="flex items-center justify-center gap-3 mb-3">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-400" />
-              <span className="text-sm font-medium text-white">Installing…</span>
-              <span className="ml-auto text-[11px] tabular-nums text-white/40">{Math.round(ps.progress * 100)}%</span>
+          <div className="mt-8">
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="h-4.5 w-4.5 animate-spin rounded-full border-2 border-blue-500/25 border-t-blue-500" />
+              <span className="text-[14px] font-medium text-black dark:text-white">Installing…</span>
+              <span className="text-[12px] tabular-nums text-black/35 dark:text-white/35">{Math.round(ps.progress * 100)}%</span>
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.max(2, ps.progress * 100)}%` }} /></div>
-            <button onClick={onViewLogs} className="mt-3 flex items-center gap-1 mx-auto text-[11px] text-white/30 hover:text-white/50"><ITerm /><span>View Logs</span></button>
+            <div className="mx-auto h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
+              <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.max(2, ps.progress * 100)}%` }} />
+            </div>
+            <button onClick={onViewLogs} className="mt-4 inline-flex items-center gap-1 text-[11px] font-medium text-black/30 dark:text-white/30"><ITerm /><span>View Logs</span></button>
           </div>
         )}
-
         {ps.status === 'installed' && (
-          <div className="mt-6">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-4 py-2 text-sm text-emerald-400">✓ Installation complete</div>
-            <p className="mb-4 text-[13px] text-white/50">Start the backend service to begin using this app.</p>
-            <div className="flex items-center justify-center gap-3">
-              <button onClick={onStart} className="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-600"><IPlay /> Start</button>
-              <button onClick={onReinstall} className="rounded-xl bg-white/5 px-4 py-3 text-sm text-white/50 hover:bg-white/8"><IRefresh /> Reinstall</button>
-              <button onClick={onUninstall} className="rounded-xl bg-red-500/8 px-4 py-3 text-sm text-red-400 hover:bg-red-500/15"><ITrash /> Uninstall</button>
+          <div className="mt-8">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-2 text-[13px] font-semibold text-emerald-600 dark:text-emerald-400">✓ Installed</div>
+            <p className="mb-5 text-[13px] text-black/50 dark:text-white/50">Start the backend service to begin using this app.</p>
+            <div className="flex items-center justify-center gap-2.5">
+              <Pill onClick={onStart}><span className="inline-flex items-center gap-1"><IPlay /> Start</span></Pill>
+              <Pill onClick={onReinstall}>Reinstall</Pill>
+              <Pill variant="danger" onClick={onUninstall}>Uninstall</Pill>
             </div>
           </div>
         )}
-
         {ps.status === 'starting' && (
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-400/30 border-t-blue-400" />
-            <span className="text-sm font-medium text-white">Starting service…</span>
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <div className="h-4.5 w-4.5 animate-spin rounded-full border-2 border-blue-500/25 border-t-blue-500" />
+            <span className="text-[14px] font-medium text-black dark:text-white">Starting…</span>
           </div>
         )}
-
         {ps.status === 'stopped' && (
-          <div className="mt-6">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-xl bg-white/5 px-4 py-2 text-sm text-white/50">⏸ Service stopped</div>
-            <div className="flex items-center justify-center gap-3">
-              <button onClick={onStart} className="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-600"><IPlay /> Restart</button>
-              <button onClick={onReinstall} className="rounded-xl bg-white/5 px-4 py-3 text-sm text-white/50 hover:bg-white/8">Reinstall</button>
-              <button onClick={onUninstall} className="rounded-xl bg-red-500/8 px-4 py-3 text-sm text-red-400">Uninstall</button>
+          <div className="mt-8">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-black/[0.05] px-4 py-2 text-[13px] font-medium text-black/50 dark:bg-white/8 dark:text-white/50">⏸ Stopped</div>
+            <div className="flex items-center justify-center gap-2.5">
+              <Pill onClick={onStart}><span className="inline-flex items-center gap-1"><IPlay /> Restart</span></Pill>
+              <Pill onClick={onReinstall}>Reinstall</Pill>
+              <Pill variant="danger" onClick={onUninstall}>Uninstall</Pill>
             </div>
           </div>
         )}
-
         {ps.status === 'uninstalling' && (
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-red-400/30 border-t-red-400" />
-            <span className="text-sm text-white">Uninstalling…</span>
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <div className="h-4.5 w-4.5 animate-spin rounded-full border-2 border-red-400/25 border-t-red-400" />
+            <span className="text-[14px] text-black dark:text-white">Uninstalling…</span>
           </div>
         )}
-
         {ps.status === 'error' && (
-          <div className="mt-6">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-xl bg-red-500/10 px-4 py-2 text-sm text-red-400">⚠ Installation failed</div>
-            <p className="mb-4 rounded-lg bg-red-500/5 border border-red-500/15 px-4 py-2 text-left font-mono text-[12px] text-red-400 break-all">{ps.error}</p>
-            <div className="flex items-center justify-center gap-3">
-              <button onClick={onInstall} className="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-sm font-semibold text-white"><IRefresh /> Retry Install</button>
-            </div>
-            <button onClick={onViewLogs} className="mt-3 flex items-center gap-1 mx-auto text-[11px] text-white/30"><ITerm /><span>View Logs</span></button>
+          <div className="mt-8">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-red-500/10 px-4 py-2 text-[13px] font-semibold text-red-500">⚠ Failed</div>
+            <p className="mb-4 rounded-xl bg-red-500/[0.04] px-4 py-3 text-left font-mono text-[12px] leading-relaxed text-red-500/80 ring-1 ring-red-500/10 break-all">{ps.error}</p>
+            <Pill onClick={onInstall}><span className="inline-flex items-center gap-1"><IRefresh /> Retry</span></Pill>
+            <button onClick={onViewLogs} className="mt-4 block mx-auto inline-flex items-center gap-1 text-[11px] font-medium text-black/30 dark:text-white/30"><ITerm /><span>View Logs</span></button>
           </div>
         )}
       </div>
@@ -169,9 +280,9 @@ function InstallScreen({ ext, ps, onInstall, onStart, onReinstall, onUninstall, 
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Drawer: Logs (live), Manage, API Docs
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// Drawer: Logs / Manage / API Docs
+// ═══════════════════════════════════════════════════════════════════════
 type DrawerTab = 'docs' | 'logs' | 'manage';
 
 function Drawer({ ext, tab, onTabChange, onClose, logLines, onFetchLogs, pluginStatus, onStart, onStop, onReinstall, onUninstall, onInstall }: {
@@ -180,68 +291,99 @@ function Drawer({ ext, tab, onTabChange, onClose, logLines, onFetchLogs, pluginS
   onStart: () => void; onStop: () => void; onReinstall: () => void; onUninstall: () => void; onInstall: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (tab === 'logs') { onFetchLogs(); const iv = setInterval(onFetchLogs, 2500); return () => clearInterval(iv); } }, [tab, onFetchLogs]);
+  useEffect(() => {
+    if (tab === 'logs') { onFetchLogs(); const iv = setInterval(onFetchLogs, 2500); return () => clearInterval(iv); }
+  }, [tab, onFetchLogs]);
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [logLines]);
 
   const tBtn = (t: DrawerTab, label: string) => (
-    <button className={`px-3 py-1 rounded-md text-[11px] font-medium transition-colors ${tab === t ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`} onClick={() => onTabChange(t)}>{label}</button>
+    <button
+      className={`rounded-md px-3 py-1 text-[11px] font-semibold transition-colors
+        ${tab === t
+          ? 'bg-black/[0.06] text-black/80 dark:bg-white/10 dark:text-white/85'
+          : 'text-black/35 hover:text-black/55 dark:text-white/35 dark:hover:text-white/55'}`}
+      onClick={() => onTabChange(t)}
+    >{label}</button>
   );
 
   return (
-    <div className="flex w-[380px] shrink-0 flex-col border-l border-white/8 bg-black/40 backdrop-blur-sm">
-      <div className="flex items-center gap-1 border-b border-white/8 px-3 py-2">
-        {tBtn('docs', '📄 API Docs')}{tBtn('logs', '📋 Logs')}{tBtn('manage', '⚙ Manage')}
-        <div className="flex-1" /><button onClick={onClose} className="rounded-md p-1 text-white/30 hover:bg-white/5 hover:text-white/60"><IX /></button>
+    <div className="flex w-[380px] shrink-0 flex-col border-l border-black/[0.06] bg-white/50 backdrop-blur-lg dark:border-white/8 dark:bg-black/40">
+      <div className="flex items-center gap-1 border-b border-black/[0.06] px-3 py-2 dark:border-white/8">
+        {tBtn('docs', '📄 Docs')}{tBtn('logs', '📋 Logs')}{tBtn('manage', '⚙ Manage')}
+        <div className="flex-1" />
+        <button onClick={onClose} className="rounded-md p-1 text-black/25 hover:bg-black/[0.04] dark:text-white/25 dark:hover:bg-white/8"><IX /></button>
       </div>
-
-      {tab === 'docs' && <iframe src={`${base()}/api/v1/plugins/${ext.id}/proxy/docs`} className="flex-1 border-0 bg-black/20" title="API Docs" sandbox="allow-same-origin allow-scripts allow-popups" />}
-
+      {tab === 'docs' && (
+        <iframe src={`${base()}/api/v1/plugins/${ext.id}/proxy/docs`} className="flex-1 border-0" title="API Docs" sandbox="allow-same-origin allow-scripts allow-popups" />
+      )}
       {tab === 'logs' && (
         <div className="flex flex-1 flex-col">
-          <div className="flex items-center border-b border-white/5 px-3 py-1.5"><span className="text-[10px] font-medium uppercase tracking-wider text-white/30">Live Output</span><div className="flex-1" /></div>
-          <div ref={scrollRef} className="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed" style={{ background: '#0a0a0a', color: '#a0a0a0' }}>
-            {logLines.length === 0 && <div className="pt-8 text-center text-white/15">No log output yet</div>}
+          <div className="flex items-center border-b border-black/[0.04] px-3 py-1.5 dark:border-white/5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-black/30 dark:text-white/30">Live Output</span>
+          </div>
+          <div ref={scrollRef} className="flex-1 overflow-auto p-3 font-mono text-[11px] leading-relaxed bg-[#fafafa] text-[#555] dark:bg-[#0a0a0a] dark:text-[#a0a0a0]">
+            {logLines.length === 0 && <div className="pt-8 text-center text-black/15 dark:text-white/15">No log output yet</div>}
             {logLines.map((l, i) => (
-              <div key={i} className={`whitespace-pre-wrap break-all border-b border-white/[0.02] py-px ${l.toLowerCase().includes('error') ? 'text-red-400/80' : l.toLowerCase().includes('running') || l.toLowerCase().includes('started') ? 'text-green-400/70' : ''}`}>{l}</div>
+              <div key={i} className={`whitespace-pre-wrap break-all border-b border-black/[0.03] py-px dark:border-white/[0.02] ${l.toLowerCase().includes('error') ? 'text-red-500 dark:text-red-400/80' : l.toLowerCase().includes('running') || l.toLowerCase().includes('started') ? 'text-green-600 dark:text-green-400/70' : ''}`}>
+                {l}
+              </div>
             ))}
           </div>
         </div>
       )}
-
       {tab === 'manage' && (
-        <div className="flex-1 overflow-auto p-4 space-y-5">
-          <div><div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Status</div>
-            <div className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2">
-              <div className={`h-2 w-2 rounded-full ${pluginStatus === 'running' ? 'bg-green-400' : pluginStatus === 'starting' || pluginStatus === 'installing' ? 'bg-yellow-400 animate-pulse' : pluginStatus === 'error' ? 'bg-red-400' : 'bg-white/20'}`} />
-              <span className="text-[12px] font-medium capitalize text-white/70">{pluginStatus}</span>
+        <div className="flex-1 overflow-auto p-4 space-y-6">
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-black/30 dark:text-white/30">Status</div>
+            <div className="flex items-center gap-2.5 rounded-xl bg-black/[0.03] px-3.5 py-2.5 ring-1 ring-black/[0.04] dark:bg-white/[0.04] dark:ring-white/5">
+              <div className={`h-2 w-2 rounded-full ${pluginStatus === 'running' ? 'bg-green-500' : pluginStatus === 'starting' || pluginStatus === 'installing' ? 'bg-amber-400 animate-pulse' : pluginStatus === 'error' ? 'bg-red-500' : 'bg-black/15 dark:bg-white/20'}`} />
+              <span className="text-[13px] font-medium capitalize text-black/70 dark:text-white/70">{pluginStatus}</span>
             </div>
           </div>
-          <div><div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Service</div><div className="space-y-2">
-            <button onClick={onStart} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium text-emerald-400" style={{ background: 'rgba(48,209,88,0.08)' }}><IPlay /> {['running', 'stopped', 'error'].includes(pluginStatus) ? 'Restart Service' : 'Start Service'}</button>
-            <button onClick={onStop} disabled={pluginStatus !== 'running'} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium text-amber-400 disabled:opacity-40" style={{ background: 'rgba(255,159,10,0.08)' }}><IStop /> Stop Service</button>
-          </div></div>
-          <div><div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Installation</div><div className="space-y-2">
-            {pluginStatus === 'idle' && <button onClick={onInstall} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium" style={{ background: 'rgba(94,92,230,0.08)', color: 'rgb(94,92,230)' }}><IDown /> Install</button>}
-            {!['idle', 'installing', 'uninstalling'].includes(pluginStatus) && (
-              <><button onClick={onReinstall} className="flex w-full items-center gap-3 rounded-lg bg-white/[0.04] px-3 py-2.5 text-[12px] font-medium text-white/50"><IRefresh /> Reinstall <span className="ml-auto text-[10px] text-white/25">keeps venv</span></button>
-              <button onClick={onUninstall} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium text-red-400" style={{ background: 'rgba(255,69,58,0.06)' }}><ITrash /> Uninstall <span className="ml-auto text-[10px] text-white/25">removes all</span></button></>
-            )}
-          </div></div>
-          <div><div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-white/30">Info</div><div className="space-y-1.5 text-[11px] text-white/40">
-            <div className="flex justify-between"><span>ID</span><span className="font-mono text-white/50">{ext.id}</span></div>
-            <div className="flex justify-between"><span>Type</span><span className="text-white/50">{ext.is_plugin ? 'Plugin (daemon)' : 'SPA'}</span></div>
-            <div className="flex justify-between"><span>Source</span><span className="text-white/50">{ext.source}</span></div>
-          </div></div>
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-black/30 dark:text-white/30">Service</div>
+            <div className="space-y-2">
+              <button onClick={onStart} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-[13px] font-medium text-emerald-600 bg-emerald-500/[0.06] dark:text-emerald-400 dark:bg-emerald-500/8">
+                <IPlay /> {['running','stopped','error'].includes(pluginStatus) ? 'Restart' : 'Start'}
+              </button>
+              <button onClick={onStop} disabled={pluginStatus !== 'running'} className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-[13px] font-medium text-amber-600 bg-amber-500/[0.06] disabled:opacity-35 dark:text-amber-400 dark:bg-amber-500/8">
+                <IStop /> Stop
+              </button>
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-black/30 dark:text-white/30">Installation</div>
+            <div className="space-y-2">
+              {pluginStatus === 'idle' && (
+                <button onClick={onInstall} className="flex w-full items-center gap-3 rounded-xl bg-indigo-500/[0.06] px-3.5 py-2.5 text-[13px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><IDown /> Install</button>
+              )}
+              {!['idle','installing','uninstalling'].includes(pluginStatus) && (
+                <>
+                  <button onClick={onReinstall} className="flex w-full items-center gap-3 rounded-xl bg-black/[0.03] px-3.5 py-2.5 text-[13px] font-medium text-black/50 dark:bg-white/[0.04] dark:text-white/50"><IRefresh /> Reinstall</button>
+                  <button onClick={onUninstall} className="flex w-full items-center gap-3 rounded-xl bg-red-500/[0.04] px-3.5 py-2.5 text-[13px] font-medium text-red-500 dark:text-red-400 dark:bg-red-500/8"><ITrash /> Uninstall</button>
+                </>
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-black/30 dark:text-white/30">Info</div>
+            <div className="space-y-2 text-[12px] text-black/40 dark:text-white/40">
+              <div className="flex justify-between"><span>ID</span><span className="font-mono text-black/55 dark:text-white/55">{ext.id}</span></div>
+              <div className="flex justify-between"><span>Type</span><span className="text-black/55 dark:text-white/55">{ext.is_plugin ? 'Plugin' : 'SPA'}</span></div>
+              <div className="flex justify-between"><span>Source</span><span className="text-black/55 dark:text-white/55">{ext.source}</span></div>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Active Extension View (tab content: install screen OR iframe+drawer)
-// ════════════════════════════════════════════════════════════════════
-function ActiveExtView({ ext, refetchAll }: { ext: Extension; refetchAll: () => void }) {
+// ═══════════════════════════════════════════════════════════════════════
+// ExtensionTabContent — single extension view with toolbar + drawer
+// Memoized so it only re-renders when its own props change.
+// ═══════════════════════════════════════════════════════════════════════
+const ExtensionTabContent = memo(function ExtensionTabContent({ ext, refetchAll }: { ext: Extension; refetchAll: () => void }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loading, setLoading] = useState(true);
   const [drawer, setDrawer] = useState<DrawerTab | null>(null);
@@ -252,86 +394,162 @@ function ActiveExtView({ ext, refetchAll }: { ext: Extension; refetchAll: () => 
   const NativeComp = NATIVE_EXTENSIONS[ext.id] ?? null;
 
   const toggleDrawer = (t: DrawerTab) => setDrawer(cur => cur === t ? null : t);
-  const openLogs = () => { setDrawer('logs'); };
+  const openLogs = () => setDrawer('logs');
 
-  // After running, refetch to update extension list
   useEffect(() => { if (pl.state.status === 'running') refetchAll(); }, [pl.state.status, refetchAll]);
+
+  const tbBtn = (icon: React.ReactNode, title: string, active: boolean, onClick: () => void) => (
+    <button onClick={onClick} className={`rounded-lg p-1.5 transition-colors ${active ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-black/30 hover:text-black/55 hover:bg-black/[0.04] dark:text-white/30 dark:hover:text-white/55 dark:hover:bg-white/8'}`} title={title}>
+      {icon}
+    </button>
+  );
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-white/5 bg-black/10 px-3 py-1.5 shrink-0">
-        <div className="flex items-center gap-1.5 rounded-md bg-white/5 px-2.5 py-1 text-[11px] font-mono text-white/40 flex-1 min-w-0 truncate">
+      <div className="flex items-center gap-2 border-b border-black/[0.06] px-3 py-1.5 shrink-0 dark:border-white/6">
+        <div className="flex items-center gap-1.5 rounded-lg bg-black/[0.04] px-2.5 py-1 font-mono text-[11px] text-black/35 flex-1 min-w-0 truncate dark:bg-white/6 dark:text-white/35">
           <span className="truncate">#/apps/{ext.route ?? ext.id}</span>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {ext.is_plugin && <button onClick={() => toggleDrawer('docs')} className={`rounded-md p-1.5 transition-colors ${drawer === 'docs' ? 'bg-blue-500/10 text-blue-400' : 'text-white/30 hover:text-white/60 hover:bg-white/5'}`} title="API Docs"><IDoc /></button>}
-          {ext.is_plugin && <button onClick={() => toggleDrawer('logs')} className={`rounded-md p-1.5 transition-colors ${drawer === 'logs' ? 'bg-blue-500/10 text-blue-400' : 'text-white/30 hover:text-white/60 hover:bg-white/5'}`} title="Logs"><ITerm /></button>}
-          {ext.is_plugin && <button onClick={() => toggleDrawer('manage')} className={`rounded-md p-1.5 transition-colors ${drawer === 'manage' ? 'bg-blue-500/10 text-blue-400' : 'text-white/30 hover:text-white/60 hover:bg-white/5'}`} title="Manage"><IGear /></button>}
-          <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} className="rounded-md p-1.5 text-white/30 hover:text-white/60 hover:bg-white/5" title="Refresh"><IRefresh /></button>
-          <button onClick={() => void popOut(ext)} className="rounded-md p-1.5 text-white/30 hover:text-white/60 hover:bg-white/5" title="Pop out"><IExt /></button>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {ext.is_plugin && tbBtn(<IDoc />, 'API Docs', drawer === 'docs', () => toggleDrawer('docs'))}
+          {ext.is_plugin && tbBtn(<ITerm />, 'Logs', drawer === 'logs', () => toggleDrawer('logs'))}
+          {ext.is_plugin && tbBtn(<IGear />, 'Manage', drawer === 'manage', () => toggleDrawer('manage'))}
+          {tbBtn(<IRefresh />, 'Refresh', false, () => iframeRef.current?.contentWindow?.location.reload())}
+          {tbBtn(<IExt />, 'Pop out', false, () => void popOut(ext))}
         </div>
       </div>
-
       {/* Content */}
-      <div className="flex flex-1 min-h-0 relative">
-        {/* Install screen OR native component OR iframe */}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
         {needsInstall ? (
           <InstallScreen ext={ext} ps={pl.state} onInstall={pl.install} onStart={pl.start} onReinstall={pl.reinstall} onUninstall={pl.uninstall} onViewLogs={openLogs} />
         ) : NativeComp ? (
-          /* Native rendering — no iframe, direct React component */
-          <Suspense fallback={
-            <div className="flex flex-1 items-center justify-center">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-500" />
-            </div>
-          }>
-            <NativeComp />
+          <Suspense fallback={<div className="flex flex-1 items-center justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500/25 border-t-blue-500" /></div>}>
+            <div className="flex min-h-0 min-w-0 w-full flex-1 overflow-hidden"><NativeComp /></div>
           </Suspense>
         ) : (
           <div className="relative flex-1">
-            {loading && <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4" style={{ background: '#111' }}>
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-white/5 text-[32px]" style={{ animation: 'float 3s ease-in-out infinite' }}>{emoji(ext)}</div>
-              <div className="text-sm font-medium text-white">{ext.display_name || ext.name}</div>
-              <div className="text-xs text-white/30">Opening…</div>
-              <div className="h-0.5 w-44 overflow-hidden rounded-full bg-white/5"><div className="h-full rounded-full bg-blue-500" style={{ animation: 'progress 2.5s ease-in-out forwards' }} /></div>
-            </div>}
+            {loading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-white/70 backdrop-blur-md dark:bg-black/60">
+                <div className="flex h-20 w-20 items-center justify-center rounded-[22px] bg-white/80 text-[38px] shadow-lg shadow-black/10 ring-1 ring-black/[0.06] dark:bg-white/10 dark:ring-white/10" style={{ animation: 'float 3s ease-in-out infinite' }}>
+                  {emoji(ext)}
+                </div>
+                <div className="text-[15px] font-semibold text-black dark:text-white">{ext.display_name || ext.name}</div>
+                <div className="text-[12px] text-black/35 dark:text-white/35">Opening…</div>
+                <div className="h-1 w-44 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/10">
+                  <div className="h-full rounded-full bg-blue-500" style={{ animation: 'progress 2.5s ease-in-out forwards' }} />
+                </div>
+              </div>
+            )}
             <iframe ref={iframeRef} src={src} onLoad={() => setLoading(false)} onError={() => setLoading(false)} title={ext.display_name || ext.name} className="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals" />
           </div>
         )}
-
-        {/* Drawer */}
         {drawer && ext.is_plugin && (
           <Drawer ext={ext} tab={drawer} onTabChange={setDrawer} onClose={() => setDrawer(null)} logLines={pl.state.logs} onFetchLogs={pl.fetchLogs} pluginStatus={pl.state.status} onStart={pl.start} onStop={pl.stop} onReinstall={pl.reinstall} onUninstall={pl.uninstall} onInstall={pl.install} />
         )}
       </div>
     </div>
   );
-}
+});
 
-// ════════════════════════════════════════════════════════════════════
-// Main App Store (browser-tab architecture)
-// ════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
+// AppTabContent — renders a built-in system app inline with toolbar
+// Wrapped in memo so it stays alive when hidden.
+// ═══════════════════════════════════════════════════════════════════════
+const AppTabContent = memo(function AppTabContent({ appId, tabId, onClose }: { appId: AppId; tabId: string; onClose: (id: string) => void }) {
+  const def = appRegistry[appId];
+  const handlePopOut = useCallback(() => {
+    void launchApp(appId);
+    onClose(tabId);
+  }, [appId, tabId, onClose]);
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 border-b border-black/6 px-3 py-1.5 shrink-0 dark:border-white/6">
+        <div className="flex items-center gap-1.5 rounded-lg bg-black/4 px-2.5 py-1 text-[11px] text-black/35 flex-1 min-w-0 truncate dark:bg-white/6 dark:text-white/35">
+          <span className="shrink-0 text-[14px]">{EMBEDDABLE_ICONS[appId] ?? '📦'}</span>
+          <span className="truncate font-medium">{def?.title ?? appId}</span>
+        </div>
+        <button
+          onClick={handlePopOut}
+          className="rounded-lg p-1.5 text-black/30 hover:text-black/55 hover:bg-black/4 transition-colors dark:text-white/30 dark:hover:text-white/55 dark:hover:bg-white/8"
+          title="Open in own window"
+        >
+          <IWindow />
+        </button>
+      </div>
+      <Suspense fallback={<div className="flex flex-1 items-center justify-center"><div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500/25 border-t-blue-500" /></div>}>
+        <AppSurface appId={appId} />
+      </Suspense>
+    </div>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// BrowseTabContent — iframe for arbitrary URL
+// ═══════════════════════════════════════════════════════════════════════
+const BrowseTabContent = memo(function BrowseTabContent({ url, name }: { url: string; name: string }) {
+  return (
+    <iframe
+      src={url}
+      className="h-full w-full border-0 flex-1"
+      title={name}
+      sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-popups allow-modals allow-popups-to-escape-sandbox"
+    />
+  );
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// Main App Store — universal dashboard with keep-alive tabs
+// ═══════════════════════════════════════════════════════════════════════
 export default function AppStoreApp(_props: { appId: AppId }) {
   const backendStatus = useConnectionStore(s => s.backendStatus);
   const { data, isLoading, error, refetch } = useExtensions();
   const [tabs, setTabs] = useState<Tab[]>([]);
-  const [activeTab, setActiveTab] = useState('');
+  const [activeTab, setActiveTab] = useState(''); // '' = launcher grid
   const [urlInput, setUrlInput] = useState('');
   const isOffline = backendStatus === 'offline' || backendStatus === 'error';
 
-  const allExts: Extension[] = (() => {
+  const allExts: Extension[] = useMemo(() => {
     if (!data) return [];
     if (Array.isArray(data)) return data;
     if ((data as Record<string, unknown>).extensions) return (data as Record<string, unknown>).extensions as Extension[];
     return [];
-  })();
+  }, [data]);
 
-  const openTab = useCallback((ext: Extension) => {
+  // Pre-computed for O(1) lookups and zero-cost grid rendering
+  const extMap = useMemo(() => new Map(allExts.map(e => [e.id, e])), [allExts]);
+  const enabledExts = useMemo(() => allExts.filter(e => e.enabled), [allExts]);
+  const disabledExts = useMemo(() => allExts.filter(e => !e.enabled), [allExts]);
+
+  // ── Open handlers ────────────────────────────────────────────────
+  const openExtTab = useCallback((ext: Extension) => {
     setTabs(prev => {
       if (prev.some(t => t.id === ext.id)) { setActiveTab(ext.id); return prev; }
       setActiveTab(ext.id);
-      return [...prev, { id: ext.id, route: ext.route ?? ext.id, name: ext.display_name || ext.name, icon: ext.icon ?? 'app-window', isPlugin: !!ext.is_plugin }];
+      return [...prev, { kind: 'extension', id: ext.id, name: ext.display_name || ext.name, icon: ext.icon ?? 'app-window', isPlugin: !!ext.is_plugin }];
     });
+  }, []);
+
+  const openAppTab = useCallback((appId: AppId) => {
+    const tabId = `app:${appId}`;
+    setTabs(prev => {
+      if (prev.some(t => t.id === tabId)) { setActiveTab(tabId); return prev; }
+      setActiveTab(tabId);
+      const def = appRegistry[appId];
+      return [...prev, { kind: 'app', id: tabId, appId, name: def?.title ?? appId, icon: appId }];
+    });
+  }, []);
+
+  const openUrl = useCallback((raw: string) => {
+    if (!raw.trim()) return;
+    let url = raw.trim();
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    const id = `browse:${Date.now()}`;
+    let name = url; try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
+    setTabs(prev => [...prev, { kind: 'browse', id, name, icon: 'globe', url }]);
+    setActiveTab(id);
+    setUrlInput('');
   }, []);
 
   const closeTab = useCallback((tabId: string, ev?: React.MouseEvent) => {
@@ -344,17 +562,6 @@ export default function AppStoreApp(_props: { appId: AppId }) {
       return next;
     });
   }, [activeTab]);
-
-  const openUrl = useCallback((raw: string) => {
-    if (!raw.trim()) return;
-    let url = raw.trim();
-    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-    const id = `browse_${Date.now()}`;
-    let name = url; try { name = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep */ }
-    setTabs(prev => [...prev, { id, route: `browse/${id}`, name, icon: 'globe', isPlugin: false, isBrowse: true, url }]);
-    setActiveTab(id);
-    setUrlInput('');
-  }, []);
 
   const handleToggle = useCallback(async (ext: Extension, en: boolean) => {
     try {
@@ -386,83 +593,150 @@ export default function AppStoreApp(_props: { appId: AppId }) {
     }
   }, [refetch]);
 
-  const activeExt = activeTab ? allExts.find(e => e.id === activeTab) ?? null : null;
-  const activeTabObj = tabs.find(t => t.id === activeTab);
+  // Stable refetch ref for memoized children
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  const stableRefetch = useCallback(() => void refetchRef.current(), []);
+
+  // tabCls is now at module scope for zero allocation per render
 
   return (
     <div className="flex h-full flex-col">
       <style>{`@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes progress{0%{width:0}30%{width:40%}60%{width:65%}80%{width:85%}100%{width:100%}}`}</style>
 
-      {/* Tab bar */}
-      <div className="flex items-end gap-0 overflow-x-auto border-b border-white/8 bg-black/20 px-2 pt-2" style={{ minHeight: 42, scrollbarWidth: 'none' }}>
-        <button className={`flex shrink-0 items-center gap-1.5 rounded-t-lg border border-transparent border-b-0 px-3 py-2 text-[12px] font-medium transition-all ${!activeTab ? 'border-white/10 bg-white/8 text-white' : 'text-white/45 hover:bg-white/[0.03] hover:text-white/70'}`} onClick={() => setActiveTab('')}><IGrid /><span>Apps</span></button>
+      {/* ── Tab bar ── */}
+      <div className="flex items-end gap-0 overflow-x-auto border-b border-black/[0.06] bg-black/[0.02] px-2 pt-2 dark:border-white/8 dark:bg-white/[0.02]" style={{ minHeight: 42, scrollbarWidth: 'none' }}>
+        {/* Home tab */}
+        <button className={tabCls(!activeTab)} onClick={() => setActiveTab('')}>
+          <IGrid /><span>Apps</span>
+        </button>
 
+        {/* Open tabs */}
         {tabs.map(t => (
-          <div key={t.id} className={`group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-t-lg border border-transparent border-b-0 py-2 pl-3 pr-1.5 text-[12px] font-medium transition-all max-w-[180px] ${activeTab === t.id ? 'border-white/10 bg-white/8 text-white' : 'text-white/45 hover:bg-white/[0.03] hover:text-white/70'}`} onClick={() => setActiveTab(t.id)}>
-            <span className="shrink-0 text-[13px]">{IC[t.icon] ?? '📦'}</span>
+          <div key={t.id} className={`group ${tabCls(activeTab === t.id)}`} onClick={() => setActiveTab(t.id)}>
+            <span className="shrink-0 text-[13px]">{tabIcon(t)}</span>
             <span className="truncate">{t.name}</span>
-            <button className={`ml-1 shrink-0 rounded-md p-0.5 opacity-0 transition-all hover:bg-white/15 group-hover:opacity-100 ${activeTab === t.id ? 'opacity-60' : ''}`} onClick={(ev) => closeTab(t.id, ev)}><IX /></button>
+            <button
+              className={`ml-1 shrink-0 rounded-md p-0.5 opacity-0 transition-all group-hover:opacity-100 ${activeTab === t.id ? 'opacity-50' : ''}`}
+              onClick={(ev) => closeTab(t.id, ev)}
+            >
+              <IX />
+            </button>
           </div>
         ))}
 
-        {/* URL bar */}
+        {/* URL bar + refresh */}
         <div className="ml-auto flex shrink-0 items-center gap-1 py-1.5 pl-2">
-          <form className="flex items-center gap-0 overflow-hidden rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }} onSubmit={(ev) => { ev.preventDefault(); openUrl(urlInput); }}>
-            <span className="px-2 text-white/25">🌐</span>
-            <input type="text" value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="Enter URL…" className="w-[140px] border-none bg-transparent py-1.5 font-mono text-[11px] text-white/70 placeholder:text-white/20 outline-none focus:w-[280px] transition-all" />
+          <form
+            className="flex items-center overflow-hidden rounded-lg bg-black/[0.03] ring-1 ring-black/[0.05] dark:bg-white/[0.04] dark:ring-white/8"
+            onSubmit={(ev) => { ev.preventDefault(); openUrl(urlInput); }}
+          >
+            <span className="px-2 text-black/25 dark:text-white/25">🌐</span>
+            <input
+              type="text" value={urlInput} onChange={e => setUrlInput(e.target.value)}
+              placeholder="Enter URL…"
+              className="w-[140px] border-none bg-transparent py-1.5 font-mono text-[11px] text-black/60 placeholder:text-black/20 outline-none focus:w-[280px] transition-all dark:text-white/65 dark:placeholder:text-white/20"
+            />
           </form>
-          <button onClick={() => void refetch()} className="rounded-md p-1.5 text-white/30 hover:bg-white/5 hover:text-white/60" title="Reload"><IRefresh /></button>
+          <button onClick={() => void refetch()} className="rounded-lg p-1.5 text-black/25 hover:bg-black/[0.04] transition-colors dark:text-white/25 dark:hover:bg-white/8" title="Reload">
+            <IRefresh />
+          </button>
         </div>
       </div>
 
-      {/* Content */}
+      {/* ── Content: keep-alive rendering ── */}
       <div className="relative flex flex-col flex-1 min-h-0">
-        {/* Launcher (when no tab active) */}
-        {!activeTab && (
-          <div className="h-full overflow-auto p-6">
-            {isOffline && <div className="text-center py-16"><p className="text-[42px]">📡</p><p className="mt-3 text-[14px] text-white/20">Backend Offline</p></div>}
-            {!isOffline && isLoading && <div className="flex items-center justify-center py-16"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500/30 border-t-blue-500" /></div>}
-            {!isOffline && error && <div className="py-12 text-center text-red-400">Failed to load</div>}
-            {!isOffline && !isLoading && allExts.length > 0 && (
-              <>
-                {allExts.filter(e => e.enabled).length > 0 && (
-                  <div className="mb-8">
-                    <p className="mb-4 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/30">Installed Apps</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{allExts.filter(e => e.enabled).map(e => <Card key={e.id} ext={e} onOpen={openTab} onToggle={handleToggle} />)}</div>
-                  </div>
-                )}
-                {allExts.filter(e => !e.enabled).length > 0 && (
-                  <div className="mb-8">
-                    <p className="mb-4 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/30">Disabled</p>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">{allExts.filter(e => !e.enabled).map(e => <Card key={e.id} ext={e} onOpen={openTab} onToggle={handleToggle} />)}</div>
-                  </div>
-                )}
-                <div className="mt-8 border-t border-white/8 pt-6">
-                  <p className="mb-3 px-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/30">Build Your Own</p>
-                  <div className="rounded-2xl border border-dashed border-white/8 bg-white/[0.03] p-5">
-                    <p className="text-[13px] font-medium text-white">Create your own extension</p>
-                    <p className="mt-1 text-[11px] text-white/30">Download the sample Counter app as a starter template, or install from URL / .zip / folder.</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button onClick={() => void handleInstallAction('sample')} className="rounded-lg px-3 py-1.5 text-[11px] font-medium text-emerald-400" style={{ background: 'rgba(48,209,88,0.1)' }}>⬇ Download Sample</button>
-                      <button onClick={() => void handleInstallAction('url')} className="rounded-lg px-3 py-1.5 text-[11px] font-medium" style={{ background: 'rgba(94,92,230,0.1)', color: 'rgb(94,92,230)' }}>🔗 Install from URL</button>
-                      <button onClick={() => void handleInstallAction('zip')} className="rounded-lg px-3 py-1.5 text-[11px] font-medium text-blue-400" style={{ background: 'rgba(0,122,255,0.1)' }}>📦 Upload .zip</button>
-                      <button onClick={() => void handleInstallAction('folder')} className="rounded-lg bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/40">📁 Install Folder</button>
-                    </div>
+        {/* Launcher grid — visible when no tab is active */}
+        <div className={`h-full overflow-auto p-6 ${activeTab ? 'hidden' : ''}`}>
+          {isOffline && (
+            <div className="text-center py-20">
+              <p className="text-[42px]">📡</p>
+              <p className="mt-3 text-[15px] font-medium text-black/25 dark:text-white/25">Backend Offline</p>
+            </div>
+          )}
+          {!isOffline && isLoading && (
+            <div className="flex items-center justify-center py-20">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500/25 border-t-blue-500" />
+            </div>
+          )}
+          {!isOffline && error && (
+            <div className="py-16 text-center text-[14px] font-medium text-red-500">Failed to load extensions</div>
+          )}
+          {!isOffline && !isLoading && (
+            <>
+              {/* System Apps */}
+              <div className="mb-10">
+                <SectionHeader>System</SectionHeader>
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                  {EMBEDDABLE_APPS.map(id => (
+                    <SystemAppCard key={id} appId={id} onOpen={openAppTab} />
+                  ))}
+                </div>
+              </div>
+
+              {/* Installed extensions */}
+              {enabledExts.length > 0 && (
+                <div className="mb-10">
+                  <SectionHeader>Installed Apps</SectionHeader>
+                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {enabledExts.map(e => <Card key={e.id} ext={e} onOpen={openExtTab} onToggle={handleToggle} />)}
                   </div>
                 </div>
-                <p className="mt-4 text-center text-[11px] text-white/20">{allExts.length} extensions · Each runs in its own sandboxed iframe</p>
-              </>
-            )}
-          </div>
-        )}
+              )}
 
-        {/* Active extension tab */}
-        {activeTab && activeExt && <ActiveExtView ext={activeExt} refetchAll={() => void refetch()} />}
+              {/* Disabled */}
+              {disabledExts.length > 0 && (
+                <div className="mb-10">
+                  <SectionHeader>Available</SectionHeader>
+                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                    {disabledExts.map(e => <Card key={e.id} ext={e} onOpen={openExtTab} onToggle={handleToggle} />)}
+                  </div>
+                </div>
+              )}
 
-        {/* Browse tab (URL) */}
-        {activeTab && !activeExt && activeTabObj?.isBrowse && (
-          <iframe src={activeTabObj.url} className="h-full w-full border-0" title={activeTabObj.name} sandbox="allow-downloads allow-forms allow-same-origin allow-scripts allow-popups allow-modals allow-popups-to-escape-sandbox" />
-        )}
+              {/* Build your own */}
+              <div className="mt-6 border-t border-black/[0.06] pt-6 dark:border-white/8">
+                <SectionHeader>Build Your Own</SectionHeader>
+                <div className="rounded-2xl border border-dashed border-black/10 bg-black/[0.02] p-5 dark:border-white/10 dark:bg-white/[0.02]">
+                  <p className="text-[14px] font-semibold text-black dark:text-white">Create your own extension</p>
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-black/45 dark:text-white/45">
+                    Download the sample Counter app as a starter template, or install from URL, .zip, or folder.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Pill onClick={() => void handleInstallAction('sample')}>⬇ Download Sample</Pill>
+                    <Pill onClick={() => void handleInstallAction('url')}>🔗 From URL</Pill>
+                    <Pill onClick={() => void handleInstallAction('zip')}>📦 Upload .zip</Pill>
+                    <Pill onClick={() => void handleInstallAction('folder')}>📁 Folder</Pill>
+                  </div>
+                </div>
+              </div>
+
+              <p className="mt-6 text-center text-[11px] font-medium text-black/20 dark:text-white/20">
+                {allExts.length} extensions · {EMBEDDABLE_APPS.length} system apps
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* ── Keep-alive tab panes ──
+             Every opened tab stays mounted. The inactive ones are hidden
+             via CSS (display:none). This preserves iframe state, scroll
+             position, and React component state across tab switches. */}
+        {tabs.map(t => {
+          const visible = activeTab === t.id;
+          return (
+            <div key={t.id} className={`flex flex-col flex-1 min-h-0 ${visible ? '' : 'hidden'}`}>
+              {t.kind === 'extension' && (() => {
+                const ext = extMap.get(t.id);
+                return ext ? <ExtensionTabContent ext={ext} refetchAll={stableRefetch} /> : (
+                  <div className="flex flex-1 items-center justify-center text-black/30 dark:text-white/30">Extension not found</div>
+                );
+              })()}
+              {t.kind === 'app' && <AppTabContent appId={t.appId} tabId={t.id} onClose={closeTab} />}
+              {t.kind === 'browse' && <BrowseTabContent url={t.url} name={t.name} />}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

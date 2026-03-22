@@ -92,6 +92,29 @@
   --window-titlebar-height: 2rem;
   --topbar-height: 1.8rem;
   --dock-height: 5.4rem;
+
+  /* ── Adaptive ink tokens ──────────────────────────────────────────
+     Foreground color at various opacities, auto-flips for light/dark
+     window backgrounds via --system-color-light-contrast.            */
+  --ink: var(--system-color-light-contrast);
+  --ink-3: color-mix(in srgb, var(--ink) 3%, transparent);
+  --ink-4: color-mix(in srgb, var(--ink) 4%, transparent);
+  --ink-5: color-mix(in srgb, var(--ink) 5%, transparent);
+  --ink-6: color-mix(in srgb, var(--ink) 6%, transparent);
+  --ink-8: color-mix(in srgb, var(--ink) 8%, transparent);
+  --ink-10: color-mix(in srgb, var(--ink) 10%, transparent);
+  --ink-12: color-mix(in srgb, var(--ink) 12%, transparent);
+  --ink-15: color-mix(in srgb, var(--ink) 15%, transparent);
+  --ink-20: color-mix(in srgb, var(--ink) 20%, transparent);
+  --ink-25: color-mix(in srgb, var(--ink) 25%, transparent);
+  --ink-30: color-mix(in srgb, var(--ink) 30%, transparent);
+  --ink-35: color-mix(in srgb, var(--ink) 35%, transparent);
+  --ink-40: color-mix(in srgb, var(--ink) 40%, transparent);
+  --ink-45: color-mix(in srgb, var(--ink) 45%, transparent);
+  --ink-50: color-mix(in srgb, var(--ink) 50%, transparent);
+  --ink-60: color-mix(in srgb, var(--ink) 60%, transparent);
+  --ink-70: color-mix(in srgb, var(--ink) 70%, transparent);
+  --ink-75: color-mix(in srgb, var(--ink) 75%, transparent);
 }
 
 html,

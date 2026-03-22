@@ -400,7 +400,7 @@ function getAccessToken(): string {
 // ---------------------------------------------------------------------------
 
 function getRendererEntry() {
-  return path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`);
+  return path.join(__dirname, '../renderer/index.html');
 }
 
 async function createMainWindow() {
@@ -417,7 +417,7 @@ async function createMainWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, '../preload/index.mjs'),
       sandbox: false,
       spellcheck: false,
     },
@@ -447,8 +447,8 @@ async function createMainWindow() {
     return { action: 'deny' };
   });
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
+    await mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     await mainWindow.loadFile(getRendererEntry());

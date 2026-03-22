@@ -1,7 +1,3 @@
-/**
- * Anti-Browser API client — calls the extension's FastAPI backend
- * through PocketPaw's reverse proxy.
- */
 import { apiClient } from '@/lib/http/client';
 
 const PROXY = '/api/v1/plugins/anti-browser/proxy';
@@ -10,21 +6,59 @@ function url(path: string) {
   return `${PROXY}${path}`;
 }
 
-// ── Types ────────────────────────────────────────────────────────────
+function get<T>(path: string) {
+  return apiClient.get<T>(url(path)).then((response) => response.data);
+}
+
+function post<T>(path: string, data?: unknown) {
+  return apiClient.post<T>(url(path), data).then((response) => response.data);
+}
+
+function patch<T>(path: string, data?: unknown) {
+  return apiClient.patch<T>(url(path), data).then((response) => response.data);
+}
+
+function del<T>(path: string) {
+  return apiClient.delete<T>(url(path)).then((response) => response.data);
+}
+
+export type OperatingSystem = 'windows' | 'macos' | 'linux';
+export type TeamRole = 'admin' | 'manager' | 'operator';
+export type ProxyType = 'none' | 'http' | 'socks5';
+export type ProxyStatus = 'alive' | 'dead' | 'unchecked';
+export type ProfileStatus = 'running' | 'stopped';
+
+export interface ProxyConfig {
+  type: ProxyType;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
 
 export interface Profile {
   id: string;
   name: string;
   group: string;
-  os_type: 'windows' | 'macos' | 'linux';
-  status: 'running' | 'stopped';
+  os_type: OperatingSystem;
+  browser_type?: string;
+  status: ProfileStatus;
+  proxy?: ProxyConfig;
+  notes?: string;
   headless: boolean;
   crawler_type: string;
   actor_id: string;
   tags: string[];
   fingerprint?: Record<string, unknown>;
   created_at?: number;
-  last_used?: number;
+  last_used?: number | null;
+}
+
+export interface Group {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
 }
 
 export interface Actor {
@@ -32,29 +66,62 @@ export interface Actor {
   name: string;
   description?: string;
   script?: string;
+  profile_ids?: string[];
+  schedule?: string;
   input_schema?: Record<string, unknown>;
   max_concurrency?: number;
+  created_at?: number;
+  total_runs?: number;
+  last_run?: number | null;
+  source?: string;
+  apify_slug?: string;
+  apify_url?: string;
+  crawler_type?: string;
+}
+
+export interface ActorRunError {
+  profile_id: string;
+  error: string;
+}
+
+export interface ActorRunResult {
+  profile_id: string;
+  result: unknown;
+}
+
+export interface ActorRun {
+  id: string;
+  actor_id: string;
+  status: string;
+  started_at?: number;
+  finished_at?: number | null;
+  profile_ids: string[];
+  input_data?: Record<string, unknown>;
+  results?: ActorRunResult[];
+  errors?: ActorRunError[];
 }
 
 export interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'manager' | 'operator';
+  role: TeamRole;
   created_at?: number;
+  last_active?: number | null;
+  profile_access?: string[];
 }
 
 export interface Proxy {
   id: string;
-  name?: string;
-  protocol: string;
+  type: ProxyType;
   host: string;
   port: number;
   username?: string;
   password?: string;
-  status?: 'alive' | 'dead' | 'unknown';
-  latency_ms?: number;
+  status?: ProxyStatus;
+  latency_ms?: number | null;
   country?: string;
+  created_at?: number;
 }
 
 export interface Stats {
@@ -67,121 +134,181 @@ export interface Stats {
 }
 
 export interface ActivityEvent {
-  id: string;
+  id: string | number;
   type: string;
   message: string;
+  resource?: string;
   timestamp: number;
   profile_id?: string;
   meta?: Record<string, unknown>;
 }
 
-// ── API methods ──────────────────────────────────────────────────────
+export interface ActivityListResponse {
+  events: ActivityEvent[];
+  total: number;
+  profile_id?: string;
+}
+
+export interface CrawleeDescriptor {
+  type: string;
+  name: string;
+  icon?: string;
+  description?: string;
+  requires_browser?: boolean;
+}
+
+export interface CrawleeStatus {
+  available: boolean;
+  crawlers: CrawleeDescriptor[];
+}
+
+export interface StoreActorVersion {
+  version: string;
+  build_tag?: string;
+  source_type?: string;
+}
+
+export interface StoreActor {
+  id?: string;
+  name: string;
+  slug: string;
+  author: string;
+  description: string;
+  category?: string;
+  icon?: string;
+  color?: string;
+  runs?: string;
+  runs_raw?: number;
+  users?: string;
+  users_raw?: number;
+  rating?: number;
+  reviews?: number;
+  tags?: string[];
+  featured?: boolean;
+  source?: 'apify' | 'builtin';
+  apify_url?: string;
+  is_paid?: boolean;
+  pricing_model?: string;
+  last_modified?: string;
+  version?: string;
+  readme?: string;
+  default_run_options?: Record<string, unknown>;
+  example_run_input?: Record<string, unknown>;
+  versions?: StoreActorVersion[];
+}
+
+export interface StoreListResponse {
+  actors: StoreActor[];
+  total: number;
+  has_more: boolean;
+}
 
 export const antiBrowserApi = {
-  // Stats
-  getStats: () => apiClient.get<Stats>(url('/api/stats')).then((r) => r.data),
+  getStats: () => get<Stats>('/api/stats'),
 
-  // Profiles
   listProfiles: (group?: string, tag?: string) => {
     const params = new URLSearchParams();
     if (group) params.set('group', group);
     if (tag) params.set('tag', tag);
-    const qs = params.toString();
-    return apiClient.get<{ profiles: Profile[] }>(url(`/api/profiles${qs ? `?${qs}` : ''}`)).then((r) => r.data);
+    const query = params.toString();
+    return get<{ profiles: Profile[] }>(`/api/profiles${query ? `?${query}` : ''}`);
   },
   createProfile: (data: Partial<Profile>) =>
-    apiClient.post(url('/api/profiles'), data).then((r) => r.data),
+    post<{ profile: Profile }>('/api/profiles', data).then((response) => response.profile),
   getProfile: (id: string) =>
-    apiClient.get<Profile>(url(`/api/profiles/${id}`)).then((r) => r.data),
+    get<{ profile: Profile }>(`/api/profiles/${id}`).then((response) => response.profile),
   updateProfile: (id: string, data: Partial<Profile>) =>
-    apiClient.patch(url(`/api/profiles/${id}`), data).then((r) => r.data),
-  deleteProfile: (id: string) =>
-    apiClient.delete(url(`/api/profiles/${id}`)).then((r) => r.data),
-  launchProfile: (id: string, opts?: Record<string, unknown>) =>
-    apiClient.post(url(`/api/profiles/${id}/launch`), opts).then((r) => r.data),
-  stopProfile: (id: string) =>
-    apiClient.post(url(`/api/profiles/${id}/stop`)).then((r) => r.data),
-  screenshotProfile: (id: string) =>
-    apiClient.post<{ image: string }>(url(`/api/profiles/${id}/screenshot`)).then((r) => r.data),
+    patch<{ profile: Profile }>(`/api/profiles/${id}`, data).then((response) => response.profile),
+  deleteProfile: (id: string) => del<{ ok: boolean }>(`/api/profiles/${id}`),
+  launchProfile: (
+    id: string,
+    opts?: {
+      start_url?: string;
+      headless?: boolean;
+      crawler_type?: string;
+      proxy_id?: string;
+      actor_id?: string;
+      viewport?: string;
+      clean_session?: boolean;
+      session_label?: string;
+    },
+  ) => post<{ status: string; cdp_url?: string }>(`/api/profiles/${id}/launch`, opts),
+  stopProfile: (id: string) => post<{ status: string }>(`/api/profiles/${id}/stop`),
+  screenshotProfile: (id: string) => post<{ image: string }>(`/api/profiles/${id}/screenshot`),
   regenerateFingerprint: (id: string) =>
-    apiClient.post(url(`/api/profiles/${id}/regenerate-fingerprint`)).then((r) => r.data),
+    post<{ fingerprint: Record<string, unknown> }>(`/api/profiles/${id}/regenerate-fingerprint`),
 
-  // Groups
-  listGroups: () =>
-    apiClient.get<{ groups: Array<{ id: string; name: string }> }>(url('/api/groups')).then((r) => r.data),
-  createGroup: (data: { name: string; description?: string }) =>
-    apiClient.post(url('/api/groups'), data).then((r) => r.data),
-  deleteGroup: (id: string) =>
-    apiClient.delete(url(`/api/groups/${id}`)).then((r) => r.data),
+  listGroups: () => get<{ groups: Group[] }>('/api/groups'),
+  createGroup: (data: { name: string; color?: string; description?: string }) =>
+    post<{ group: Group }>('/api/groups', data).then((response) => response.group),
+  deleteGroup: (id: string) => del<{ ok: boolean }>(`/api/groups/${id}`),
 
-  // Actors
-  listActors: () =>
-    apiClient.get<{ actors: Actor[] }>(url('/api/actors')).then((r) => r.data),
+  listActors: () => get<{ actors: Actor[] }>('/api/actors'),
   createActor: (data: Partial<Actor>) =>
-    apiClient.post(url('/api/actors'), data).then((r) => r.data),
+    post<{ actor: Actor }>('/api/actors', data).then((response) => response.actor),
   getActor: (id: string) =>
-    apiClient.get<Actor>(url(`/api/actors/${id}`)).then((r) => r.data),
+    get<{ actor: Actor }>(`/api/actors/${id}`).then((response) => response.actor),
   updateActor: (id: string, data: Partial<Actor>) =>
-    apiClient.patch(url(`/api/actors/${id}`), data).then((r) => r.data),
-  deleteActor: (id: string) =>
-    apiClient.delete(url(`/api/actors/${id}`)).then((r) => r.data),
+    patch<{ actor: Actor }>(`/api/actors/${id}`, data).then((response) => response.actor),
+  deleteActor: (id: string) => del<{ ok: boolean }>(`/api/actors/${id}`),
   runActor: (id: string, data: Record<string, unknown>) =>
-    apiClient.post(url(`/api/actors/${id}/run`), data).then((r) => r.data),
-  listRuns: (actorId: string) =>
-    apiClient.get(url(`/api/actors/${actorId}/runs`)).then((r) => r.data),
+    post<{ run: ActorRun }>(`/api/actors/${id}/run`, data),
+  listRuns: (actorId: string) => get<{ runs: ActorRun[] }>(`/api/actors/${actorId}/runs`),
+  getRun: (runId: string) => get<{ run: ActorRun }>(`/api/runs/${runId}`),
 
-  // Team
-  listTeam: () =>
-    apiClient.get<{ members: TeamMember[] }>(url('/api/team')).then((r) => r.data),
+  listTeam: () => get<{ members: TeamMember[] }>('/api/team'),
   addTeamMember: (data: Partial<TeamMember>) =>
-    apiClient.post(url('/api/team'), data).then((r) => r.data),
+    post<{ member: TeamMember }>('/api/team', data).then((response) => response.member),
   updateTeamMember: (id: string, data: Partial<TeamMember>) =>
-    apiClient.patch(url(`/api/team/${id}`), data).then((r) => r.data),
-  removeTeamMember: (id: string) =>
-    apiClient.delete(url(`/api/team/${id}`)).then((r) => r.data),
+    patch<{ member: TeamMember }>(`/api/team/${id}`, data).then((response) => response.member),
+  removeTeamMember: (id: string) => del<{ ok: boolean }>(`/api/team/${id}`),
 
-  // Proxies
-  listProxies: () =>
-    apiClient.get<{ proxies: Proxy[] }>(url('/api/proxies')).then((r) => r.data),
+  listProxies: () => get<{ proxies: Proxy[] }>('/api/proxies'),
   addProxy: (data: Partial<Proxy>) =>
-    apiClient.post(url('/api/proxies'), data).then((r) => r.data),
-  checkProxies: () =>
-    apiClient.post(url('/api/proxies/check')).then((r) => r.data),
-  deleteProxy: (id: string) =>
-    apiClient.delete(url(`/api/proxies/${id}`)).then((r) => r.data),
+    post<{ proxy: Proxy }>('/api/proxies', data).then((response) => response.proxy),
+  checkProxies: () => post<{ proxies: Proxy[] }>('/api/proxies/check'),
+  deleteProxy: (id: string) => del<{ ok: boolean }>(`/api/proxies/${id}`),
 
-  // Fingerprint
   previewFingerprint: (osType: string, browserType: string) =>
-    apiClient.get(url(`/api/fingerprint/preview?os_type=${osType}&browser_type=${browserType}`)).then((r) => r.data),
+    get<{ fingerprint: Record<string, unknown> }>(
+      `/api/fingerprint/preview?os_type=${osType}&browser_type=${browserType}`,
+    ),
 
-  // Activity
   listActivity: (params?: { limit?: number; offset?: number; type?: string; profile_id?: string }) => {
-    const qs = new URLSearchParams();
-    if (params?.limit) qs.set('limit', String(params.limit));
-    if (params?.offset) qs.set('offset', String(params.offset));
-    if (params?.type) qs.set('type', params.type);
-    if (params?.profile_id) qs.set('profile_id', params.profile_id);
-    const q = qs.toString();
-    return apiClient.get<{ events: ActivityEvent[] }>(url(`/api/activity${q ? `?${q}` : ''}`)).then((r) => r.data);
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    if (params?.type) query.set('type', params.type);
+    if (params?.profile_id) query.set('profile_id', params.profile_id);
+    return get<ActivityListResponse>(`/api/activity${query.toString() ? `?${query.toString()}` : ''}`);
   },
-  getProfileActivity: (profileId: string, limit?: number) => {
-    const qs = limit ? `?limit=${limit}` : '';
-    return apiClient.get<{ events: ActivityEvent[] }>(url(`/api/profiles/${profileId}/activity${qs}`)).then((r) => r.data);
-  },
+  getProfileActivity: (profileId: string, limit?: number) =>
+    get<ActivityListResponse>(`/api/profiles/${profileId}/activity${limit ? `?limit=${limit}` : ''}`),
+  clearActivity: (profileId?: string) =>
+    del<{ ok: boolean }>(`/api/activity${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ''}`),
 
-  // Crawlee
-  crawleeStatus: () => apiClient.get(url('/api/crawlee/status')).then((r) => r.data),
-  crawleeInstall: () => apiClient.post(url('/api/crawlee/install')).then((r) => r.data),
+  crawleeStatus: () => get<CrawleeStatus>('/api/crawlee/status'),
+  crawleeInstall: () => post<{ success: boolean; output?: string; error?: string }>('/api/crawlee/install'),
+  crawleeCrawlers: () => get<{ crawlers: CrawleeDescriptor[] }>('/api/crawlee/crawlers'),
 
-  // Store
-  storeListActors: (params?: { search?: string; category?: string; limit?: number }) => {
-    const qs = new URLSearchParams();
-    if (params?.search) qs.set('search', params.search);
-    if (params?.category) qs.set('category', params.category);
-    if (params?.limit) qs.set('limit', String(params.limit));
-    const q = qs.toString();
-    return apiClient.get(url(`/api/store/actors${q ? `?${q}` : ''}`)).then((r) => r.data);
+  storeListActors: (params?: {
+    search?: string;
+    category?: string;
+    limit?: number;
+    offset?: number;
+    sort_by?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.category) query.set('category', params.category);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    if (params?.sort_by) query.set('sort_by', params.sort_by);
+    return get<StoreListResponse>(`/api/store/actors${query.toString() ? `?${query.toString()}` : ''}`);
   },
+  storeGetActor: (slug: string) =>
+    get<{ actor: StoreActor }>(`/api/store/actors/${slug}`).then((response) => response.actor),
+  storeCategories: () => get<{ categories: string[] }>('/api/store/categories'),
   storeInstallActor: (slug: string) =>
-    apiClient.post(url(`/api/store/install/${slug}`)).then((r) => r.data),
+    post<{ actor: Actor }>(`/api/store/install/${slug}`),
 };

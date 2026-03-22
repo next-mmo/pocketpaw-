@@ -2,47 +2,16 @@
   "name": "macos-electron",
   "version": "14.0.0",
   "private": true,
-  "main": ".vite/build/main.js",
+  "main": "out/main/index.mjs",
   "scripts": {
-    "dev": "electron-forge start",
-    "build": "electron-forge package",
-    "make": "electron-forge make",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
     "postinstall": "node node_modules/electron/install.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm exec tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "pnpm build && playwright test -c playwright.config.ts"
-  },
-  "config": {
-    "forge": {
-      "packagerConfig": {
-        "asar": true
-      },
-      "plugins": [
-        {
-          "name": "@electron-forge/plugin-vite",
-          "config": {
-            "concurrent": false,
-            "build": [
-              {
-                "entry": "electron/main.ts",
-                "config": "vite.main.config.ts"
-              },
-              {
-                "entry": "electron/preload.ts",
-                "config": "vite.preload.config.ts"
-              }
-            ],
-            "renderer": [
-              {
-                "name": "main_window",
-                "config": "vite.renderer.config.ts"
-              }
-            ]
-          }
-        }
-      ]
-    }
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
@@ -62,8 +31,6 @@
     "zustand": "5.0.12"
   },
   "devDependencies": {
-    "@electron-forge/cli": "7.11.1",
-    "@electron-forge/plugin-vite": "7.11.1",
     "@playwright/test": "1.58.2",
     "@tailwindcss/vite": "4.2.2",
     "@tanstack/router-plugin": "1.167.2",
@@ -73,7 +40,9 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
+    "code-inspector-plugin": "^1.4.5",
     "electron": "41.0.3",
+    "electron-vite": "^5.0.0",
     "jsdom": "29.0.1",
     "prettier": "3.8.1",
     "prettier-plugin-tailwindcss": "0.7.2",

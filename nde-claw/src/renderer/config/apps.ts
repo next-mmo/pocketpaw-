@@ -101,8 +101,8 @@ const definitions: readonly AppDefinition[] = [
     icon: '/app-icons/appstore/256.png',
     routePath: '/app/appstore',
     defaultBounds: {
-      width: 920,
-      height: 660,
+      width: 1010,   // ~70% of 1440 default viewport
+      height: 720,
     },
     searchTerms: ['store', 'download', 'apps', 'tahoe', 'upgrade', 'macos 26'],
   }),

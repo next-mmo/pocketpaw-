@@ -63,19 +63,21 @@ export function OnboardingOverlay() {
               🐾
             </div>
             <h1 className="text-[24px] font-bold text-white">Welcome to PocketPaw</h1>
-            <p className="mt-2 text-[14px] leading-relaxed text-white/55">
+            <p className="mt-2 text-[14px] leading-relaxed text-white/60">
               Your AI assistant, running locally on your machine. Let's personalise your experience.
             </p>
             <button
               type="button"
-              className="mt-7 w-full rounded-xl bg-white/90 px-6 py-3 text-[14px] font-semibold text-black transition-all hover:bg-white active:scale-[.97]"
+              className="mt-7 w-full rounded-xl px-6 py-3 text-[14px] font-semibold transition-all hover:opacity-90 active:scale-[.97]"
+              style={{ background: '#ffffff', color: '#000000' }}
               onClick={() => setStep('name')}
             >
               Get Started
             </button>
             <button
               type="button"
-              className="mt-2 text-[12px] text-white/35 hover:text-white/55 transition-colors"
+              className="mt-2 text-[13px] hover:opacity-100 transition-colors"
+              style={{ color: 'rgba(255,255,255,0.65)' }}
               onClick={handleFinish}
             >
               Skip for now
@@ -101,7 +103,7 @@ export function OnboardingOverlay() {
             </div>
 
             <h2 className="text-[20px] font-bold text-white">What's your name?</h2>
-            <p className="mt-1.5 text-[13px] text-white/45">
+            <p className="mt-1.5 text-[13px] text-white/60">
               This is shown on the lock screen and menus.
             </p>
 
@@ -111,20 +113,22 @@ export function OnboardingOverlay() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
-              className="mt-5 w-full rounded-xl border border-white/10 bg-white/8 px-4 py-3 text-center text-[15px] text-white placeholder:text-white/25 outline-none focus:border-white/25 focus:bg-white/12 transition-all"
+              className="mt-5 w-full rounded-xl border border-white/10 bg-white/8 px-4 py-3 text-center text-[15px] text-white placeholder:text-white/40 outline-none focus:border-white/25 focus:bg-white/12 transition-all"
               maxLength={32}
             />
 
             <button
               type="submit"
               disabled={!name.trim()}
-              className="mt-5 w-full rounded-xl bg-white/90 px-6 py-3 text-[14px] font-semibold text-black transition-all hover:bg-white active:scale-[.97] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="mt-5 w-full rounded-xl px-6 py-3 text-[14px] font-semibold transition-all hover:opacity-90 active:scale-[.97] disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ background: '#ffffff', color: '#000000' }}
             >
               Continue
             </button>
             <button
               type="button"
-              className="mt-2 text-[12px] text-white/35 hover:text-white/55 transition-colors"
+              className="mt-2 text-[13px] hover:opacity-100 transition-colors"
+              style={{ color: 'rgba(255,255,255,0.65)' }}
               onClick={handleFinish}
             >
               Skip
@@ -145,13 +149,14 @@ export function OnboardingOverlay() {
             <h2 className="text-[20px] font-bold text-white">
               Hey, {name.trim().split(/\s+/)[0]}! 👋
             </h2>
-            <p className="mt-1.5 text-[13px] text-white/45">
+            <p className="mt-1.5 text-[13px] text-white/60">
               You're all set. PocketPaw is ready to go.
             </p>
 
             <button
               type="button"
-              className="mt-7 w-full rounded-xl bg-white/90 px-6 py-3 text-[14px] font-semibold text-black transition-all hover:bg-white active:scale-[.97]"
+              className="mt-7 w-full rounded-xl px-6 py-3 text-[14px] font-semibold transition-all hover:opacity-90 active:scale-[.97]"
+              style={{ background: '#ffffff', color: '#000000' }}
               onClick={handleFinish}
             >
               Enter PocketPaw
