@@ -372,6 +372,13 @@ async def websocket_handler(
                         val = data["copilot_sdk_max_turns"]
                         if isinstance(val, int | float) and 1 <= val <= 200:
                             settings.copilot_sdk_max_turns = int(val)
+                    # Deep Agents
+                    if "deep_agents_model" in data:
+                        settings.deep_agents_model = data["deep_agents_model"]
+                    if "deep_agents_max_turns" in data:
+                        val = data["deep_agents_max_turns"]
+                        if isinstance(val, int | float) and 1 <= val <= 200:
+                            settings.deep_agents_max_turns = int(val)
                     # OpenCode
                     if "opencode_base_url" in data:
                         settings.opencode_base_url = data["opencode_base_url"]
@@ -522,6 +529,24 @@ async def websocket_handler(
                         val = data["soul_auto_save_interval"]
                         if isinstance(val, int | float) and 0 <= val <= 3600:
                             settings.soul_auto_save_interval = int(val)
+                    if "soul_biorhythm" in data:
+                        val = data["soul_biorhythm"]
+                        if isinstance(val, dict):
+                            allowed = {
+                                "energy_drain_rate",
+                                "mood_inertia",
+                                "tired_threshold",
+                                "auto_regen",
+                            }
+                            clean = {}
+                            for k, v in val.items():
+                                if k in allowed and isinstance(v, int | float):
+                                    clean[k] = float(max(0.0, min(1.0, v)))
+                            if clean:
+                                settings.soul_biorhythm = {
+                                    **settings.soul_biorhythm,
+                                    **clean,
+                                }
                     warnings = validate_api_keys(settings)
                     settings.save()
 
@@ -703,6 +728,8 @@ async def websocket_handler(
                             "copilotSdkProvider": settings.copilot_sdk_provider,
                             "copilotSdkModel": settings.copilot_sdk_model,
                             "copilotSdkMaxTurns": settings.copilot_sdk_max_turns,
+                            "deepAgentsModel": settings.deep_agents_model,
+                            "deepAgentsMaxTurns": settings.deep_agents_max_turns,
                             "opencodeBaseUrl": settings.opencode_base_url,
                             "opencodeModel": settings.opencode_model,
                             "opencodeMaxTurns": settings.opencode_max_turns,
@@ -778,6 +805,7 @@ async def websocket_handler(
                             "soulArchetype": settings.soul_archetype,
                             "soulPersona": settings.soul_persona,
                             "soulAutoSaveInterval": settings.soul_auto_save_interval,
+                            "soulBiorhythm": settings.soul_biorhythm,
                             "agentActive": agent_active,
                             "agentStatus": agent_status,
                         },

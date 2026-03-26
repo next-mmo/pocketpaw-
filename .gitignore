@@ -92,3 +92,7 @@ client/bun.lock
 nul
 private.key
 out
+
+# Backups and secrets
+.env.bak
+*.bak

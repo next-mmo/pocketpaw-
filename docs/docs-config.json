@@ -385,6 +385,11 @@
             "icon": "lucide:github"
           },
           {
+            "label": "Deep Agents",
+            "href": "/backends/deep-agents",
+            "icon": "lucide:workflow"
+          },
+          {
             "label": "Ollama (Local LLMs)",
             "href": "/backends/ollama",
             "icon": "lucide:hard-drive"
@@ -815,6 +820,11 @@
             "label": "Docker",
             "href": "/deployment/docker",
             "icon": "lucide:container"
+          },
+          {
+            "label": "Discord Docker",
+            "href": "/deployment/discord-docker",
+            "icon": "lucide:gamepad-2"
           },
           {
             "label": "Systemd Service",

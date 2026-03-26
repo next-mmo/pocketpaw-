@@ -1511,12 +1511,40 @@ async def get_audit_log(limit: int = 100):
 
 @app.delete("/api/audit")
 async def clear_audit_log():
-    """Clear the audit log file."""
-    logger = get_audit_logger()
+    """Archive and rotate the audit log file.
+
+    Instead of deleting the audit log (which would violate the append-only
+    guarantee), this endpoint archives the current log to a timestamped file
+    and starts a new empty log. The archive is preserved for compliance.
+    """
+    from datetime import UTC, datetime
+
+    audit = get_audit_logger()
     try:
-        if logger.log_path.exists():
-            logger.log_path.write_text("")
-        return {"ok": True}
+        if audit.log_path.exists() and audit.log_path.stat().st_size > 0:
+            # Archive to timestamped file
+            ts = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
+            archive_path = audit.log_path.with_name(f"audit-{ts}.jsonl")
+            import shutil
+
+            shutil.copy2(audit.log_path, archive_path)
+            # Truncate the active log
+            audit.log_path.write_text("")
+            # Log the rotation event in the new log
+            from pocketpaw.security.audit import AuditEvent, AuditSeverity
+
+            audit.log(
+                AuditEvent.create(
+                    severity=AuditSeverity.WARNING,
+                    actor="dashboard_user",
+                    action="audit_log_rotated",
+                    target=str(archive_path),
+                    status="success",
+                    archived_to=str(archive_path),
+                )
+            )
+            return {"ok": True, "archived_to": str(archive_path)}
+        return {"ok": True, "archived_to": None}
     except Exception as e:
         from fastapi.responses import JSONResponse
 

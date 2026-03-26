@@ -511,6 +511,7 @@ function app() {
                 'googleAdkProvider', 'googleAdkModel', 'googleAdkMaxTurns',
                 'codexCliModel', 'codexCliMaxTurns',
                 'copilotSdkProvider', 'copilotSdkModel', 'copilotSdkMaxTurns',
+                'deepAgentsModel', 'deepAgentsMaxTurns',
                 'opencodeBaseUrl', 'opencodeModel', 'opencodeMaxTurns',
                 'llmProvider', 'ollamaHost', 'ollamaModel', 'anthropicModel',
                 'openaiCompatibleBaseUrl', 'openaiCompatibleModel', 'openaiCompatibleMaxTokens',
@@ -906,6 +907,7 @@ function app() {
             else if (backend === 'codex_cli') return false;  // manages own credentials
             else if (backend === 'opencode') return false;
             else if (backend === 'copilot_sdk') return false;
+            else if (backend === 'deep_agents') return false;
 
             // Ollama and openai_compatible don't need top-level API keys
             if (provider === 'ollama' || provider === 'openai_compatible') return false;
@@ -929,7 +931,7 @@ function app() {
             else if (backend === 'openai_agents') provider = this.settings.openaiAgentsProvider || 'openai';
             else if (backend === 'google_adk') provider = 'google';
             else if (backend === 'codex_cli') return false;  // manages own credentials
-            else return false; // opencode, copilot_sdk don't need keys
+            else return false; // opencode, copilot_sdk, deep_agents don't need keys
 
             if (provider === 'ollama' || provider === 'openai_compatible') return false;
 
